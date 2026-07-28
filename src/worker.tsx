@@ -15,6 +15,7 @@ import {
   getDailyHeatHistory,
   getDailyReport,
   getWeeklyArchive,
+  getWeeklyEventTimeline,
   getWeeklyReport,
 } from "./server/reports";
 
@@ -105,6 +106,12 @@ async function dailyPage(
       { reportDate: report.reportDate, sectors: report.sectorHeat },
     ];
   }
+  let weekEvents = null;
+  try {
+    weekEvents = await getWeeklyEventTimeline(db, report.reportDate);
+  } catch (error) {
+    console.error("D1 weekly event read failed; hiding event timeline", error);
+  }
 
   const data: DailyPageData = {
     kind: "daily",
@@ -114,6 +121,7 @@ async function dailyPage(
     report,
     archive,
     sectorHeat: buildSectorHeatView(report.sectorHeat, marketHistory),
+    weekEvents,
   };
   return renderPage(data);
 }

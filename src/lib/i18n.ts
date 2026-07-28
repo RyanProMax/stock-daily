@@ -53,7 +53,19 @@ export const copy = {
     noHeatStreak: "暂无连续两个交易日高热的板块",
     currentMarkets: "主要行情",
     marketUpdatedAt: "市场信息更新于 {time}（北京时间）",
-    marketAsOf: "{market} 行情截至 {date}收盘",
+    marketAsOfToday: "{market}数据截至今天（{date}）收盘",
+    marketAsOfYesterday: "{market}数据截至昨天（{date}）收盘",
+    marketAsOfLatest: "{market}数据截至最近交易日（{date}）收盘",
+    weekEvents: "本周关键事件",
+    weekEventsEyebrow: "Event realization",
+    weekEventsHint: "按公布日跟踪；只有结果经来源核验后才标记兑现。",
+    eventScheduled: "待公布",
+    eventAwaiting: "结果待核验",
+    eventRealized: "已兑现",
+    eventCancelled: "已取消",
+    eventPostponed: "已延期",
+    eventResult: "兑现结果",
+    eventNoData: "本周暂无关键事件。",
     signals: "重点新闻",
     signalsEyebrow: "Market moving news",
     signalsHint: "方向、对象与依据分开标注。",
@@ -128,7 +140,20 @@ export const copy = {
     noHeatStreak: "No sector has stayed hot for two trading days.",
     currentMarkets: "Key Market Data",
     marketUpdatedAt: "Market info updated {time} (Beijing time)",
-    marketAsOf: "{market} data through the {date} close",
+    marketAsOfToday: "{market} data through today's close ({date})",
+    marketAsOfYesterday: "{market} data through yesterday's close ({date})",
+    marketAsOfLatest: "{market} data through the latest trading-day close ({date})",
+    weekEvents: "This Week's Key Events",
+    weekEventsEyebrow: "Event realization",
+    weekEventsHint:
+      "Tracked by release date; an event is realized only after its result is source-verified.",
+    eventScheduled: "Scheduled",
+    eventAwaiting: "Result pending verification",
+    eventRealized: "Realized",
+    eventCancelled: "Cancelled",
+    eventPostponed: "Postponed",
+    eventResult: "Realized result",
+    eventNoData: "No key events are scheduled this week.",
     signals: "Market-moving News",
     signalsEyebrow: "Market moving news",
     signalsHint: "Direction, exposure and evidence are separated.",
@@ -338,6 +363,36 @@ export function formatMarketDate(date: string, language: Language) {
     day: "numeric",
     timeZone: "Asia/Shanghai",
   }).format(new Date(`${date}T00:00:00+08:00`));
+}
+
+export function formatMarketAsOfLabel(
+  marketAsOf: string,
+  reportDate: string,
+  market: MarketRegion,
+  language: Language,
+) {
+  const difference =
+    (Date.parse(`${reportDate}T12:00:00Z`) -
+      Date.parse(`${marketAsOf}T12:00:00Z`)) /
+    86_400_000;
+  const template =
+    difference === 0
+      ? copy[language].marketAsOfToday
+      : difference === 1
+        ? copy[language].marketAsOfYesterday
+        : copy[language].marketAsOfLatest;
+  const marketLabel =
+    language === "zh"
+      ? market === "CN"
+        ? "A股"
+        : "美股"
+      : market === "CN"
+        ? "China"
+        : "U.S.";
+  return formatTemplate(template, {
+    market: marketLabel,
+    date: formatMarketDate(marketAsOf, language),
+  });
 }
 
 export function formatMarketUpdateTime(date: string, language: Language) {

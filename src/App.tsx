@@ -4,10 +4,11 @@ import DailyStory from "./components/DailyStory";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import MarketHeatHistory from "./components/MarketHeatHistory";
+import WeeklyEventTimeline from "./components/WeeklyEventTimeline";
 import {
   copy,
   formatDate,
-  formatMarketDate,
+  formatMarketAsOfLabel,
   formatMarketUpdateTime,
   formatTemplate,
   formatWeekday,
@@ -22,6 +23,7 @@ import type {
   MarketRegion,
   ReportListItem,
   SectorHeatView,
+  WeeklyEventTimeline as WeeklyEventTimelineData,
   WeeklyListItem,
   WeeklyReport,
 } from "./types";
@@ -37,6 +39,7 @@ export interface DailyPageData extends CommonPageData {
   report: DailyReport;
   archive: ReportListItem[];
   sectorHeat: SectorHeatView;
+  weekEvents: WeeklyEventTimelineData | null;
 }
 
 export interface WeeklyPageData extends CommonPageData {
@@ -266,10 +269,12 @@ function DailyPage({ data }: { data: DailyPageData }) {
     time: formatMarketUpdateTime(report.generatedAt, language),
   });
   const marketAsOfLabel = marketAsOf
-    ? formatTemplate(t.marketAsOf, {
-        market: data.market,
-        date: formatMarketDate(marketAsOf, language),
-      })
+    ? formatMarketAsOfLabel(
+        marketAsOf,
+        report.reportDate,
+        data.market,
+        language,
+      )
     : "";
   const copyText = `Stock Daily | ${formatDate(report.reportDate, language)}
 ${marketView.headline}
@@ -290,6 +295,25 @@ ${t.disclaimer}`;
           olderLabel={t.older}
         />
       </section>
+
+      {data.weekEvents && (
+        <WeeklyEventTimeline
+          timeline={data.weekEvents}
+          language={language}
+          labels={{
+            title: t.weekEvents,
+            eyebrow: t.weekEventsEyebrow,
+            hint: t.weekEventsHint,
+            scheduled: t.eventScheduled,
+            awaiting: t.eventAwaiting,
+            realized: t.eventRealized,
+            cancelled: t.eventCancelled,
+            postponed: t.eventPostponed,
+            result: t.eventResult,
+            noData: t.eventNoData,
+          }}
+        />
+      )}
 
       <article className="hero">
         <div className="hero-copy">

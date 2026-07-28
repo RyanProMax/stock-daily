@@ -343,9 +343,15 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["marketUpdateCount"] == 1, result
     assert audit["layout"]["marketUpdateText"].startswith("市场信息更新于 "), result
     assert audit["layout"]["marketAsOfCount"] == 1, result
+    market_label = "A股" if audit["market"] == "CN" else "美股"
     assert audit["layout"]["marketAsOfText"].startswith(
-        f'{audit["market"]} 行情截至 '
+        f"{market_label}数据截至"
     ), result
+    assert any(
+        qualifier in audit["layout"]["marketAsOfText"]
+        for qualifier in ("今天", "昨天", "最近交易日")
+    ), result
+    assert audit["layout"]["marketAsOfText"].endswith("收盘"), result
     assert audit["layout"]["duplicateMarketDateCount"] == 0, result
     assert len(audit["layout"]["archiveTones"]) == len(
         audit["layout"]["archiveTitles"]
@@ -384,7 +390,8 @@ assert result["english"]["lang"] == "en", result
 assert result["english"]["hasOverview"], result
 assert result["english"]["marketCount"] == 4, result
 assert result["english"]["marketUpdate"].startswith("Market info updated "), result
-assert result["english"]["marketAsOf"].startswith("US data through the "), result
+assert result["english"]["marketAsOf"].startswith("U.S. data through "), result
+assert result["english"]["marketAsOf"].endswith(")"), result
 assert result["english"]["activeMarket"] == "US", result
 assert all(
     tone.startswith("Overall ") for tone in result["english"]["archiveTones"]

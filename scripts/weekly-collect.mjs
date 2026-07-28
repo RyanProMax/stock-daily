@@ -22,6 +22,14 @@ function addDays(date, days) {
   return isoDate(next);
 }
 
+function eventSlug(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+}
+
 function shanghaiDate() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
@@ -137,6 +145,7 @@ async function fetchFedEvents(startDate, endDate) {
       const date = `${month}-${String(day).padStart(2, "0")}`;
       if (date < startDate || date > endDate) continue;
       events.push({
+        id: `fed-fomc-${date}`,
         date,
         title: "Federal Open Market Committee decision",
         source,
@@ -167,6 +176,7 @@ async function fetchBeaEvents(startDate, endDate) {
       const date = String(timestamp).slice(0, 10);
       if (date >= startDate && date <= endDate) {
         events.push({
+          id: `bea-${eventSlug(title)}-${date}`,
           date,
           title,
           source,
@@ -187,6 +197,7 @@ function parseIcs(ics, startDate, endDate) {
     const date = `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6)}`;
     if (date < startDate || date > endDate) continue;
     events.push({
+      id: `bls-${eventSlug(title)}-${date}`,
       date,
       title: decodeHtml(title.replace(/\\,/g, ",")),
       source: "https://www.bls.gov/schedule/news_release/bls.ics",

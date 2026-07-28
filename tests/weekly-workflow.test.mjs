@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildContent,
   validateWeeklyInput,
   validateWeeklyReport,
 } from "../scripts/weekly-publish.mjs";
@@ -15,6 +16,7 @@ const input = {
   dailyReports: [{ reportDate: "2026-07-24" }, { reportDate: "2026-07-25" }],
   upcomingEvents: [
     {
+      id: "fed-fomc-2026-07-29",
       date: "2026-07-29",
       title: "Federal Open Market Committee decision",
       source: "https://www.federalreserve.gov/",
@@ -93,6 +95,9 @@ test("weekly contract validates scenarios, impact labels and event sources", () 
   assert.equal(checkedReport.highlights.length, 3);
   assert.equal(checkedReport.events[0].sourceIndex, 0);
   assert.equal(checkedReport.translations.en.events.length, 1);
+  const stored = JSON.parse(buildContent(checkedInput, checkedReport));
+  assert.equal(stored.events[0].id, "fed-fomc-2026-07-29");
+  assert.equal(stored.events[0].status, "scheduled");
 });
 
 test("weekly contract rejects investment instructions", () => {

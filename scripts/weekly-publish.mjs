@@ -232,7 +232,24 @@ function sqlText(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function buildContent(input, report) {
+function eventId(source) {
+  if (typeof source.id === "string" && source.id.trim()) {
+    return source.id.trim();
+  }
+  const authority = String(source.sourceLabel ?? "event")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32);
+  const title = String(source.title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+  return `${authority || "event"}-${title || "release"}-${source.date}`;
+}
+
+export function buildContent(input, report) {
   return JSON.stringify({
     overview: report.overview,
     highlights: report.highlights,
@@ -240,11 +257,13 @@ function buildContent(input, report) {
     events: report.events.map((event) => {
       const source = input.upcomingEvents[event.sourceIndex];
       return {
+        id: eventId(source),
         date: source.date,
         title: event.title,
         whyItMatters: event.whyItMatters,
         source: source.source,
         sourceLabel: source.sourceLabel,
+        status: "scheduled",
       };
     }),
     translations: report.translations,

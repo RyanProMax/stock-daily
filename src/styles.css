@@ -590,6 +590,177 @@ main {
   gap: 20px;
 }
 
+.week-events {
+  overflow: hidden;
+  margin-bottom: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.week-events-heading {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(280px, 1fr);
+  align-items: end;
+  padding: 22px 24px 20px;
+  gap: 28px;
+}
+
+.week-events-heading h2 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: 31px;
+  font-weight: 610;
+  letter-spacing: -0.018em;
+  line-height: 1.1;
+}
+
+.week-events-heading > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.week-events-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--line);
+}
+
+.week-event {
+  display: flex;
+  min-width: 0;
+  min-height: 270px;
+  padding: 22px;
+  flex-direction: column;
+  background: var(--surface-solid);
+}
+
+.week-event-realized {
+  background: color-mix(in srgb, var(--positive) 9%, var(--surface-solid));
+  box-shadow: inset 0 3px 0 var(--positive);
+}
+
+.week-event-awaiting {
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface-solid));
+  box-shadow: inset 0 3px 0 color-mix(in srgb, var(--amber) 80%, var(--ink));
+}
+
+.week-event-cancelled,
+.week-event-postponed {
+  background: color-mix(in srgb, var(--neutral) 8%, var(--surface-solid));
+}
+
+.week-event-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--sans);
+}
+
+.week-event-meta time {
+  color: var(--coral);
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+}
+
+.week-event-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.week-event-meta svg {
+  width: 13px;
+  height: 13px;
+}
+
+.week-event-realized .week-event-meta span {
+  border-color: color-mix(in srgb, var(--positive) 38%, transparent);
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+}
+
+.week-event-awaiting .week-event-meta span {
+  color: color-mix(in srgb, var(--ink) 72%, #8c6b1f);
+}
+
+.week-event h3 {
+  margin: 23px 0 0;
+  font-family: var(--display);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1.16;
+}
+
+.week-event > p {
+  margin: 12px 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.week-event-source,
+.week-event-result a {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: auto;
+  gap: 5px;
+  color: var(--coral);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.week-event-source svg,
+.week-event-result a svg {
+  width: 13px;
+  height: 13px;
+}
+
+.week-event-result {
+  margin-top: auto;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--positive) 26%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--positive) 7%, transparent);
+}
+
+.week-event-result strong {
+  color: var(--positive);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.06em;
+}
+
+.week-event-result p {
+  margin: 7px 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.week-events-empty {
+  margin: 0;
+  padding: 24px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
 .data-state {
   display: inline-flex;
   align-items: center;
@@ -2155,6 +2326,40 @@ footer {
     justify-content: stretch;
     margin-bottom: 18px;
     gap: 14px;
+  }
+
+  .week-events {
+    margin-bottom: 18px;
+    border-radius: 18px;
+  }
+
+  .week-events-heading {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px;
+    gap: 10px;
+  }
+
+  .week-events-heading h2 {
+    font-size: 27px;
+  }
+
+  .week-events-heading > p {
+    font-size: 13px;
+  }
+
+  .week-events-grid {
+    grid-template-columns: none;
+    grid-auto-columns: minmax(270px, 84vw);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x proximity;
+  }
+
+  .week-event {
+    min-height: 260px;
+    padding: 19px;
+    scroll-snap-align: start;
   }
 
   .data-state {

@@ -139,6 +139,14 @@ export const NEWS_SOURCES = Object.freeze([
     tier: "official",
   },
   {
+    id: "bea-releases",
+    label: "U.S. Bureau of Economic Analysis",
+    type: "bea",
+    url: "https://www.bea.gov/news/current-releases",
+    regions: ["US"],
+    tier: "official",
+  },
+  {
     id: "sec-press",
     label: "U.S. Securities and Exchange Commission",
     type: "rss",
@@ -633,12 +641,67 @@ async function fetchCls(source, referenceTime) {
     .slice(0, MAX_CANDIDATES_PER_SOURCE);
 }
 
+export function parseBeaReleases(
+  html,
+  source,
+  referenceTime = Date.now(),
+) {
+  const cutoff = referenceTime - DISCOVERY_WINDOW_MS;
+  const document = new JSDOM(html, { url: source.url }).window.document;
+  return [...document.querySelectorAll("tr.release-row")]
+    .map((row) => {
+      const link = row.querySelector("a[href]");
+      const time = row.querySelector("time[datetime]");
+      const title = cleanTitle(link?.textContent ?? "", source.id);
+      const timestamp = Date.parse(time?.getAttribute("datetime") ?? "");
+      let url = "";
+      try {
+        url = canonicalizeUrl(
+          new URL(link?.getAttribute("href") ?? "", source.url),
+        );
+      } catch {
+        return null;
+      }
+      if (
+        title.length < 8 ||
+        !url.startsWith("https://") ||
+        !Number.isFinite(timestamp) ||
+        timestamp < cutoff ||
+        timestamp > referenceTime
+      ) {
+        return null;
+      }
+      return {
+        title,
+        url,
+        source: source.label,
+        publishedAt: new Date(timestamp).toISOString(),
+        regions: [...source.regions],
+        _sourceId: source.id,
+        _tier: source.tier,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, MAX_CANDIDATES_PER_SOURCE);
+}
+
+async function fetchBeaReleases(source, referenceTime) {
+  const response = await fetchText(source.url, {
+    headers: { Accept: "text/html,application/xhtml+xml" },
+    source: source.label,
+  });
+  return parseBeaReleases(response.body, source, referenceTime);
+}
+
 async function fetchSource(source, referenceTime) {
   if (source.type === "wallstreetcn") {
     return fetchWallstreetCn(source, referenceTime);
   }
   if (source.type === "cls") {
     return fetchCls(source, referenceTime);
+  }
+  if (source.type === "bea") {
+    return fetchBeaReleases(source, referenceTime);
   }
   const response = await fetchText(source.url, {
     headers: {

@@ -6,7 +6,7 @@
 
 完整包装流程由 `scripts/run-codex-daily.sh` 执行：
 
-1. `npm run daily:collect` 把最小必要行情、CN/US 一级行业热度与候选新闻写入被 git 忽略的 `work/daily-input.json`。采集器并行运行独立来源适配器，结构化解析 RSS/Atom 或来源 API，按 URL、Unicode 标题相似度、来源和主题去重，再回读原文提炼 `facts`。历史回补使用人工审计的同结构事实摘要；正文抓取或事实摘要缺失时淘汰该候选，由下一条高分候选递补。
+1. `npm run daily:collect` 把最小必要行情、CN/US 一级行业热度与候选新闻写入被 git 忽略的 `work/daily-input.json`。采集器并行运行独立来源适配器，结构化解析 RSS/Atom、BEA 官方发布页或来源 API，按 URL、Unicode 标题相似度、来源和主题去重，再回读原文提炼 `facts`。历史回补使用人工审计的同结构事实摘要；正文抓取或事实摘要缺失时淘汰该候选，由下一条高分候选递补。
 2. 定时运行先执行 `npm run daily:freshness`。交易日收盘版要求当日 CN 收盘数据已到位，非交易日仍刷新新闻与核验时间；三个主时段各刷新一次，只有同一时段的补偿重试在两个市场交易日和高质量新闻均未推进时才直接跳过、不调用 Agent。
 3. 本机 `codex exec` 读取 `docs/codex-daily-agent-prompt.md` 和输入，独立完成中英双语总览、CN/US 分市场总览及逐条新闻解读，写入 `work/daily-report.json`。
 4. Codex 内部和包装脚本各执行一次 `npm run daily:check`。若质量门失败，Codex 最多修正三轮；禁止通过放宽或删除校验绕过问题。
@@ -118,7 +118,7 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
 - `daily-input.json.news[].regions` 是采集与审计确定的市场归属，Agent 不得改写；页面据此在 CN/US 标签页过滤新闻。
 - 工作日 `news` 每个市场必须有 4–6 条，周末必须有 3–6 条，采集目标为每边 5 条。个人理财、荐股、分析师观点、日历、汇总稿、人事变动和低相关性内容不能用于补足数量；若高质量候选仍低于下限，整次任务失败。
 - `daily-input.json.newsDiagnostics` 只用于本地质量门，记录候选数、正文提取结果、分市场数量和各来源健康状态；它不写入 D1。单一来源失败时其余来源继续运行，最终仍必须满足数量与质量下限。
-- `daily-input.json.updateKind` 为 `morning`、`close` 或 `evening`；对应北京时间 `09:00`、`15:00` 与 `21:00` 截点。D1 只保存该类型及 CN/US 各一个行情交易日，不重复保存每项行情日期。
+- `daily-input.json.updateKind` 为 `morning`、`close` 或 `evening`；对应北京时间 `09:00`、`15:00` 与 `21:00` 截点。美股和美债会同时比较 FRED 与 Yahoo 的有效收盘点并选择最新交易日；指数与行业日期不一致时整次拒绝发布。D1 只保存该类型及 CN/US 各一个行情交易日，不重复保存每项行情日期。
 - `positive` 表示主要受影响资产净利好，`negative` 表示净利空，同时存在重要受益与承压对象时用 `mixed`。只有例行事项不改变定价、状态整体稳定或正负因素实质抵消时才用 `neutral`，并必须在解读中明确写出“中性”及其依据。
 - 禁止用“标题未披露”“信息不足”“无法判断”“方向未明”“取决于后续”代替分析。若 `facts` 仍不足以完成传导判断，质量门必须失败，不能生成日报。
 - 指数新闻必须说明估值、风险偏好或指数权重机制；利率新闻必须说明折现率、融资成本、债券吸引力、无风险利率或估值机制。

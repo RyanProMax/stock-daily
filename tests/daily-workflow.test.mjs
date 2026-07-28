@@ -4,7 +4,9 @@ import {
   canonicalizeUrl,
   classifyMarketRegions,
   normalizeTextKey,
+  parseBeaReleases,
   parseFeed,
+  selectFreshestMarketCandidate,
   selectNews,
   usefulFacts,
 } from "../scripts/daily-collect.mjs";
@@ -493,6 +495,76 @@ test("CN sector close accepts only Yahoo quotes inside settlement grace", () => 
   payload.chart.result[0].meta.regularMarketTime =
     Date.parse("2026-07-27T07:05:01.000Z") / 1_000;
   assert.equal(yahooSectorPoint(payload, cutoffTime), null);
+});
+
+test("US market collection prefers the freshest complete source", () => {
+  const fred = {
+    points: [
+      { date: "2026-07-23", value: 25_137.69 },
+      { date: "2026-07-24", value: 24_975.82 },
+    ],
+    source: "https://fred.stlouisfed.org/series/NASDAQCOM",
+    sourceLabel: "FRED 日收盘",
+  };
+  const yahoo = {
+    points: [
+      { date: "2026-07-24", value: 24_975.82 },
+      { date: "2026-07-27", value: 24_932.08 },
+    ],
+    source: "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC",
+    sourceLabel: "Yahoo Finance 日收盘",
+  };
+
+  assert.equal(selectFreshestMarketCandidate([fred, yahoo]), yahoo);
+  assert.equal(selectFreshestMarketCandidate([yahoo, fred]), yahoo);
+  assert.equal(selectFreshestMarketCandidate([null, fred]), fred);
+  assert.equal(selectFreshestMarketCandidate([]), null);
+});
+
+test("BEA official releases enter the verified daily-news pipeline", () => {
+  const source = {
+    id: "bea-releases",
+    label: "U.S. Bureau of Economic Analysis",
+    url: "https://www.bea.gov/news/current-releases",
+    regions: ["US"],
+    tier: "official",
+  };
+  const releases = parseBeaReleases(
+    `<table><tbody>
+      <tr class="release-row">
+        <td><a href="/news/2026/gross-domestic-product-2nd-quarter-2026">
+          Gross Domestic Product, 2nd Quarter 2026
+        </a></td>
+        <td><time datetime="2026-07-30T08:30:00-04:00">July 30, 2026</time></td>
+      </tr>
+      <tr class="release-row">
+        <td><a href="/news/2026/personal-income-and-outlays-june-2026">
+          Personal Income and Outlays, June 2026
+        </a></td>
+        <td><time datetime="2026-07-30T08:30:00-04:00">July 30, 2026</time></td>
+      </tr>
+      <tr class="release-row">
+        <td><a href="/news/2026/old-release">Old release</a></td>
+        <td><time datetime="2026-07-20T08:30:00-04:00">July 20, 2026</time></td>
+      </tr>
+    </tbody></table>`,
+    source,
+    Date.parse("2026-07-30T13:00:00.000Z"),
+  );
+
+  assert.equal(releases.length, 2);
+  assert.deepEqual(
+    releases.map((release) => release.publishedAt),
+    ["2026-07-30T12:30:00.000Z", "2026-07-30T12:30:00.000Z"],
+  );
+  assert.ok(
+    releases.every(
+      (release) =>
+        release.url.startsWith("https://www.bea.gov/news/2026/") &&
+        release.source === "U.S. Bureau of Economic Analysis" &&
+        release._tier === "official",
+    ),
+  );
 });
 
 test("daily contract rejects the old two-stories-per-market floor", () => {

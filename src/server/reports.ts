@@ -14,6 +14,9 @@ import type {
   SectorHeatStreak,
   SectorHeatView,
   StoryInsight,
+  WeeklyEvent,
+  WeeklyEventTimeline,
+  WeeklyEventTimelineItem,
   WeeklyListItem,
   WeeklyReport,
 } from "../types";
@@ -44,6 +47,11 @@ interface HeatRow {
   sectorHeat: string | null;
 }
 
+interface EventDailyRow {
+  reportDate: string;
+  content: string;
+}
+
 interface DailyArchiveRow extends Omit<ReportListItem, "marketViews"> {
   cnSignalCount: number | null;
   usSignalCount: number | null;
@@ -69,9 +77,187 @@ const primaryIndexSymbols: Record<MarketRegion, Set<string>> = {
   CN: new Set(["SSE", "CSI300"]),
   US: new Set(["SPX", "IXIC", "DJI"]),
 };
+const eventTokenStopwords = new Set([
+  "and",
+  "committee",
+  "decision",
+  "income",
+  "outlays",
+  "the",
+  "united",
+  "states",
+]);
 type StoredDailyReport = Omit<DailyReport, "marketViews"> & {
   marketViews?: DailyReport["marketViews"];
 };
+
+function addIsoDays(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function sourceAuthority(value: string | undefined) {
+  if (!value) return "";
+  try {
+    const parts = new URL(value).hostname
+      .toLowerCase()
+      .replace(/^www\./, "")
+      .split(".");
+    return parts.slice(-2).join(".");
+  } catch {
+    return "";
+  }
+}
+
+function eventStoryPattern(eventTitle: string) {
+  if (
+    /fomc|federal open market|联邦公开市场|美联储.{0,8}(政策|利率|决议)/i.test(
+      eventTitle,
+    )
+  ) {
+    return /fomc|federal open market|联邦公开市场|美联储.{0,12}(政策|利率|决议)/i;
+  }
+  if (/gross domestic product|\bgdp\b|国内生产总值/i.test(eventTitle)) {
+    return /gross domestic product|\bgdp\b|国内生产总值/i;
+  }
+  if (
+    /personal income|income and outlays|个人收入|收入与支出|个人消费支出/i.test(
+      eventTitle,
+    )
+  ) {
+    return /personal income|income and outlays|个人收入|收入与支出|个人消费支出/i;
+  }
+  const tokens = [
+    ...new Set(
+      eventTitle
+        .toLowerCase()
+        .match(/[a-z0-9]{4,}/g)
+        ?.filter((token) => !eventTokenStopwords.has(token)) ?? [],
+    ),
+  ];
+  if (tokens.length === 0) return null;
+  return new RegExp(
+    tokens
+      .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|"),
+    "i",
+  );
+}
+
+function eventId(event: WeeklyEvent, index: number) {
+  return (
+    event.id?.trim() ||
+    `${event.date}:${sourceAuthority(event.source) || event.sourceLabel}:${index}`
+  );
+}
+
+type OutcomeReport = Pick<
+  DailyReport,
+  "reportDate" | "stories" | "translations"
+>;
+
+function findEventOutcome(
+  event: WeeklyEvent,
+  titleEn: string | undefined,
+  reports: OutcomeReport[],
+) {
+  const authority = sourceAuthority(event.source);
+  if (!authority) return null;
+  const pattern = eventStoryPattern(`${event.title} ${titleEn ?? ""}`);
+  if (!pattern) return null;
+
+  for (const report of [...reports].sort((left, right) =>
+    right.reportDate.localeCompare(left.reportDate),
+  )) {
+    if (report.reportDate < event.date) continue;
+    for (const [index, story] of report.stories.entries()) {
+      if (sourceAuthority(story.source) !== authority) continue;
+      if (
+        !story.publishedAt ||
+        !Number.isFinite(Date.parse(story.publishedAt))
+      ) {
+        continue;
+      }
+      const text = [
+        story.title,
+        story.summary,
+        story.evidence,
+        story.sourceLabel,
+      ].join(" ");
+      if (!pattern.test(text)) continue;
+      return {
+        result: story.summary,
+        resultEn: report.translations?.en?.stories[index]?.summary,
+        resultSource: story.source,
+        resultSourceLabel: story.sourceLabel,
+        resultVerifiedAt: story.publishedAt,
+        realizedAt: report.reportDate,
+      };
+    }
+  }
+  return null;
+}
+
+export function buildWeeklyEventTimeline(
+  report: WeeklyReport,
+  throughDate: string,
+  outcomeReports: OutcomeReport[] = [],
+): WeeklyEventTimeline {
+  const weekStart = addIsoDays(report.weekEnd, 1);
+  const weekEnd = addIsoDays(report.weekEnd, 7);
+  const translations = report.translations?.en?.events ?? [];
+  const events = report.events
+    .map((event, index): WeeklyEventTimelineItem | null => {
+      if (event.date < weekStart || event.date > weekEnd) return null;
+      const translation = translations[index];
+      const eventAuthority = sourceAuthority(event.source);
+      const storedResultIsVerified =
+        event.status === "realized" &&
+        Boolean(event.result?.trim()) &&
+        Boolean(eventAuthority) &&
+        sourceAuthority(event.resultSource) === eventAuthority &&
+        Number.isFinite(Date.parse(event.resultVerifiedAt ?? ""));
+      const derivedOutcome =
+        event.date <= throughDate
+          ? findEventOutcome(event, translation?.title, outcomeReports)
+          : null;
+      const outcome = storedResultIsVerified
+        ? {
+            result: event.result,
+            resultEn: translation?.result,
+            resultSource: event.resultSource,
+            resultSourceLabel: event.resultSourceLabel,
+            resultVerifiedAt: event.resultVerifiedAt,
+            realizedAt: event.resultVerifiedAt?.slice(0, 10),
+          }
+        : derivedOutcome;
+      const displayStatus =
+        outcome
+          ? "realized"
+          : event.status === "cancelled" || event.status === "postponed"
+            ? event.status
+            : event.date < throughDate
+              ? "awaiting"
+              : "scheduled";
+      return {
+        ...event,
+        id: eventId(event, index),
+        titleEn: translation?.title,
+        whyItMattersEn: translation?.whyItMatters,
+        displayStatus,
+        ...outcome,
+      };
+    })
+    .filter((event): event is WeeklyEventTimelineItem => event !== null);
+
+  return {
+    weekStart,
+    weekEnd,
+    sourceWeekEnd: report.weekEnd,
+    events,
+  };
+}
 
 function summarizeMarketTrend(
   markets: MarketMetric[],
@@ -524,6 +710,58 @@ export async function getDailyHeatHistory(
   return rows.results
     .map(parseHeatRow)
     .filter((day): day is SectorHeatDay => day !== null);
+}
+
+export async function getWeeklyEventTimeline(
+  db: D1Database | undefined,
+  targetDate: string,
+): Promise<WeeklyEventTimeline | null> {
+  if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) return null;
+  const row = await db
+    .prepare(
+      `SELECT
+        week_start AS weekStart,
+        week_end AS weekEnd,
+        headline,
+        summary,
+        generated_at AS generatedAt,
+        agent_model AS agentModel,
+        content
+      FROM weekly_reports
+      WHERE ? BETWEEN date(week_end, '+1 day') AND date(week_end, '+7 days')
+      ORDER BY week_end DESC
+      LIMIT 1`,
+    )
+    .bind(targetDate)
+    .first<WeeklyRow>();
+  if (!row) return null;
+
+  const report = parseWeeklyRow(row);
+  const weekStart = addIsoDays(report.weekEnd, 1);
+  const dailyRows = await db
+    .prepare(
+      `SELECT report_date AS reportDate, content
+       FROM daily_reports
+       WHERE report_date BETWEEN ? AND ?
+       ORDER BY report_date DESC`,
+    )
+    .bind(weekStart, targetDate)
+    .all<EventDailyRow>();
+  const outcomeReports = dailyRows.results.flatMap((dailyRow) => {
+    try {
+      const content = JSON.parse(dailyRow.content) as Partial<DailyReport>;
+      return [
+        {
+          reportDate: dailyRow.reportDate,
+          stories: content.stories ?? [],
+          translations: content.translations,
+        },
+      ];
+    } catch {
+      return [];
+    }
+  });
+  return buildWeeklyEventTimeline(report, targetDate, outcomeReports);
 }
 
 export async function getWeeklyArchive(

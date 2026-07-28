@@ -15,6 +15,7 @@ export interface MarketMetric {
   direction: MarketDirection;
   note: string;
   source?: string;
+  asOf?: string;
 }
 
 export interface SectorHeatMetric {
@@ -146,11 +147,40 @@ export interface ApiResponse<T> {
 }
 
 export interface WeeklyEvent {
+  id?: string;
   date: string;
   title: string;
   whyItMatters: string;
   source: string;
   sourceLabel: string;
+  status?: "scheduled" | "realized" | "cancelled" | "postponed";
+  result?: string;
+  resultSource?: string;
+  resultSourceLabel?: string;
+  resultVerifiedAt?: string;
+}
+
+export type WeeklyEventDisplayStatus =
+  | "scheduled"
+  | "awaiting"
+  | "realized"
+  | "cancelled"
+  | "postponed";
+
+export interface WeeklyEventTimelineItem extends WeeklyEvent {
+  id: string;
+  titleEn?: string;
+  whyItMattersEn?: string;
+  displayStatus: WeeklyEventDisplayStatus;
+  resultEn?: string;
+  realizedAt?: string;
+}
+
+export interface WeeklyEventTimeline {
+  weekStart: string;
+  weekEnd: string;
+  sourceWeekEnd: string;
+  events: WeeklyEventTimelineItem[];
 }
 
 export interface WeeklyReport {
@@ -175,7 +205,11 @@ export interface WeeklyReport {
       overview: Omit<MarketOverview, "tone">;
       highlights: string[];
       outlook: WeeklyReport["outlook"];
-      events: Array<Pick<WeeklyEvent, "title" | "whyItMatters">>;
+      events: Array<
+        Pick<WeeklyEvent, "title" | "whyItMatters"> & {
+          result?: string;
+        }
+      >;
     };
   };
 }

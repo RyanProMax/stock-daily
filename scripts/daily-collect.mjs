@@ -17,6 +17,7 @@ export {
   extractArticleFacts,
   getNewsBudget,
   normalizeTextKey,
+  parseBeaReleases,
   parseFeed,
   relevanceScore,
   selectNews,
@@ -262,10 +263,26 @@ function formatMarket(series, points, source, sourceLabel) {
     }).format(latest.value),
     change: `${percent > 0 ? "+" : ""}${percent.toFixed(2)}%`,
     direction,
-    note: sourceLabel,
+    note: `${sourceLabel} · ${latest.date.slice(5)}`,
     source,
     asOf: latest.date,
   };
+}
+
+export function selectFreshestMarketCandidate(candidates) {
+  const viable = candidates.filter(
+    (candidate) =>
+      candidate &&
+      Array.isArray(candidate.points) &&
+      candidate.points.length >= 2 &&
+      /^\d{4}-\d{2}-\d{2}$/.test(candidate.points.at(-1)?.date ?? ""),
+  );
+  if (viable.length === 0) return null;
+  return viable.reduce((freshest, candidate) =>
+    candidate.points.at(-1).date > freshest.points.at(-1).date
+      ? candidate
+      : freshest,
+  );
 }
 
 async function fetchMarket(series, cutoffTime) {
@@ -295,29 +312,37 @@ async function fetchMarket(series, cutoffTime) {
       // Continue to the cross-market fallback below.
     }
   }
-  if (series.id) {
-    try {
-      const fred = await fetchFredPoints(series, cutoffTime);
-      return formatMarket(series, fred.points, fred.source, fred.sourceLabel);
-    } catch {
-      // Continue to the exchange-chart fallback.
-    }
+  const [fredResult, yahooResult] = await Promise.allSettled([
+    series.id
+      ? fetchFredPoints(series, cutoffTime)
+      : Promise.reject(new Error(`${series.symbol}: FRED 不支持该市场`)),
+    fetchYahooPoints(series, cutoffTime),
+  ]);
+  const freshest = selectFreshestMarketCandidate([
+    fredResult.status === "fulfilled" ? fredResult.value : null,
+    yahooResult.status === "fulfilled" ? yahooResult.value : null,
+  ]);
+  if (freshest) {
+    return formatMarket(
+      series,
+      freshest.points,
+      freshest.source,
+      freshest.sourceLabel,
+    );
   }
-  try {
-    const yahoo = await fetchYahooPoints(series, cutoffTime);
-    return formatMarket(series, yahoo.points, yahoo.source, yahoo.sourceLabel);
-  } catch (yahooError) {
-    try {
-      const fred = await fetchFredPoints(series, cutoffTime);
-      return formatMarket(series, fred.points, fred.source, fred.sourceLabel);
-    } catch (fredError) {
-      const yahooMessage =
-        yahooError instanceof Error ? yahooError.message : "Yahoo failed";
-      const fredMessage =
-        fredError instanceof Error ? fredError.message : "FRED failed";
-      throw new Error(`${yahooMessage}; fallback ${fredMessage}`);
-    }
-  }
+  const fredMessage =
+    fredResult.status === "rejected"
+      ? fredResult.reason instanceof Error
+        ? fredResult.reason.message
+        : String(fredResult.reason)
+      : "FRED returned stale or incomplete data";
+  const yahooMessage =
+    yahooResult.status === "rejected"
+      ? yahooResult.reason instanceof Error
+        ? yahooResult.reason.message
+        : String(yahooResult.reason)
+      : "Yahoo returned stale or incomplete data";
+  throw new Error(`${fredMessage}; fallback ${yahooMessage}`);
 }
 
 async function fetchMarkets(cutoffTime) {
