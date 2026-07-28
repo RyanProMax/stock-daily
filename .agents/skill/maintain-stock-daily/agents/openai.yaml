@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stock Daily Maintainer"
+  short_description: "Maintain Stock Daily SSR, D1, and Agent workflows"
+  default_prompt: "Use $maintain-stock-daily to implement and verify a Stock Daily repository change."

@@ -1,0 +1,61 @@
+{
+  "name": "stock-daily",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "npm run build && wrangler pages dev dist",
+    "check": "tsc --noEmit",
+    "build": "npm run check && vite build && vite build --mode client",
+    "preview": "npm run build && wrangler pages dev dist",
+    "pages:dev": "npm run preview",
+    "data:compact": "node scripts/compact-reports.mjs",
+    "data:sync": "node scripts/sync-reports.mjs",
+    "storage:estimate": "node scripts/estimate-storage.mjs",
+    "security:check": "node scripts/check-public-repo.mjs",
+    "daily:collect": "node scripts/daily-collect.mjs",
+    "daily:freshness": "node scripts/daily-freshness.mjs",
+    "daily:check": "node scripts/daily-publish.mjs --check",
+    "daily:publish": "node scripts/daily-publish.mjs",
+    "daily:verify": "node scripts/daily-verify.mjs",
+    "daily:run": "scripts/run-codex-daily.sh --force --update-kind morning",
+    "daily:close": "scripts/run-codex-daily.sh --force --update-kind close",
+    "daily:evening": "scripts/run-codex-daily.sh --force --update-kind evening",
+    "weekly:collect": "node scripts/weekly-collect.mjs",
+    "weekly:check": "node scripts/weekly-publish.mjs --check",
+    "weekly:publish": "node scripts/weekly-publish.mjs",
+    "weekly:verify": "node scripts/weekly-verify.mjs",
+    "weekly:run": "scripts/run-codex-weekly.sh --force",
+    "db:migrate:local": "wrangler d1 migrations apply stock-daily-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply stock-daily-db --remote",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name stock-daily --branch main --commit-dirty=true",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.0",
+    "@fontsource-variable/noto-serif-sc": "^5.3.0",
+    "@mozilla/readability": "^0.6.0",
+    "fast-xml-parser": "^5.10.1",
+    "hono": "^4.12.32",
+    "jsdom": "^29.1.1",
+    "lucide-react": "^1.26.0",
+    "react": "^19.2.6",
+    "react-aria-components": "^1.19.0",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260723.1",
+    "@hono/vite-build": "^1.11.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "typescript": "5.9.3",
+    "vite": "^8.1.5",
+    "wrangler": "4.114.0"
+  }
+}

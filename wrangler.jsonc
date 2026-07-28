@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stock-daily",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stock-daily-db",
+      "database_id": "17f3db5d-7f31-4b7f-ba7b-8631a119e4c5",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
