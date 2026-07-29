@@ -374,6 +374,29 @@ export function validateInput(value) {
   if (marketCounts.get("CN") !== 2 || marketCounts.get("US") !== 4) {
     throw new Error("行情必须包含 2 个 CN 与 4 个 US 指标");
   }
+  const marketDataDiagnostics = requireObject(
+    input.marketDataDiagnostics,
+    "marketDataDiagnostics",
+  );
+  const providerSymbols = Array.isArray(marketDataDiagnostics.providers)
+    ? marketDataDiagnostics.providers.map((item) => item?.symbol)
+    : [];
+  if (
+    marketDataDiagnostics.schemaVersion !== "market-data-query.v1" ||
+    marketDataDiagnostics.status !== "ok" ||
+    marketDataDiagnostics.source !== "market_data_query" ||
+    marketDataDiagnostics.persistence !== "none" ||
+    Date.parse(marketDataDiagnostics.cutoffAt) !== Date.parse(input.cutoffAt) ||
+    marketDataDiagnostics.marketCount !== 6 ||
+    !Number.isFinite(Date.parse(marketDataDiagnostics.computedAt)) ||
+    providerSymbols.length !== 6 ||
+    new Set(providerSymbols).size !== 6 ||
+    !["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"].every((symbol) =>
+      providerSymbols.includes(symbol),
+    )
+  ) {
+    throw new Error("行情必须来自完整、无持久化的 API daily-pack");
+  }
   const newsCounts = new Map([
     ["CN", 0],
     ["US", 0],

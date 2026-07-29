@@ -3,7 +3,10 @@
 ## 定时策略
 
 - 触发时间：macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 生成早间版、A 股收盘版和晚间版；Mac 到点需保持开机。
-- 行情：抓取 S&P 500、NASDAQ、DOW、美国 10 年期收益率及中美宽基；板块热度使用中证全指 11 个一级行业与美国 11 个 GICS Sector SPDR，主源失败时切换备用源。
+- 行情：通过 `stock-analysis-api` 无状态 `daily-pack` CLI 一次性读取 S&P 500、
+  NASDAQ、DOW、美国 10 年期收益率及中美宽基；不要求 FastAPI 常驻且固定
+  `persistence=none`。板块热度仍由日报使用中证全指 11 个一级行业与美国 11 个
+  GICS Sector SPDR 计算，主源失败时切换备用源。
 - 新闻：国家统计局、Federal Reserve、SEC、EIA 等官方 RSS 与中美财经源并行发现近 96 小时候选；每个来源独立超时、重试和记录健康状态，不让单点失败拖垮整次采集。
 - 解析：RSS/Atom 使用结构化 XML 解析，中文无时区日期按来源时区还原；URL 清理追踪参数，标题使用 Unicode 相似度去重，随后回读原文并用 Readability 提炼最小核验事实。
 - 筛选：宏观、指数、利率、能源、关税、财报和大型公司优先；个人理财、荐股、分析师观点、日历、汇总稿、人事变动、软文和标题党直接降权或移除。
@@ -13,6 +16,11 @@
 - 写入：仅当行情、新闻和 Agent 输出全部通过本地校验时，才由本机 Wrangler 按日期覆盖 D1。早间、收盘和晚间更新共用一行，不制造重复期次；失败不会覆盖上一版内容。
 
 完整任务 prompt、JSON 契约与人工试跑步骤见 [codex-daily-task.md](codex-daily-task.md)。`launchd` 只负责唤醒，Cloudflare 不承载抓取、模型调用或定时调度。
+
+默认要求 `stock-analysis-api` 位于本仓库同级目录。非默认布局通过
+`STOCK_ANALYSIS_API_ROOT` 指定 API 仓库绝对路径，通过 `STOCK_ANALYSIS_UV`
+指定 `uv` 绝对路径。行情 CLI 失败、返回 `partial` 或六项不完整时整次采集失败，
+不会回退到日报内的旧直连实现。
 
 ## 最小必要字段
 

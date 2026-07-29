@@ -118,14 +118,20 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
 - `daily-input.json.news[].regions` 是采集与审计确定的市场归属，Agent 不得改写；页面据此在 CN/US 标签页过滤新闻。
 - 工作日 `news` 每个市场必须有 4–6 条，周末必须有 3–6 条，采集目标为每边 5 条。个人理财、荐股、分析师观点、日历、汇总稿、人事变动和低相关性内容不能用于补足数量；若高质量候选仍低于下限，整次任务失败。
 - `daily-input.json.newsDiagnostics` 只用于本地质量门，记录候选数、正文提取结果、分市场数量和各来源健康状态；它不写入 D1。单一来源失败时其余来源继续运行，最终仍必须满足数量与质量下限。
-- `daily-input.json.updateKind` 为 `morning`、`close` 或 `evening`；对应北京时间 `09:00`、`15:00` 与 `21:00` 截点。美股和美债会同时比较 FRED 与 Yahoo 的有效收盘点并选择最新交易日；指数与行业日期不一致时整次拒绝发布。D1 只保存该类型及 CN/US 各一个行情交易日，不重复保存每项行情日期。
+- `daily-input.json.updateKind` 为 `morning`、`close` 或 `evening`；对应北京时间
+  `09:00`、`15:00` 与 `21:00` 截点。六项指数 / 收益率由
+  `stock-analysis-api/scripts/market_data_query.py daily-pack` 通过 Skill contract
+  一次性获取；该命令无需 FastAPI 常驻、固定 `persistence=none`，并在 API 内
+  比较 FRED / Yahoo 与中国指数 fallback。`marketDataDiagnostics` 必须证明
+  contract 完整、六项成功且无持久化；指数与行业日期不一致时整次拒绝发布。
+  D1 只保存更新类型及 CN/US 各一个行情交易日，不保存本地 diagnostics 或逐项日期。
 - `positive` 表示主要受影响资产净利好，`negative` 表示净利空，同时存在重要受益与承压对象时用 `mixed`。只有例行事项不改变定价、状态整体稳定或正负因素实质抵消时才用 `neutral`，并必须在解读中明确写出“中性”及其依据。
 - 禁止用“标题未披露”“信息不足”“无法判断”“方向未明”“取决于后续”代替分析。若 `facts` 仍不足以完成传导判断，质量门必须失败，不能生成日报。
 - 指数新闻必须说明估值、风险偏好或指数权重机制；利率新闻必须说明折现率、融资成本、债券吸引力、无风险利率或估值机制。
 - 价格涨跌不能倒置为利润变化的原因。禁止“相关股票可能上涨”“值得关注”“投资机会”等空泛模板或买卖建议。
 - 不得新增该条原始标题与 `facts` 没有的数字、公司或已发生事实。条件情景必须保留“若”“如果”等条件措辞。
 - 原始标题或 `facts` 明确出现 Apple、Amazon、Google/Alphabet、Meta、Microsoft、Nvidia、Tesla、AliExpress/Alibaba、Crown Holdings 或 Verisign 时，必须填写对应 ticker；没有明确公司时保持空数组。
-- `translations.en` 只能翻译已经通过事实校验的中文内容，不增加数字、公司、事件或判断。
+- `translations.en` 只能翻译已经通过事实校验的中文内容，不增加数字、公司、事件或判断。中文“亿”金额应改写为自然英文金额；需要换算时用英文单词拼写数值（如 “eight hundred sixty million yuan”），避免生硬的 “hundred million” 直译和新增阿拉伯数字。
 - `daily-input.json.sectorHeat` 由采集器确定性生成，不属于 Agent 输出：CN 使用中证全指 11 个一级行业指数，US 使用 11 个 GICS Sector SPDR，每边只保留价格波动强度最高的 3 个板块。
 - 热度为 `0–100` 的价格波动强度，涨跌方向单独存储；连续高热按实际交易日去重，周末重复引用同一收盘不会增加天数。Agent 不得改写或推断该数据。
 - 只输出页面需要的内容；D1 仅保存原始标题、最小核验事实摘要、来源链接和最终解读，不保存文章全文、网页 HTML、推理过程、prompt、token 明细或抓取原始响应。

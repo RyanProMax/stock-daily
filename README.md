@@ -36,7 +36,10 @@ npm run pages:dev
 
 macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 分别生成早间版、A 股收盘版和晚间版：
 
-1. 获取 S&P 500、NASDAQ、DOW、美国 10 年期收益率、上证指数和沪深 300；美股与美债同时比较 FRED 和 Yahoo 的有效数据，逐项选择最新交易日；
+1. 通过 `stock-analysis-skill` 约定的一次性
+   `stock-analysis-api/scripts/market_data_query.py daily-pack` 获取 S&P 500、
+   NASDAQ、DOW、美国 10 年期收益率、上证指数和沪深 300；无需启动 FastAPI，
+   固定无持久化，并由 API 统一比较 FRED / Yahoo 与中国指数 fallback；
 2. 并行读取国家统计局、Federal Reserve、BEA、SEC、EIA 等官方发布页或 RSS 与中美财经源；单一来源超时或失败不会阻断其余来源；
 3. 结构化解析 RSS/Atom，清理追踪参数并回读原文；正文使用 Readability 提取最小核验事实，事实缺失则不发布；
 4. 按中文兼容的标题相似度、URL、来源和主题去重，再剔除个人理财、荐股、标题党、日历与汇总稿等噪声；
@@ -46,6 +49,14 @@ macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 分别生成早�
 8. 三个主时段使用同一 `report_date` 依次覆盖并刷新生成时间，不新增重复期次；同一时段的补偿重试若没有行情或新闻推进则跳过，失败则保留上一版并写入 `ingestion_runs`。
 
 `launchd` 只负责到点唤醒；抓取、AI 解读与质量校验都在本机完成，Cloudflare 不运行抓取或模型任务。本机通过 Wrangler 登录态直写 D1。运行审计保留 90 天，日报长期保留。任务契约和运行前提见 [docs/codex-daily-task.md](docs/codex-daily-task.md)。
+
+行情 Skill 默认使用同级目录 `../stock-analysis-api`，并从常见安装位置解析
+`uv`。目录或可执行文件不在默认位置时，在本机环境设置绝对路径：
+
+```bash
+STOCK_ANALYSIS_API_ROOT="/absolute/path/to/stock-analysis-api"
+STOCK_ANALYSIS_UV="/absolute/path/to/uv"
+```
 
 手工试跑同一流程：
 

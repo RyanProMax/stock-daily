@@ -6,10 +6,10 @@ import {
   normalizeTextKey,
   parseBeaReleases,
   parseFeed,
-  selectFreshestMarketCandidate,
   selectNews,
   usefulFacts,
 } from "../scripts/daily-collect.mjs";
+import { normalizeDailyMarketPack } from "../scripts/market-data.mjs";
 import {
   validateInput,
   validateReport,
@@ -96,6 +96,28 @@ const input = {
       asOf: "2026-07-24",
     },
   ],
+  marketDataDiagnostics: {
+    schemaVersion: "market-data-query.v1",
+    status: "ok",
+    source: "market_data_query",
+    computedAt: "2026-07-25T01:00:01.000Z",
+    cutoffAt: "2026-07-25T01:00:00.000Z",
+    persistence: "none",
+    marketCount: 6,
+    providers: [
+      { symbol: "SPX", provider: "fred", asOf: "2026-07-24", attempts: [] },
+      { symbol: "IXIC", provider: "fred", asOf: "2026-07-24", attempts: [] },
+      { symbol: "DJI", provider: "fred", asOf: "2026-07-24", attempts: [] },
+      { symbol: "DGS10", provider: "fred", asOf: "2026-07-23", attempts: [] },
+      { symbol: "SSE", provider: "tencent", asOf: "2026-07-24", attempts: [] },
+      {
+        symbol: "CSI300",
+        provider: "tencent",
+        asOf: "2026-07-24",
+        attempts: [],
+      },
+    ],
+  },
   sectorHeat: [
     {
       market: "CN",
@@ -497,28 +519,65 @@ test("CN sector close accepts only Yahoo quotes inside settlement grace", () => 
   assert.equal(yahooSectorPoint(payload, cutoffTime), null);
 });
 
-test("US market collection prefers the freshest complete source", () => {
-  const fred = {
-    points: [
-      { date: "2026-07-23", value: 25_137.69 },
-      { date: "2026-07-24", value: 24_975.82 },
-    ],
-    source: "https://fred.stlouisfed.org/series/NASDAQCOM",
-    sourceLabel: "FRED 日收盘",
-  };
-  const yahoo = {
-    points: [
-      { date: "2026-07-24", value: 24_975.82 },
-      { date: "2026-07-27", value: 24_932.08 },
-    ],
-    source: "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC",
-    sourceLabel: "Yahoo Finance 日收盘",
-  };
+test("daily market pack maps the API Skill contract without changing report fields", () => {
+  const apiMarkets = input.markets.map((market) => ({
+    symbol: market.symbol,
+    name: market.name,
+    region: market.region,
+    kind: market.symbol === "DGS10" ? "yield" : "index",
+    unit: market.symbol === "DGS10" ? "percent" : "points",
+    latest_value: Number.parseFloat(market.value.replaceAll(",", "")),
+    previous_value: 1,
+    change_value: 1,
+    change_ratio: 0.01,
+    display_value: market.value,
+    display_change: market.change,
+    direction: market.direction,
+    as_of: market.asOf,
+    provider: "fixture",
+    source: market.source,
+    source_label: "Fixture close",
+    provider_attempts: [{ provider: "fixture", status: "ok" }],
+  }));
+  const normalized = normalizeDailyMarketPack({
+    schema_version: "market-data-query.v1",
+    status: "ok",
+    source: "market_data_query",
+    computed_at: "2026-07-25T01:00:01.000Z",
+    request: {
+      operation: "daily_market_pack",
+      cutoff_at: "2026-07-25T01:00:00.000Z",
+      persistence: "none",
+    },
+    summary: { requested: 6, succeeded: 6, failed: 0 },
+    data: { markets: apiMarkets, failures: [] },
+  });
 
-  assert.equal(selectFreshestMarketCandidate([fred, yahoo]), yahoo);
-  assert.equal(selectFreshestMarketCandidate([yahoo, fred]), yahoo);
-  assert.equal(selectFreshestMarketCandidate([null, fred]), fred);
-  assert.equal(selectFreshestMarketCandidate([]), null);
+  assert.deepEqual(
+    normalized.markets.map((market) => market.symbol),
+    ["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"],
+  );
+  assert.equal(normalized.markets[3].value, "4.71%");
+  assert.match(normalized.markets[3].note, /API Skill/);
+  assert.equal(normalized.diagnostics.persistence, "none");
+  assert.equal(normalized.diagnostics.providers.length, 6);
+});
+
+test("daily market pack rejects partial or incomplete API output", () => {
+  assert.throws(
+    () =>
+      normalizeDailyMarketPack({
+        schema_version: "market-data-query.v1",
+        status: "partial",
+        source: "market_data_query",
+        request: {
+          operation: "daily_market_pack",
+          persistence: "none",
+        },
+        data: { markets: [], failures: [{ symbol: "SPX" }] },
+      }),
+    /状态、数量或 contract 无效/,
+  );
 });
 
 test("BEA official releases enter the verified daily-news pipeline", () => {
