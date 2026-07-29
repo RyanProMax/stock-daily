@@ -14,6 +14,7 @@ import type {
   SectorHeatStreak,
   SectorHeatView,
   StoryInsight,
+  ThesisLedgerEntry,
   WeeklyEvent,
   WeeklyEventTimeline,
   WeeklyEventTimelineItem,
@@ -51,6 +52,8 @@ interface EventDailyRow {
   reportDate: string;
   content: string;
 }
+
+type LedgerDailyRow = DailyRow;
 
 interface DailyArchiveRow extends Omit<ReportListItem, "marketViews"> {
   cnSignalCount: number | null;
@@ -108,6 +111,180 @@ function sourceAuthority(value: string | undefined) {
   } catch {
     return "";
   }
+}
+
+function meaningfulTokens(value: string) {
+  const latin = value
+    .toLowerCase()
+    .match(/[a-z][a-z0-9-]{3,}/g)
+    ?.filter(
+      (token) =>
+        !["market", "price", "result", "change", "data", "later"].includes(
+          token,
+        ),
+    ) ?? [];
+  const han = [
+    ...value.matchAll(/(?=([\p{Script=Han}]{2}))/gu),
+  ].map((match) => match[1]);
+  return [...new Set([...latin, ...han])];
+}
+
+function hasCheckpointSubject(checkpointMetric: string, storyText: string) {
+  const tokens = meaningfulTokens(checkpointMetric);
+  if (tokens.length === 0) return false;
+  const normalized = storyText.toLowerCase();
+  return tokens.filter((token) => normalized.includes(token)).length >=
+    Math.min(2, tokens.length);
+}
+
+function exposureKeys(story: DailyReport["stories"][number]) {
+  const structured =
+    story.signal?.exposures.flatMap((exposure) =>
+      exposure.ticker
+        ? [`${exposure.exchange ?? ""}:${exposure.ticker}`]
+        : [],
+    ) ?? [];
+  const legacy =
+    story.ai?.tickers.map((ticker) => `:${ticker.toUpperCase()}`) ?? [];
+  return new Set([...structured, ...legacy]);
+}
+
+function storiesShareExposure(
+  origin: DailyReport["stories"][number],
+  candidate: DailyReport["stories"][number],
+) {
+  const originKeys = exposureKeys(origin);
+  if (originKeys.size === 0) return false;
+  for (const candidateKey of exposureKeys(candidate)) {
+    const ticker = candidateKey.split(":").at(-1);
+    if (
+      originKeys.has(candidateKey) ||
+      [...originKeys].some((key) => key.endsWith(`:${ticker}`))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function verifiedFollowUp(
+  origin: DailyReport["stories"][number],
+  checkpoint: NonNullable<
+    DailyReport["stories"][number]["signal"]
+  >["checkpoint"],
+  laterReports: DailyReport[],
+) {
+  for (const report of laterReports) {
+    for (const [index, story] of report.stories.entries()) {
+      if (
+        !story.publishedAt ||
+        !Number.isFinite(Date.parse(story.publishedAt)) ||
+        !story.evidenceSource ||
+        story.evidenceSource.tier === "secondary"
+      ) {
+        continue;
+      }
+      const text = [
+        story.title,
+        story.summary,
+        story.evidence,
+        story.signal?.thesis,
+      ].join(" ");
+      if (
+        !hasCheckpointSubject(checkpoint.metric, text) &&
+        !storiesShareExposure(origin, story)
+      ) {
+        continue;
+      }
+      return {
+        observation: story.summary,
+        observationEn:
+          report.translations?.en?.stories[index]?.summary,
+        resultSource: story.evidenceSource,
+        verifiedAt: story.publishedAt,
+      };
+    }
+  }
+  return null;
+}
+
+export function deriveThesisLedger(
+  reports: DailyReport[],
+  throughDate: string,
+  market: MarketRegion,
+): ThesisLedgerEntry[] {
+  const ordered = [...reports]
+    .filter((report) => report.reportDate <= throughDate)
+    .sort((left, right) => right.reportDate.localeCompare(left.reportDate));
+  const entries: ThesisLedgerEntry[] = [];
+
+  for (const report of ordered) {
+    for (const [index, story] of report.stories.entries()) {
+      const signal = story.signal;
+      const role = signal?.roleByMarket[market];
+      if (
+        !signal ||
+        !story.regions.includes(market) ||
+        (role !== "core" && role !== "supporting")
+      ) {
+        continue;
+      }
+      let checkpoint = signal.checkpoint;
+      let checkpointEn =
+        report.translations?.en?.stories[index]?.signal?.checkpoint;
+      if (
+        checkpoint.status === "pending" &&
+        checkpoint.dueAt < throughDate
+      ) {
+        const followUp = verifiedFollowUp(
+          story,
+          checkpoint,
+          ordered.filter(
+            (candidate) => candidate.reportDate > report.reportDate,
+          ),
+        );
+        if (followUp) {
+          checkpoint = {
+            ...checkpoint,
+            status: "inconclusive",
+            observation: followUp.observation,
+            resultSource: followUp.resultSource,
+            verifiedAt: followUp.verifiedAt,
+          };
+          checkpointEn = {
+            metric: checkpointEn?.metric ?? checkpoint.metric,
+            confirmIf: checkpointEn?.confirmIf ?? checkpoint.confirmIf,
+            invalidateIf:
+              checkpointEn?.invalidateIf ?? checkpoint.invalidateIf,
+            observation:
+              followUp.observationEn ?? followUp.observation,
+          };
+        }
+      }
+      entries.push({
+        id: `${report.reportDate}:${story.id}:${market}`,
+        reportDate: report.reportDate,
+        storyId: story.id,
+        market,
+        title: story.title,
+        titleEn: report.translations?.en?.stories[index]?.title,
+        thesis: signal.thesis,
+        thesisEn: report.translations?.en?.stories[index]?.signal?.thesis,
+        horizon: signal.horizon,
+        confidence: signal.confidence,
+        checkpoint,
+        ...(checkpointEn ? { checkpointEn } : {}),
+      });
+    }
+  }
+
+  return entries
+    .sort(
+      (left, right) =>
+        left.checkpoint.dueAt.localeCompare(right.checkpoint.dueAt) ||
+        right.reportDate.localeCompare(left.reportDate),
+    )
+    .slice(0, 8);
 }
 
 function eventStoryPattern(eventTitle: string) {
@@ -193,6 +370,12 @@ function findEventOutcome(
         resultSourceLabel: story.sourceLabel,
         resultVerifiedAt: story.publishedAt,
         realizedAt: report.reportDate,
+        ...(story.signal?.baselineKind
+          ? { baselineKind: story.signal.baselineKind }
+          : {}),
+        ...(story.signal?.metrics && story.signal.metrics.length > 0
+          ? { metrics: story.signal.metrics }
+          : {}),
       };
     }
   }
@@ -278,6 +461,17 @@ function summarizeMarketTrend(
   if (hasUp) return "up";
   if (hasDown) return "down";
   return "flat";
+}
+
+function visibleStoryForMarket(
+  story: DailyReport["stories"][number],
+  market: MarketRegion,
+) {
+  return (
+    story.importance >= 3 &&
+    story.regions.includes(market) &&
+    story.signal?.roleByMarket[market] !== "excluded"
+  );
 }
 
 function parseArchivedMarkets(value: string | null): MarketMetric[] {
@@ -508,15 +702,18 @@ export async function getDailyArchive(
       edition: report.edition,
       title: report.headline,
       summary: report.summary,
-      signalCount: report.stories.length,
+      signalCount: report.stories.filter((story) => story.importance >= 3)
+        .length,
       generatedAt: report.generatedAt,
       titleEn: report.translations?.en?.headline,
       summaryEn: report.translations?.en?.summary,
       marketSignalCounts: {
-        CN: report.stories.filter((story) => story.regions.includes("CN"))
-          .length,
-        US: report.stories.filter((story) => story.regions.includes("US"))
-          .length,
+        CN: report.stories.filter((story) =>
+          visibleStoryForMarket(story, "CN"),
+        ).length,
+        US: report.stories.filter((story) =>
+          visibleStoryForMarket(story, "US"),
+        ).length,
       },
       marketViews: {
         CN: {
@@ -563,11 +760,20 @@ export async function getDailyArchive(
         json_extract(content, '$.marketViews.CN.overview.tone') AS cnTone,
         json_extract(content, '$.marketViews.US.overview.tone') AS usTone,
         json_extract(content, '$.markets') AS marketsJson,
-        json_array_length(content, '$.stories') AS signalCount,
         (
           SELECT COUNT(*)
           FROM json_each(daily_reports.content, '$.stories') AS story
-          WHERE EXISTS (
+          WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
+        ) AS signalCount,
+        (
+          SELECT COUNT(*)
+          FROM json_each(daily_reports.content, '$.stories') AS story
+          WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
+          AND COALESCE(
+            json_extract(story.value, '$.signal.roleByMarket.CN'),
+            'core'
+          ) != 'excluded'
+          AND EXISTS (
             SELECT 1
             FROM json_each(story.value, '$.regions') AS region
             WHERE region.value = 'CN'
@@ -576,7 +782,12 @@ export async function getDailyArchive(
         (
           SELECT COUNT(*)
           FROM json_each(daily_reports.content, '$.stories') AS story
-          WHERE EXISTS (
+          WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
+          AND COALESCE(
+            json_extract(story.value, '$.signal.roleByMarket.US'),
+            'core'
+          ) != 'excluded'
+          AND EXISTS (
             SELECT 1
             FROM json_each(story.value, '$.regions') AS region
             WHERE region.value = 'US'
@@ -677,6 +888,42 @@ export async function getDailyReport(
     ? await statement.bind(date).first<DailyRow>()
     : await statement.first<DailyRow>();
   return row ? parseDailyRow(row) : null;
+}
+
+export async function getThesisLedger(
+  db: D1Database | undefined,
+  throughDate: string,
+  market: MarketRegion,
+): Promise<ThesisLedgerEntry[]> {
+  if (!db) {
+    return deriveThesisLedger(fallbackReports, throughDate, market);
+  }
+  const rows = await db
+    .prepare(
+      `SELECT
+         report_date AS reportDate,
+         edition,
+         headline,
+         summary,
+         generated_at AS generatedAt,
+         data_cut AS dataCut,
+         agent_model AS agentModel,
+         content
+       FROM daily_reports
+       WHERE report_date <= ?
+       ORDER BY report_date DESC
+       LIMIT 30`,
+    )
+    .bind(throughDate)
+    .all<LedgerDailyRow>();
+  const reports = rows.results.flatMap((row) => {
+    try {
+      return [parseDailyRow(row)];
+    } catch {
+      return [];
+    }
+  });
+  return deriveThesisLedger(reports, throughDate, market);
 }
 
 export async function getDailyHeatHistory(

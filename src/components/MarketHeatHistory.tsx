@@ -58,15 +58,11 @@ export default function MarketHeatHistory({
                   >
                     {name}
                   </a>
-                  <b>{sector.score}</b>
+                  <b>{sector.change}</b>
                 </div>
                 <div className="heat-item-meta">
                   <span>{sector.symbol}</span>
-                  <em>{sector.change}</em>
                 </div>
-                <span className="heat-track" aria-hidden="true">
-                  <i style={{ width: `${sector.score}%` }} />
-                </span>
               </article>
             );
           })}
@@ -87,7 +83,7 @@ export default function MarketHeatHistory({
       <div className="heat-streaks">
         <header>
           <strong>{labels.streakTitle}</strong>
-          <small>≥ {view.threshold}</small>
+          <small>|%| ≥ {(view.threshold / 20).toFixed(1)}</small>
         </header>
         {streaks.length > 0 ? (
           <div>

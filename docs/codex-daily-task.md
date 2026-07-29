@@ -61,7 +61,37 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
       "tone": "positive | negative | mixed | neutral",
       "interpretation": "18–130 个汉字，写清事件→利润/成本/利率/估值/现金流/供需/风险偏好→板块或个股的传导链。",
       "sectors": ["1–3 个中文短标签"],
-      "tickers": ["仅填写原始标题或 facts 可验证归属的 0–4 个代码"]
+      "tickers": ["仅填写原始标题或 facts 可验证归属的 0–4 个代码"],
+      "signal": {
+        "thesis": "20–140 字：先写相对基准真正改变了什么，再写市场最应重视的变量。",
+        "scoreReason": "12–100 字：说明该事件为何比同批候选更重要，不复述标题。",
+        "transmission": [
+          {
+            "order": 1,
+            "from": "必须能在该条标题或 facts 中找到依据的具体事件起点",
+            "to": "具体价格、供需、财务变量、行业或公司",
+            "mechanism": "12–100 字的具体传导机制。",
+            "conditional": false
+          }
+        ],
+        "exposures": [
+          {
+            "name": "具体行业、资产或公司",
+            "ticker": "facts 明确归属时必填，否则省略",
+            "exchange": "ticker 存在时必填，如 SSE/SZSE/NYSE/NASDAQ",
+            "direction": "positive | negative | mixed",
+            "basis": "12–100 字：该对象为何直接或间接受影响。"
+          }
+        ],
+        "horizon": "intraday | 1-5d | 1-4w",
+        "confidence": "low | medium | high",
+        "checkpoint": {
+          "metric": "未来可从权威来源核验的具体指标或事件",
+          "dueInDays": 3,
+          "confirmIf": "12–120 字：什么结果支持当前判断。",
+          "invalidateIf": "12–120 字：什么结果推翻当前判断。"
+        }
+      }
     }
   ],
   "translations": {
@@ -98,7 +128,29 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
           "title": "English title",
           "summary": "English summary.",
           "interpretation": "English interpretation.",
-          "sectors": ["Translated sector labels"]
+          "sectors": ["Translated sector labels"],
+          "signal": {
+            "thesis": "Translated thesis.",
+            "scoreReason": "Translated selection reason.",
+            "transmission": [
+              {
+                "from": "Translated factual starting point",
+                "to": "Translated affected variable or object",
+                "mechanism": "Translated mechanism."
+              }
+            ],
+            "exposures": [
+              {
+                "name": "Translated exposure name",
+                "basis": "Translated attribution basis."
+              }
+            ],
+            "checkpoint": {
+              "metric": "Translated checkpoint metric",
+              "confirmIf": "Translated confirmation condition.",
+              "invalidateIf": "Translated invalidation condition."
+            }
+          }
         }
       ]
     }
@@ -106,7 +158,7 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
 }
 ```
 
-`stories` 必须与 `daily-input.json.news` 等长且顺序一致，`sourceIndex` 从 `0` 连续递增。
+`stories` 必须与 `daily-input.json.news` 等长且顺序一致，`sourceIndex` 从 `0` 连续递增。`importance >= 3` 时必须生成 `signal`；`importance < 3` 时必须省略 `signal`，页面不会展示这类低信号内容。
 
 ## 事实与质量边界
 
@@ -126,6 +178,11 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
   contract 完整、六项成功且无持久化；指数与行业日期不一致时整次拒绝发布。
   D1 只保存更新类型及 CN/US 各一个行情交易日，不保存本地 diagnostics 或逐项日期。
 - `positive` 表示主要受影响资产净利好，`negative` 表示净利空，同时存在重要受益与承压对象时用 `mixed`。只有例行事项不改变定价、状态整体稳定或正负因素实质抵消时才用 `neutral`，并必须在解读中明确写出“中性”及其依据。
+- `signal.thesis` 不得只是把 `interpretation` 换一种说法。先指出相对预期、前值、指引、既有政策或市场定价真正变化的部分；输入没有可靠基准时明确聚焦“新增事实”，不要编造市场共识。
+- `signal.transmission` 必须从该条已核验事实中的具体名词开始，按 1–3 步写到财务变量、市场变量和受影响对象；不得以“消息、事件、相关板块、市场”等泛称同时充当起点与终点。
+- `signal.exposures` 中出现 ticker 时必须同时给出交易所；标题或 facts 明确出现的上市公司必须列入，未明确出现的公司不得补入。
+- `signal.horizon` 与 `checkpoint.dueInDays` 必须匹配：`intraday=0`、`1-5d=1–5`、`1-4w=6–28`。确认条件和推翻条件都必须可以在到期后客观核验，不得写“持续关注”“视情况而定”。
+- `confidence` 只使用低、中、高三档，不生成百分比或伪精确概率。
 - 禁止用“标题未披露”“信息不足”“无法判断”“方向未明”“取决于后续”代替分析。若 `facts` 仍不足以完成传导判断，质量门必须失败，不能生成日报。
 - 指数新闻必须说明估值、风险偏好或指数权重机制；利率新闻必须说明折现率、融资成本、债券吸引力、无风险利率或估值机制。
 - 价格涨跌不能倒置为利润变化的原因。禁止“相关股票可能上涨”“值得关注”“投资机会”等空泛模板或买卖建议。

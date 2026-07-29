@@ -8,12 +8,13 @@ import Document, {
 import {
   resolveLanguage,
 } from "./lib/i18n";
-import type { MarketRegion } from "./types";
+import type { MarketRegion, ThesisLedgerEntry } from "./types";
 import {
   buildSectorHeatView,
   getDailyArchive,
   getDailyHeatHistory,
   getDailyReport,
+  getThesisLedger,
   getWeeklyArchive,
   getWeeklyEventTimeline,
   getWeeklyReport,
@@ -112,6 +113,12 @@ async function dailyPage(
   } catch (error) {
     console.error("D1 weekly event read failed; hiding event timeline", error);
   }
+  let thesisLedger: ThesisLedgerEntry[] = [];
+  try {
+    thesisLedger = await getThesisLedger(db, report.reportDate, market);
+  } catch (error) {
+    console.error("D1 thesis ledger read failed; hiding ledger", error);
+  }
 
   const data: DailyPageData = {
     kind: "daily",
@@ -122,6 +129,7 @@ async function dailyPage(
     archive,
     sectorHeat: buildSectorHeatView(report.sectorHeat, marketHistory),
     weekEvents,
+    thesisLedger,
   };
   return renderPage(data);
 }

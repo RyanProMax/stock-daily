@@ -895,18 +895,24 @@ export function isOpinionNoise(item) {
   const title = plainText(item.title).toLocaleLowerCase();
   const facts = plainText(item.facts ?? "").toLocaleLowerCase();
   const chineseOpinionTitle =
-    /(?:投资人|私募|机构|投行|券商|分析师|策略师|市场情报团队|研究团队|摩根大通|高盛|花旗|美银|瑞银|野村).{0,30}(?:认为|表示|称|发声|观点|看好|建议|预计|推演|情景|预测|研判)|(?:对股市|对a股|对美股).{0,16}(?:最为有利|最佳结果|最糟糕结果)/u;
+    /(?:投资人|私募|机构|投行|券商|证券|银行|分析师|策略师|市场情报团队|研究团队|摩根大通|高盛|花旗|美银|瑞银|野村).{0,30}(?:认为|表示|称|发声|观点|看好|建议|预计|推演|情景|预测|研判)|(?:对股市|对a股|对美股).{0,16}(?:最为有利|最佳结果|最糟糕结果)/u;
   const englishOpinionTitle =
     /\b(?:analyst|strategist|portfolio manager|chief investment officer|jpmorgan|goldman sachs|citigroup|bank of america|ubs|nomura)\b.{0,48}\b(?:says?|sees?|expects?|predicts?|forecasts?|recommends?|scenario)\b/u;
   const pendingEventPreviewTitle =
     /^(?:fed meeting live|federal reserve live|美联储(?:会议|决议)(?:直播|前瞻))|(?:\bfed(?:eral reserve)?\b|美联储).{0,42}(?:\bexpected to (?:hold|cut|raise)\b|预计(?:按兵不动|降息|加息))/u;
   const personalCommentaryFacts =
     /(?:知名)?(?:私募)?投资人.{0,18}(?:密集发声|朋友圈发文|个人观点)|(?:朋友圈|社交平台).{0,12}(?:发文|表示).{0,28}(?:产业|市场|股市|a股|美股)/u;
+  const analystRatingFacts =
+    /\b(?:buy|sell|hold|overweight|underweight) rating\b|\bprice target\b|\bmarket overreacting\b|买入评级|卖出评级|目标价/u;
+  const technicalPredictionTitle =
+    /\b(?:bullish|bearish)\b.{0,36}\b(?:chart|pattern|shape|signal)\b|\bcharts?\b.{0,48}\b(?:signals?|suggests?|points to)\b.{0,36}\b(?:gains?|losses?|upside|downside)\b/u;
   return (
     chineseOpinionTitle.test(title) ||
     englishOpinionTitle.test(title) ||
     pendingEventPreviewTitle.test(title) ||
-    personalCommentaryFacts.test(facts.slice(0, 360))
+    technicalPredictionTitle.test(title) ||
+    personalCommentaryFacts.test(facts.slice(0, 360)) ||
+    analystRatingFacts.test(`${title} ${facts.slice(0, 520)}`)
   );
 }
 
@@ -1181,27 +1187,44 @@ export function extractArticleFacts(html, title, url) {
   return factsCandidates(html, title, url)[0]?.facts ?? "";
 }
 
+export function shouldHydrateFacts(item, existingFacts) {
+  if (!existingFacts) return true;
+  if (item?._tier === "official") return true;
+  if (/(?:\.{3}|…)\s*$/u.test(existingFacts)) return true;
+  return existingFacts.length < 80;
+}
+
 async function hydrateNewsFacts(item) {
   const existingFacts = usefulFacts(item.facts, item.title);
-  if (existingFacts) return { ...item, facts: existingFacts };
-
-  const response = await fetchText(item.url, {
-    headers: { Accept: "text/html,application/xhtml+xml" },
-    source: item.source,
-  });
-  const facts = extractArticleFacts(
-    response.body,
-    item.title,
-    response.finalUrl || item.url,
-  );
-  if (!facts) {
-    throw new Error(`${item.source} 正文没有可核验的事实摘要：${item.title}`);
+  if (!shouldHydrateFacts(item, existingFacts)) {
+    return { ...item, facts: existingFacts };
   }
-  return {
-    ...item,
-    url: canonicalizeUrl(response.finalUrl || item.url),
-    facts,
-  };
+
+  try {
+    const response = await fetchText(item.url, {
+      headers: { Accept: "text/html,application/xhtml+xml" },
+      source: item.source,
+    });
+    const hydratedFacts = extractArticleFacts(
+      response.body,
+      item.title,
+      response.finalUrl || item.url,
+    );
+    const facts = hydratedFacts || existingFacts;
+    if (!facts) {
+      throw new Error(`${item.source} 正文没有可核验的事实摘要：${item.title}`);
+    }
+    return {
+      ...item,
+      url: canonicalizeUrl(response.finalUrl || item.url),
+      facts,
+    };
+  } catch (error) {
+    if (existingFacts) {
+      return { ...item, facts: existingFacts };
+    }
+    throw error;
+  }
 }
 
 async function mapSettledWithConcurrency(items, concurrency, worker) {

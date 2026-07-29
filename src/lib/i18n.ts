@@ -37,15 +37,15 @@ export const copy = {
     dataCut: "数据截止",
     copy: "复制摘要",
     copied: "已复制",
-    agentOverview: "AI 总览",
+    agentOverview: "今日定价主线",
     favorable: "主要利好",
     adverse: "主要利空",
     market: "市场状态",
-    sectorHeat: "板块热度",
-    heatRange: "价格波动强度 · 0–100",
-    heatStreak: "连续高热",
+    sectorHeat: "高波动板块",
+    heatRange: "按当日绝对涨跌幅排序",
+    heatStreak: "连续大幅波动",
     heatStreakDays: "连续 {count} 个交易日",
-    noHeatStreak: "暂无连续两个交易日高热的板块",
+    noHeatStreak: "暂无连续两个交易日大幅波动的板块",
     currentMarkets: "主要行情",
     marketUpdatedAt: "市场信息更新于 {time}（北京时间）",
     marketAsOfToday: "{market}数据截至今天（{date}）收盘",
@@ -59,8 +59,9 @@ export const copy = {
     eventPostponed: "已延期",
     eventResult: "兑现结果",
     eventNoData: "本周暂无关键事件。",
-    hotspotIndex: "热点版图",
-    hotspotTop: "今日头条",
+    hotspotIndex: "定价信号板",
+    hotspotTop: "核心信号",
+    hotspotSupporting: "辅助信号",
     hotspotMacro: "政策与宏观",
     hotspotCompany: "公司与财报",
     hotspotIndustry: "行业与商品",
@@ -70,9 +71,43 @@ export const copy = {
     impact: "影响",
     priority: "优先级 {value}/5",
     proof: "核验依据",
+    pricingThesis: "今日定价主线",
+    expectationGap: "预期差",
+    actual: "实际",
+    expected: "预期",
+    prior: "前值",
+    surprise: "差异",
+    marketReaction: "市场反应",
+    transmission: "传导链",
+    exposure: "影响对象",
+    checkpoint: "核验点",
+    confirmIf: "支持条件",
+    invalidateIf: "失效条件",
+    verifyBy: "核验期限",
+    confidence: "置信度",
+    signalScore: "信号分 {value}",
+    coreSignal: "核心",
+    supportingSignal: "辅助",
+    horizonIntraday: "日内",
+    horizonShort: "1–5日",
+    horizonMedium: "1–4周",
+    confidenceLow: "低",
+    confidenceMedium: "中",
+    confidenceHigh: "高",
+    sourceFirstParty: "一手来源",
+    sourceWire: "通讯社",
+    sourceSecondary: "二手来源",
+    thesisLedger: "论点复盘",
+    ledgerEmpty: "暂无到期论点。",
+    statusPending: "待核验",
+    statusConfirmed: "已验证",
+    statusPartial: "部分验证",
+    statusInvalidated: "已失效",
+    statusInconclusive: "证据不足",
+    observation: "后续观察",
     previous: "其他日报",
     overallTone: "整体{tone}",
-    newsCount: "{count} 条新闻",
+    newsCount: "{count} 条有效信号",
     newer: "查看更新一期",
     older: "查看更早一期",
     selectDate: "选择日报日期",
@@ -116,15 +151,15 @@ export const copy = {
     dataCut: "Data through",
     copy: "Copy summary",
     copied: "Copied",
-    agentOverview: "AI Overview",
+    agentOverview: "Today's Pricing Thesis",
     favorable: "Favorable for",
     adverse: "Adverse for",
     market: "Market Pulse",
-    sectorHeat: "Sector Heat",
-    heatRange: "Price-move intensity · 0–100",
-    heatStreak: "Sustained Heat",
+    sectorHeat: "High-Volatility Sectors",
+    heatRange: "Ranked by absolute daily price move",
+    heatStreak: "Sustained Large Moves",
     heatStreakDays: "{count} trading days",
-    noHeatStreak: "No sector has stayed hot for two trading days.",
+    noHeatStreak: "No sector has made a large move for two trading days.",
     currentMarkets: "Key Market Data",
     marketUpdatedAt: "Market info updated {time} (Beijing time)",
     marketAsOfToday: "{market} data through today's close ({date})",
@@ -138,8 +173,9 @@ export const copy = {
     eventPostponed: "Postponed",
     eventResult: "Realized result",
     eventNoData: "No key events are scheduled this week.",
-    hotspotIndex: "News Map",
-    hotspotTop: "Top News",
+    hotspotIndex: "Pricing Signal Board",
+    hotspotTop: "Core Signals",
+    hotspotSupporting: "Supporting Signals",
     hotspotMacro: "Policy & Macro",
     hotspotCompany: "Companies & Earnings",
     hotspotIndustry: "Sectors & Commodities",
@@ -149,9 +185,43 @@ export const copy = {
     impact: "Impact",
     priority: "Priority {value}/5",
     proof: "Evidence",
+    pricingThesis: "Today's Pricing Thesis",
+    expectationGap: "Expectation Gap",
+    actual: "Actual",
+    expected: "Expected",
+    prior: "Prior",
+    surprise: "Gap",
+    marketReaction: "Market Reaction",
+    transmission: "Transmission",
+    exposure: "Exposures",
+    checkpoint: "Checkpoint",
+    confirmIf: "Confirmation",
+    invalidateIf: "Invalidation",
+    verifyBy: "Verify by",
+    confidence: "Confidence",
+    signalScore: "Signal score {value}",
+    coreSignal: "Core",
+    supportingSignal: "Supporting",
+    horizonIntraday: "Intraday",
+    horizonShort: "1–5 days",
+    horizonMedium: "1–4 weeks",
+    confidenceLow: "Low",
+    confidenceMedium: "Medium",
+    confidenceHigh: "High",
+    sourceFirstParty: "First party",
+    sourceWire: "Wire",
+    sourceSecondary: "Secondary",
+    thesisLedger: "Thesis Ledger",
+    ledgerEmpty: "No thesis is due for review.",
+    statusPending: "Pending",
+    statusConfirmed: "Confirmed",
+    statusPartial: "Partially confirmed",
+    statusInvalidated: "Invalidated",
+    statusInconclusive: "Inconclusive",
+    observation: "Follow-up observation",
     previous: "Other Editions",
     overallTone: "Overall {tone}",
-    newsCount: "{count} stories",
+    newsCount: "{count} qualified signals",
     newer: "View newer edition",
     older: "View older edition",
     selectDate: "Select report date",
@@ -282,22 +352,83 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       ...market,
       name: marketNames[market.symbol ?? ""]?.[language] ?? market.name,
     })),
-    stories: report.stories.map((story, index) => ({
-      ...story,
-      categoryLabel: categoryLabels[language][story.category],
-      title: translation?.stories[index]?.title ?? story.title,
-      summary: translation?.stories[index]?.summary ?? story.summary,
-      ai: {
-        tone: story.ai?.tone ?? "neutral",
-        interpretation:
-          translation?.stories[index]?.interpretation ??
-          story.ai?.interpretation ??
-          "",
-        sectors:
-          translation?.stories[index]?.sectors ?? story.ai?.sectors ?? [],
-        tickers: story.ai?.tickers ?? [],
-      },
-    })),
+    stories: report.stories.map((story, index) => {
+      const translatedStory = translation?.stories[index];
+      const translatedSignal = translatedStory?.signal;
+      const signal = story.signal
+        ? {
+            ...story.signal,
+            thesis: translatedSignal?.thesis ?? story.signal.thesis,
+            scoreReason:
+              translatedSignal?.scoreReason ?? story.signal.scoreReason,
+            metrics: story.signal.metrics.map((metric) => ({
+              ...metric,
+              label:
+                language === "en"
+                  ? metric.labelEn ?? metric.label
+                  : metric.label,
+            })),
+            reactions: story.signal.reactions.map((reaction) => ({
+              ...reaction,
+              window:
+                language === "en"
+                  ? reaction.windowEn ?? reaction.window
+                  : reaction.window,
+            })),
+            transmission: story.signal.transmission.map((step, stepIndex) => ({
+              ...step,
+              from:
+                translatedSignal?.transmission[stepIndex]?.from ?? step.from,
+              to: translatedSignal?.transmission[stepIndex]?.to ?? step.to,
+              mechanism:
+                translatedSignal?.transmission[stepIndex]?.mechanism ??
+                step.mechanism,
+            })),
+            exposures: story.signal.exposures.map(
+              (exposure, exposureIndex) => ({
+                ...exposure,
+                name:
+                  translatedSignal?.exposures[exposureIndex]?.name ??
+                  exposure.name,
+                basis:
+                  translatedSignal?.exposures[exposureIndex]?.basis ??
+                  exposure.basis,
+              }),
+            ),
+            checkpoint: {
+              ...story.signal.checkpoint,
+              metric:
+                translatedSignal?.checkpoint.metric ??
+                story.signal.checkpoint.metric,
+              confirmIf:
+                translatedSignal?.checkpoint.confirmIf ??
+                story.signal.checkpoint.confirmIf,
+              invalidateIf:
+                translatedSignal?.checkpoint.invalidateIf ??
+                story.signal.checkpoint.invalidateIf,
+              observation:
+                translatedSignal?.checkpoint.observation ??
+                story.signal.checkpoint.observation,
+            },
+          }
+        : undefined;
+      return {
+        ...story,
+        ...(signal ? { signal } : {}),
+        categoryLabel: categoryLabels[language][story.category],
+        title: translatedStory?.title ?? story.title,
+        summary: translatedStory?.summary ?? story.summary,
+        ai: {
+          tone: story.ai?.tone ?? "neutral",
+          interpretation:
+            translatedStory?.interpretation ??
+            story.ai?.interpretation ??
+            "",
+          sectors: translatedStory?.sectors ?? story.ai?.sectors ?? [],
+          tickers: story.ai?.tickers ?? [],
+        },
+      };
+    }),
   };
 }
 

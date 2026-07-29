@@ -152,6 +152,16 @@ test("market close labels are relative to the selected report date", async () =>
   );
 });
 
+test("event dates render both calendar dates and ISO checkpoint timestamps", async () => {
+  const { eventDate } = await vite.ssrLoadModule(
+    "/src/components/HotspotBoard.tsx",
+  );
+
+  assert.match(eventDate("2026-07-29", "zh"), /7.*29/);
+  assert.match(eventDate("2026-08-03T13:00:00.000Z", "en"), /Aug 3/);
+  assert.equal(eventDate("not-a-date", "en"), "not-a-date");
+});
+
 test("weekly events turn green only after an official result is verified", async () => {
   const { buildWeeklyEventTimeline } = await vite.ssrLoadModule(
     "/src/server/reports.ts",
@@ -249,6 +259,86 @@ test("weekly events turn green only after an official result is verified", async
   );
 });
 
+test("thesis ledger resolves only against timestamped first-party or wire follow-up", async () => {
+  const { deriveThesisLedger } = await vite.ssrLoadModule(
+    "/src/server/reports.ts",
+  );
+  const origin = {
+    reportDate: "2026-07-20",
+    stories: [
+      {
+        id: "apple-guidance",
+        regions: ["US"],
+        title: "苹果上调指引",
+        signal: {
+          thesis: "指引上调改善现金流预期。",
+          roleByMarket: { US: "core" },
+          exposures: [
+            { name: "Apple", ticker: "AAPL", exchange: "NASDAQ" },
+          ],
+          horizon: "1-5d",
+          confidence: "medium",
+          checkpoint: {
+            metric: "Apple revenue guidance",
+            dueAt: "2026-07-22T13:00:00.000Z",
+            confirmIf: "后续收入指引维持。",
+            invalidateIf: "后续收入指引下修。",
+            status: "pending",
+          },
+        },
+      },
+    ],
+    translations: {
+      en: {
+        stories: [
+          {
+            title: "Apple raises guidance",
+            signal: { thesis: "Guidance improves the cash-flow outlook." },
+          },
+        ],
+      },
+    },
+  };
+  const verifiedFollowUp = {
+    reportDate: "2026-07-23",
+    stories: [
+      {
+        id: "apple-follow-up",
+        regions: ["US"],
+        title: "苹果更新收入指引",
+        summary: "Apple维持最新收入指引。",
+        evidence: "Reuters published the company update.",
+        source: "https://www.reuters.com/example/apple",
+        sourceLabel: "Reuters",
+        publishedAt: "2026-07-23T12:00:00.000Z",
+        evidenceSource: {
+          url: "https://www.reuters.com/example/apple",
+          label: "Reuters",
+          tier: "wire",
+        },
+        ai: { tickers: ["AAPL"] },
+      },
+    ],
+  };
+  const [resolved] = deriveThesisLedger(
+    [origin, verifiedFollowUp],
+    "2026-07-24",
+    "US",
+  );
+  assert.equal(resolved.checkpoint.status, "inconclusive");
+  assert.equal(resolved.checkpoint.resultSource.tier, "wire");
+  assert.match(resolved.checkpoint.observation, /维持最新收入指引/);
+
+  const unverified = structuredClone(verifiedFollowUp);
+  delete unverified.stories[0].evidenceSource;
+  const [pending] = deriveThesisLedger(
+    [origin, unverified],
+    "2026-07-24",
+    "US",
+  );
+  assert.equal(pending.checkpoint.status, "pending");
+});
+
 test("daily SSR merges weekly events and analysis into the hotspot board", async () => {
   const [{ default: Document }, { buildWeeklyEventTimeline }] =
     await Promise.all([
@@ -277,6 +367,7 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
       threshold: 70,
     },
     weekEvents: timeline,
+    thesisLedger: [],
   };
   const markup = renderToStaticMarkup(React.createElement(Document, { data }));
   const dom = new JSDOM(`<!doctype html>${markup}`);
@@ -284,7 +375,7 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   const eventSection = document.querySelector("[data-weekly-events]");
   const hero = document.querySelector(".hero");
   const hotspotBoard = document.querySelector(".hotspot-board");
-  const topGroup = document.querySelector(".hotspot-group-top");
+  const topGroup = document.querySelector(".hotspot-group-core");
 
   assert.ok(eventSection);
   assert.ok(hero);
@@ -323,14 +414,14 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   );
 
   const marketStories = report.stories.filter((story) =>
-    story.regions.includes("US"),
-  );
+    story.regions.includes("US") && story.importance >= 3,
+  ).sort((left, right) => right.importance - left.importance).slice(0, 5);
   assert.equal(
     document.querySelectorAll(".hotspot-group li").length,
     marketStories.length,
   );
   assert.equal(
-    document.querySelectorAll(".hotspot-group-top li").length,
+    document.querySelectorAll(".hotspot-group-core li").length,
     Math.min(3, marketStories.length),
   );
   for (const [index, story] of marketStories.entries()) {

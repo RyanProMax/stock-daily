@@ -26,6 +26,53 @@ if (!healthResponse.ok || !reportResponse.ok) {
 
 const health = (await healthResponse.json()).data;
 const report = (await reportResponse.json()).data;
+const qualifiedStories = report?.stories?.filter(
+  (story) => story.importance >= 3,
+) ?? [];
+const signalCounts = Object.fromEntries(
+  ["CN", "US"].map((market) => [
+    market,
+    {
+      core: qualifiedStories.filter(
+        (story) => story.signal?.roleByMarket?.[market] === "core",
+      ).length,
+      supporting: qualifiedStories.filter(
+        (story) => story.signal?.roleByMarket?.[market] === "supporting",
+      ).length,
+    },
+  ]),
+);
+const v8Invalid =
+  input.contractVersion === "codex-daily-v8" &&
+  (qualifiedStories.length === 0 ||
+    qualifiedStories.some(
+      (story) =>
+        story.signal?.version !== 2 ||
+        !story.evidenceSource?.url ||
+        !["first_party", "wire", "secondary"].includes(
+          story.evidenceSource?.tier,
+        ) ||
+        !story.signal?.thesis ||
+        !Array.isArray(story.signal?.transmission) ||
+        story.signal.transmission.length < 1 ||
+        !Array.isArray(story.signal?.exposures) ||
+        story.signal.exposures.length < 1 ||
+        !story.signal?.checkpoint?.dueAt ||
+        story.signal.checkpoint.status !== "pending",
+    ) ||
+    report.stories.some(
+      (story) => story.importance < 3 && story.signal !== undefined,
+    ) ||
+    ["CN", "US"].some((market) => {
+      const marketQualified = qualifiedStories.filter((story) =>
+        story.regions.includes(market),
+      );
+      return (
+        marketQualified.length >= 3 &&
+        (signalCounts[market].core !== 3 ||
+          signalCounts[market].supporting > 2)
+      );
+    }));
 if (
   health?.database !== "connected" ||
   health?.latestIngestion?.status !== "completed" ||
@@ -61,7 +108,8 @@ if (
     (story, index) =>
       JSON.stringify(story.regions) !==
       JSON.stringify(input.news[index]?.regions),
-  )
+  ) ||
+  v8Invalid
 ) {
   throw new Error("线上日报与本次输入或 Codex 溯源字段不一致");
 }
@@ -76,6 +124,8 @@ console.log(
       marketCount: report.markets.length,
       heatCount: report.sectorHeat.length,
       storyCount: report.stories.length,
+      qualifiedSignalCount: qualifiedStories.length,
+      signalCounts,
       markets: ["CN", "US"],
       agentModel: report.agentModel,
     },

@@ -264,6 +264,12 @@ export function buildContent(input, report) {
         source: source.source,
         sourceLabel: source.sourceLabel,
         status: "scheduled",
+        ...(source.baselineKind
+          ? { baselineKind: source.baselineKind }
+          : {}),
+        ...(Array.isArray(source.metrics) && source.metrics.length > 0
+          ? { metrics: source.metrics }
+          : {}),
       };
     }),
     translations: report.translations,

@@ -21,17 +21,17 @@ SELECTORS = {
     "date": ".date-select-trigger",
     "hero_title": ".hero h1",
     "hero_summary": ".hero-summary",
-    "overview_title": ".thesis-card h2",
-    "overview_body": ".thesis-card > p",
+    "overview_title": ".pricing-thesis > header > strong",
+    "overview_body": ".pricing-thesis > p",
     "section_title": ".section-intro h2",
     "market_name": ".market-item span",
     "market_value": ".market-item strong",
     "story_meta": ".hotspot-title > span",
     "story_title": ".hotspot-title > strong",
-    "story_body": ".hotspot-analysis-copy > div:first-child p",
-    "ai_label": ".hotspot-analysis-copy > div:last-child > strong",
-    "ai_body": ".hotspot-analysis-copy > div:last-child p",
-    "impact_tag": ".hotspot-impact .sector-tag",
+    "story_body": ".signal-fact-thesis > div:first-child p",
+    "ai_label": ".signal-fact-thesis > div:last-child > strong",
+    "ai_body": ".signal-fact-thesis > div:last-child p",
+    "impact_tag": ".signal-exposure b",
 }
 
 

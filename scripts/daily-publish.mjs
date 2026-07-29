@@ -14,22 +14,34 @@ import {
   dailyCutoffAt,
   marketAsOfFromInput,
 } from "./daily-policy.mjs";
+import {
+  assignSignalMetadata,
+  checkpointDueAt,
+  enrichNewsItem,
+  supportedEntityKeys,
+} from "./signal-intelligence.mjs";
 
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
 const categories = new Set(["公司", "宏观", "商品", "行业"]);
 const tones = new Set(["positive", "negative", "mixed", "neutral"]);
+const signalDirections = new Set(["positive", "negative", "mixed"]);
+const signalHorizons = new Set(["intraday", "1-5d", "1-4w"]);
+const signalConfidences = new Set(["low", "medium", "high"]);
 
 const tickerAliases = {
   AAPL: /\bapple\b/i,
   AMZN: /\bamazon\b/i,
   BABA: /\baliexpress\b|\balibaba\b|全球速卖通/i,
   CCK: /\bcrown holdings\b/i,
+  EDU: /\bnew oriental(?: education)?\b|新东方/i,
   GOOG: /\bgoogle\b|\balphabet\b/i,
   GOOGL: /\bgoogle\b|\balphabet\b/i,
+  GFS: /\bglobalfoundries\b|格罗方德/i,
   META: /\bmeta\b|\bfacebook\b/i,
   MSFT: /\bmicrosoft\b/i,
   NVDA: /\bnvidia\b/i,
+  PG: /\bprocter\s*&\s*gamble\b|\bp&g\b|宝洁/i,
   TSLA: /\btesla\b/i,
   VRSN: /\bverisign\b/i,
 };
@@ -296,9 +308,13 @@ function requiredTickerGroups(sourceTitle) {
 
 export function validateInput(value) {
   const input = requireObject(value, "daily-input");
+  const supportedContract =
+    (input.schemaVersion === 7 &&
+      input.contractVersion === "codex-daily-v7") ||
+    (input.schemaVersion === 8 &&
+      input.contractVersion === "codex-daily-v8");
   if (
-    input.schemaVersion !== 7 ||
-    input.contractVersion !== "codex-daily-v7" ||
+    !supportedContract ||
     typeof input.runId !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/.test(input.reportDate) ||
     !DAILY_UPDATE_KINDS.includes(input.updateKind) ||
@@ -311,7 +327,7 @@ export function validateInput(value) {
     input.news.length === 0 ||
     input.news.length > NEWS_MAX_PER_MARKET * 2
   ) {
-    throw new Error("daily-input 结构或数量不符合 codex-daily-v7");
+    throw new Error("daily-input 结构或数量不符合 codex-daily-v7/v8");
   }
   const sectorCounts = new Map([
     ["CN", 0],
@@ -560,6 +576,246 @@ function validateMarketView(value, market, markets) {
   return { headline, summary, overview };
 }
 
+function phraseIsGrounded(phrase, sourceFacts) {
+  const source = sourceFacts
+    .toLocaleLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
+  const value = phrase
+    .toLocaleLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
+  if (value.length >= 2 && source.includes(value)) return true;
+  const chinesePairs = [
+    ...value.matchAll(/(?=([\p{Script=Han}]{2}))/gu),
+  ].map((match) => match[1]);
+  if (chinesePairs.some((pair) => source.includes(pair))) return true;
+  const englishWords = phrase
+    .toLocaleLowerCase()
+    .match(/[a-z]{4,}/g) ?? [];
+  return englishWords.some((word) => source.includes(word));
+}
+
+function validateAgentSignal(
+  value,
+  {
+    index,
+    importance,
+    reportDate,
+    sourceFacts,
+    enrichment,
+    sectors,
+    tickers,
+    required,
+  },
+) {
+  if (importance < 3) return undefined;
+  if (!required && value === undefined) return undefined;
+  const label = `stories[${index}].signal`;
+  const signal = requireObject(value, label);
+  const thesis = completeSentence(signal.thesis, `${label}.thesis`, 140, 20);
+  const scoreReason = completeSentence(
+    signal.scoreReason,
+    `${label}.scoreReason`,
+    100,
+    12,
+  );
+  if (!signalHorizons.has(signal.horizon)) {
+    throw new Error(`${label}.horizon 无效`);
+  }
+  if (!signalConfidences.has(signal.confidence)) {
+    throw new Error(`${label}.confidence 无效`);
+  }
+  if (
+    !Array.isArray(signal.transmission) ||
+    signal.transmission.length < 1 ||
+    signal.transmission.length > 3
+  ) {
+    throw new Error(`${label}.transmission 必须包含 1–3 步`);
+  }
+  const genericNodes =
+    /^(?:事件|消息|政策|数据|公司|行业|市场|相关板块|相关资产|资产|风险偏好|估值|现金流)$/u;
+  const transmission = signal.transmission.map((stepValue, stepIndex) => {
+    const step = requireObject(
+      stepValue,
+      `${label}.transmission[${stepIndex}]`,
+    );
+    const order = Number(step.order);
+    if (order !== stepIndex + 1 || order > 3) {
+      throw new Error(`${label}.transmission[${stepIndex}].order 必须连续`);
+    }
+    const from = requireText(
+      step.from,
+      `${label}.transmission[${stepIndex}].from`,
+      30,
+      2,
+    );
+    const to = requireText(
+      step.to,
+      `${label}.transmission[${stepIndex}].to`,
+      30,
+      2,
+    );
+    const mechanism = completeSentence(
+      step.mechanism,
+      `${label}.transmission[${stepIndex}].mechanism`,
+      100,
+      12,
+    );
+    if (
+      typeof step.conditional !== "boolean" ||
+      (genericNodes.test(from) && genericNodes.test(to))
+    ) {
+      throw new Error(
+        `${label}.transmission[${stepIndex}] 缺少具体事件或影响对象`,
+      );
+    }
+    return {
+      order,
+      from,
+      to,
+      mechanism,
+      conditional: step.conditional,
+    };
+  });
+  if (!transmission.some((step) => phraseIsGrounded(step.from, sourceFacts))) {
+    throw new Error(`${label}.transmission 起点无法回溯到已核验事实`);
+  }
+
+  if (
+    !Array.isArray(signal.exposures) ||
+    signal.exposures.length < 1 ||
+    signal.exposures.length > 6
+  ) {
+    throw new Error(`${label}.exposures 必须包含 1–6 项`);
+  }
+  const supportedKeys = supportedEntityKeys(enrichment.entities);
+  const exposures = signal.exposures.map((exposureValue, exposureIndex) => {
+    const exposure = requireObject(
+      exposureValue,
+      `${label}.exposures[${exposureIndex}]`,
+    );
+    const ticker =
+      typeof exposure.ticker === "string" && exposure.ticker.trim()
+        ? exposure.ticker.trim().toUpperCase()
+        : undefined;
+    const exchange =
+      typeof exposure.exchange === "string" && exposure.exchange.trim()
+        ? exposure.exchange.trim().toUpperCase()
+        : undefined;
+    if (!signalDirections.has(exposure.direction)) {
+      throw new Error(`${label}.exposures[${exposureIndex}].direction 无效`);
+    }
+    if (
+      (ticker && !exchange) ||
+      (!ticker && exchange) ||
+      (ticker && !supportedKeys.has(`${exchange}:${ticker}`))
+    ) {
+      throw new Error(
+        `${label}.exposures[${exposureIndex}] 含无法由事实归属的 ticker`,
+      );
+    }
+    return {
+      name: requireText(
+        exposure.name,
+        `${label}.exposures[${exposureIndex}].name`,
+        36,
+        2,
+      ),
+      ...(ticker ? { ticker, exchange } : {}),
+      direction: exposure.direction,
+      basis: completeSentence(
+        exposure.basis,
+        `${label}.exposures[${exposureIndex}].basis`,
+        100,
+        12,
+      ),
+    };
+  });
+  for (const entity of enrichment.entities) {
+    if (
+      !exposures.some(
+        (exposure) =>
+          exposure.ticker === entity.ticker &&
+          exposure.exchange === entity.exchange,
+      )
+    ) {
+      throw new Error(
+        `${label}.exposures 必须包含 ${entity.exchange}:${entity.ticker}`,
+      );
+    }
+    if (!tickers.includes(entity.ticker)) {
+      throw new Error(
+        `stories[${index}].tickers 必须包含 ${entity.ticker}`,
+      );
+    }
+  }
+
+  const checkpointValue = requireObject(
+    signal.checkpoint,
+    `${label}.checkpoint`,
+  );
+  const checkpoint = {
+    metric: requireText(
+      checkpointValue.metric,
+      `${label}.checkpoint.metric`,
+      72,
+      4,
+    ),
+    dueAt: checkpointDueAt(
+      reportDate,
+      signal.horizon,
+      checkpointValue.dueInDays,
+    ),
+    confirmIf: completeSentence(
+      checkpointValue.confirmIf,
+      `${label}.checkpoint.confirmIf`,
+      120,
+      12,
+    ),
+    invalidateIf: completeSentence(
+      checkpointValue.invalidateIf,
+      `${label}.checkpoint.invalidateIf`,
+      120,
+      12,
+    ),
+    status: "pending",
+  };
+
+  const generatedText = [
+    thesis,
+    scoreReason,
+    ...transmission.flatMap((step) => [
+      step.from,
+      step.to,
+      step.mechanism,
+    ]),
+    ...exposures.flatMap((exposure) => [exposure.name, exposure.basis]),
+    checkpoint.metric,
+    checkpoint.confirmIf,
+    checkpoint.invalidateIf,
+  ].join(" ");
+  assertStoryFactsBounded(sourceFacts, generatedText);
+  if (
+    /投资者(可以|应当|应该)|值得关注|投资机会|建议|买入|卖出|仓位|目标价/.test(
+      generatedText,
+    )
+  ) {
+    throw new Error(`${label} 含投资建议`);
+  }
+
+  return {
+    thesis,
+    scoreReason,
+    baselineKind: enrichment.baselineKind,
+    metrics: enrichment.metrics,
+    reactions: enrichment.reactions,
+    transmission,
+    exposures,
+    horizon: signal.horizon,
+    confidence: signal.confidence,
+    checkpoint,
+  };
+}
+
 export function validateReport(value, input) {
   const report = requireObject(value, "daily-report");
   const headline = requireText(report.headline, "headline", 22, 8);
@@ -625,7 +881,7 @@ export function validateReport(value, input) {
     throw new Error("stories 必须逐条对应全部候选新闻");
   }
 
-  const stories = report.stories.map((storyValue, index) => {
+  const storyDrafts = report.stories.map((storyValue, index) => {
     const story = requireObject(storyValue, `stories[${index}]`);
     const sourceIndex = Number(story.sourceIndex);
     if (sourceIndex !== index) {
@@ -666,6 +922,7 @@ export function validateReport(value, input) {
     }
     const sourceTitle = input.news[index].title;
     const sourceFacts = `${sourceTitle} ${input.news[index].facts}`;
+    const enrichment = enrichNewsItem(input.news[index]);
     const sourceTopics = topicTags(sourceFacts);
     const generatedTopic = topicKey(title);
     if (
@@ -729,7 +986,8 @@ export function validateReport(value, input) {
       .map((ticker) => ticker.toUpperCase())
       .filter(
         (ticker) =>
-          /^[A-Z][A-Z0-9.-]{0,5}$/.test(ticker) &&
+          (/^[A-Z][A-Z0-9.-]{0,7}$/.test(ticker) ||
+            /^\d{6}$/.test(ticker)) &&
           tickerIsSupported(ticker, sourceFacts),
       );
     for (const group of requiredTickerGroups(sourceFacts)) {
@@ -739,6 +997,23 @@ export function validateReport(value, input) {
         );
       }
     }
+    for (const entity of enrichment.entities) {
+      if (!tickers.includes(entity.ticker)) {
+        throw new Error(
+          `stories[${index}] 来源明确出现上市公司，必须填写 ${entity.ticker}`,
+        );
+      }
+    }
+    const signal = validateAgentSignal(story.signal, {
+      index,
+      importance,
+      reportDate: input.reportDate,
+      sourceFacts,
+      enrichment,
+      sectors,
+      tickers,
+      required: input.contractVersion === "codex-daily-v8",
+    });
 
     return {
       sourceIndex,
@@ -750,6 +1025,32 @@ export function validateReport(value, input) {
       interpretation,
       sectors,
       tickers,
+      ...(signal ? { signal } : {}),
+    };
+  });
+  const signalMetadata = storyDrafts.some((story) => story.signal)
+    ? assignSignalMetadata(input.news, storyDrafts)
+    : [];
+  const stories = storyDrafts.map((story, index) => {
+    if (!story.signal) return story;
+    return {
+      ...story,
+      signal: {
+        version: 2,
+        score: signalMetadata[index].score,
+        scoreReason: story.signal.scoreReason,
+        rankByMarket: signalMetadata[index].rankByMarket,
+        roleByMarket: signalMetadata[index].roleByMarket,
+        thesis: story.signal.thesis,
+        baselineKind: story.signal.baselineKind,
+        metrics: story.signal.metrics,
+        reactions: story.signal.reactions,
+        transmission: story.signal.transmission,
+        exposures: story.signal.exposures,
+        horizon: story.signal.horizon,
+        confidence: story.signal.confidence,
+        checkpoint: story.signal.checkpoint,
+      },
     };
   });
 
@@ -927,11 +1228,161 @@ export function validateReport(value, input) {
             `translations.en.stories[${index}].sectors 必须逐项对应中文标签`,
           );
         }
+        const englishSignalValue = englishStory.signal;
+        if (stories[index].signal) {
+          const englishSignal = requireObject(
+            englishSignalValue,
+            `translations.en.stories[${index}].signal`,
+          );
+          if (
+            !Array.isArray(englishSignal.transmission) ||
+            englishSignal.transmission.length !==
+              stories[index].signal.transmission.length ||
+            !Array.isArray(englishSignal.exposures) ||
+            englishSignal.exposures.length !==
+              stories[index].signal.exposures.length
+          ) {
+            throw new Error(
+              `translations.en.stories[${index}].signal 必须对应中文传导和对象`,
+            );
+          }
+          const englishCheckpoint = requireObject(
+            englishSignal.checkpoint,
+            `translations.en.stories[${index}].signal.checkpoint`,
+          );
+          translated.signal = {
+            thesis: completeSentence(
+              englishSignal.thesis,
+              `translations.en.stories[${index}].signal.thesis`,
+              360,
+              20,
+              ".",
+            ),
+            scoreReason: completeSentence(
+              englishSignal.scoreReason,
+              `translations.en.stories[${index}].signal.scoreReason`,
+              240,
+              12,
+              ".",
+            ),
+            transmission: englishSignal.transmission.map(
+              (stepValue, stepIndex) => {
+                const step = requireObject(
+                  stepValue,
+                  `translations.en.stories[${index}].signal.transmission[${stepIndex}]`,
+                );
+                return {
+                  from: requireText(
+                    step.from,
+                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].from`,
+                    90,
+                    2,
+                  ),
+                  to: requireText(
+                    step.to,
+                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].to`,
+                    90,
+                    2,
+                  ),
+                  mechanism: completeSentence(
+                    step.mechanism,
+                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].mechanism`,
+                    280,
+                    10,
+                    ".",
+                  ),
+                };
+              },
+            ),
+            exposures: englishSignal.exposures.map(
+              (exposureValue, exposureIndex) => {
+                const exposure = requireObject(
+                  exposureValue,
+                  `translations.en.stories[${index}].signal.exposures[${exposureIndex}]`,
+                );
+                return {
+                  name: requireText(
+                    exposure.name,
+                    `translations.en.stories[${index}].signal.exposures[${exposureIndex}].name`,
+                    90,
+                    2,
+                  ),
+                  basis: completeSentence(
+                    exposure.basis,
+                    `translations.en.stories[${index}].signal.exposures[${exposureIndex}].basis`,
+                    280,
+                    10,
+                    ".",
+                  ),
+                };
+              },
+            ),
+            checkpoint: {
+              metric: requireText(
+                englishCheckpoint.metric,
+                `translations.en.stories[${index}].signal.checkpoint.metric`,
+                180,
+                4,
+              ),
+              confirmIf: completeSentence(
+                englishCheckpoint.confirmIf,
+                `translations.en.stories[${index}].signal.checkpoint.confirmIf`,
+                320,
+                10,
+                ".",
+              ),
+              invalidateIf: completeSentence(
+                englishCheckpoint.invalidateIf,
+                `translations.en.stories[${index}].signal.checkpoint.invalidateIf`,
+                320,
+                10,
+                ".",
+              ),
+              ...(typeof englishCheckpoint.observation === "string" &&
+              englishCheckpoint.observation.trim()
+                ? {
+                    observation: completeSentence(
+                      englishCheckpoint.observation,
+                      `translations.en.stories[${index}].signal.checkpoint.observation`,
+                      320,
+                      10,
+                      ".",
+                    ),
+                  }
+                : {}),
+            },
+          };
+        } else if (englishSignalValue !== undefined) {
+          throw new Error(
+            `translations.en.stories[${index}].signal 不应为低重要度新闻生成`,
+          );
+        }
+        const translatedSignalText = translated.signal
+          ? [
+              translated.signal.thesis,
+              translated.signal.scoreReason,
+              ...translated.signal.transmission.flatMap((step) => [
+                step.from,
+                step.to,
+                step.mechanism,
+              ]),
+              ...translated.signal.exposures.flatMap((exposure) => [
+                exposure.name,
+                exposure.basis,
+              ]),
+              translated.signal.checkpoint.metric,
+              translated.signal.checkpoint.confirmIf,
+              translated.signal.checkpoint.invalidateIf,
+            ]
+          : [];
         assertNumbersBounded(
           `${input.news[index].title} ${input.news[index].facts}`,
-          [translated.title, translated.summary, translated.interpretation].join(
-            " ",
-          ),
+          [
+            translated.title,
+            translated.summary,
+            translated.interpretation,
+            ...translatedSignalText,
+          ].join(" "),
         );
         return translated;
       }),
@@ -982,6 +1433,7 @@ function buildReportContent(input, report) {
     sectorHeat: input.sectorHeat,
     stories: report.stories.map((story) => {
       const source = input.news[story.sourceIndex];
+      const enrichment = enrichNewsItem(source);
       return {
         id: stableId(source.url),
         regions: source.regions,
@@ -993,12 +1445,14 @@ function buildReportContent(input, report) {
         source: source.url,
         sourceLabel: source.source,
         publishedAt: source.publishedAt,
+        evidenceSource: enrichment.evidenceSource,
         ai: {
           tone: story.tone,
           interpretation: story.interpretation,
           sectors: story.sectors,
           tickers: story.tickers,
         },
+        ...(story.signal ? { signal: story.signal } : {}),
       };
     }),
     translations: report.translations,

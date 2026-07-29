@@ -21,6 +21,21 @@ const input = {
       title: "Federal Open Market Committee decision",
       source: "https://www.federalreserve.gov/",
       sourceLabel: "Federal Reserve",
+      baselineKind: "consensus",
+      metrics: [
+        {
+          id: "policy-rate",
+          label: "政策利率",
+          labelEn: "Policy rate",
+          expected: 4.5,
+          unit: "%",
+          source: {
+            url: "https://www.federalreserve.gov/",
+            label: "Federal Reserve",
+            tier: "first_party",
+          },
+        },
+      ],
     },
   ],
 };
@@ -98,6 +113,8 @@ test("weekly contract validates scenarios, impact labels and event sources", () 
   const stored = JSON.parse(buildContent(checkedInput, checkedReport));
   assert.equal(stored.events[0].id, "fed-fomc-2026-07-29");
   assert.equal(stored.events[0].status, "scheduled");
+  assert.equal(stored.events[0].baselineKind, "consensus");
+  assert.equal(stored.events[0].metrics[0].expected, 4.5);
 });
 
 test("weekly contract rejects investment instructions", () => {

@@ -21,6 +21,7 @@ import type {
   MarketRegion,
   ReportListItem,
   SectorHeatView,
+  ThesisLedgerEntry,
   WeeklyEventTimeline as WeeklyEventTimelineData,
   WeeklyListItem,
   WeeklyReport,
@@ -38,6 +39,7 @@ export interface DailyPageData extends CommonPageData {
   archive: ReportListItem[];
   sectorHeat: SectorHeatView;
   weekEvents: WeeklyEventTimelineData | null;
+  thesisLedger: ThesisLedgerEntry[];
 }
 
 export interface WeeklyPageData extends CommonPageData {
@@ -288,7 +290,7 @@ ${t.disclaimer}`;
         />
       </section>
 
-      <article className="hero">
+      <article className="hero hero-daily">
         <div className="hero-copy">
           <div className="edition-row">
             <span className="edition-label">
@@ -317,7 +319,6 @@ ${t.disclaimer}`;
             />
           </div>
         </div>
-        <OverviewCard overview={marketView.overview} language={language} />
       </article>
 
       <section className="market-section" aria-labelledby="market-title">
@@ -372,20 +373,19 @@ ${t.disclaimer}`;
         <HotspotBoard
           stories={marketStories}
           timeline={data.weekEvents}
+          overview={marketView.overview}
+          thesisLedger={data.thesisLedger ?? []}
           market={data.market}
           language={language}
           labels={{
             title: t.hotspotIndex,
             events: t.weekEvents,
             top: t.hotspotTop,
-            macro: t.hotspotMacro,
-            company: t.hotspotCompany,
-            industry: t.hotspotIndustry,
+            supporting: t.hotspotSupporting,
             source: t.hotspotSource,
             facts: t.signalFacts,
             logic: t.signalLogic,
             impact: t.impact,
-            priority: t.priority,
             proof: t.proof,
             scheduled: t.eventScheduled,
             awaiting: t.eventAwaiting,
@@ -394,6 +394,42 @@ ${t.disclaimer}`;
             postponed: t.eventPostponed,
             result: t.eventResult,
             noData: t.eventNoData,
+            pricingThesis: t.pricingThesis,
+            expectationGap: t.expectationGap,
+            actual: t.actual,
+            expected: t.expected,
+            prior: t.prior,
+            surprise: t.surprise,
+            marketReaction: t.marketReaction,
+            transmission: t.transmission,
+            exposure: t.exposure,
+            checkpoint: t.checkpoint,
+            confirmIf: t.confirmIf,
+            invalidateIf: t.invalidateIf,
+            verifyBy: t.verifyBy,
+            confidence: t.confidence,
+            signalScore: t.signalScore,
+            coreSignal: t.coreSignal,
+            supportingSignal: t.supportingSignal,
+            horizonIntraday: t.horizonIntraday,
+            horizonShort: t.horizonShort,
+            horizonMedium: t.horizonMedium,
+            confidenceLow: t.confidenceLow,
+            confidenceMedium: t.confidenceMedium,
+            confidenceHigh: t.confidenceHigh,
+            sourceFirstParty: t.sourceFirstParty,
+            sourceWire: t.sourceWire,
+            sourceSecondary: t.sourceSecondary,
+            thesisLedger: t.thesisLedger,
+            ledgerEmpty: t.ledgerEmpty,
+            statusPending: t.statusPending,
+            statusConfirmed: t.statusConfirmed,
+            statusPartial: t.statusPartial,
+            statusInvalidated: t.statusInvalidated,
+            statusInconclusive: t.statusInconclusive,
+            observation: t.observation,
+            favorable: t.favorable,
+            adverse: t.adverse,
           }}
         />
         {marketStories.length === 0 && (

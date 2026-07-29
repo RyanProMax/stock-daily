@@ -21,6 +21,7 @@ export {
   parseFeed,
   relevanceScore,
   selectNews,
+  shouldHydrateFacts,
   usefulFacts,
 } from "./news-pipeline.mjs";
 
@@ -85,8 +86,8 @@ export async function collectDailyInput({
   ]);
   validateMarketDates(marketPack.markets, sectorHeat);
   return {
-    schemaVersion: 7,
-    contractVersion: "codex-daily-v7",
+    schemaVersion: 8,
+    contractVersion: "codex-daily-v8",
     runId: randomUUID(),
     reportDate,
     updateKind,

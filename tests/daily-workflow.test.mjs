@@ -7,6 +7,7 @@ import {
   parseBeaReleases,
   parseFeed,
   selectNews,
+  shouldHydrateFacts,
   usefulFacts,
 } from "../scripts/daily-collect.mjs";
 import { normalizeDailyMarketPack } from "../scripts/market-data.mjs";
@@ -343,6 +344,34 @@ function reportWith(stories, overrides = {}) {
             (_sector, sectorIndex) =>
               `Sector ${storyIndex + 1}.${sectorIndex + 1}`,
           ),
+          ...(story.signal
+            ? {
+                signal: {
+                  thesis:
+                    "The verified development changes the pricing baseline for the affected assets.",
+                  scoreReason:
+                    "Source quality and direct transmission support this ranking.",
+                  transmission: story.signal.transmission.map(() => ({
+                    from: "Verified source development",
+                    to: "Affected market exposure",
+                    mechanism:
+                      "The change transmits through demand, cash flow, financing cost, or valuation.",
+                  })),
+                  exposures: story.signal.exposures.map((exposure) => ({
+                    name: exposure.name,
+                    basis:
+                      "The exposure is directly linked to the verified source development.",
+                  })),
+                  checkpoint: {
+                    metric: "Follow-up source evidence",
+                    confirmIf:
+                      "Later verified evidence remains consistent with the pricing thesis.",
+                    invalidateIf:
+                      "Later verified evidence contradicts the pricing thesis.",
+                  },
+                },
+              }
+            : {}),
         })),
       },
     },
@@ -425,12 +454,95 @@ const validStories = [
   },
 ];
 
+const groundedSignalStarts = [
+  "Apple raised its guidance",
+  "Treasury yield inflation",
+  "China industrial output",
+  "China consumer demand",
+  "Federal Reserve policy outlook",
+  "semiconductor demand improved",
+];
+
+const v8Stories = validStories.map((story, index) => ({
+  ...story,
+  tickers: index === 0 ? ["AAPL"] : story.tickers,
+  signal: {
+    thesis: `${groundedSignalStarts[index]} changes the pricing baseline through the verified demand, cash-flow, financing-cost, or valuation channel.`,
+    scoreReason:
+      "The source is directly connected to a concrete pricing transmission mechanism.",
+    transmission: [
+      {
+        order: 1,
+        from: groundedSignalStarts[index],
+        to: story.sectors[0],
+        mechanism:
+          "The verified development changes demand, cash-flow, financing-cost, or valuation expectations.",
+        conditional: index === 1,
+      },
+    ],
+    exposures:
+      index === 0
+        ? [
+            {
+              name: "Apple",
+              ticker: "AAPL",
+              exchange: "NASDAQ",
+              direction: "positive",
+              basis:
+                "Apple guidance supports the stated revenue and cash-flow outlook.",
+            },
+          ]
+        : [
+            {
+              name: story.sectors[0],
+              direction: story.tone,
+              basis:
+                "The exposure follows the verified demand, financing-cost, or valuation channel.",
+            },
+          ],
+    horizon: "1-5d",
+    confidence: index === 4 ? "high" : "medium",
+    checkpoint: {
+      metric: `${groundedSignalStarts[index]} follow-up`,
+      dueInDays: 2,
+      confirmIf:
+        "Later verified source evidence remains consistent with the stated transmission.",
+      invalidateIf:
+        "Later verified source evidence contradicts the stated transmission.",
+    },
+  },
+}));
+
 test("local Codex report contract accepts bounded facts and filters tickers", () => {
   const checkedInput = validateInput(input);
   const checkedReport = validateReport(reportWith(validStories), checkedInput);
 
   assert.deepEqual(checkedReport.stories[0].tickers, ["AAPL"]);
   assert.equal(checkedReport.stories[1].tone, "negative");
+});
+
+test("v8 pricing contract requires structured signals and ranks each market", () => {
+  const v8Input = structuredClone(input);
+  v8Input.schemaVersion = 8;
+  v8Input.contractVersion = "codex-daily-v8";
+  const checkedInput = validateInput(v8Input);
+  const checkedReport = validateReport(reportWith(v8Stories), checkedInput);
+
+  assert.equal(checkedReport.stories[0].signal.version, 2);
+  assert.deepEqual(checkedReport.stories[0].tickers, ["AAPL"]);
+  assert.equal(checkedReport.stories[0].signal.roleByMarket.US, "core");
+  assert.equal(checkedReport.stories[2].signal.roleByMarket.CN, "core");
+  assert.equal(
+    checkedReport.stories[4].signal.checkpoint.dueAt,
+    "2026-07-27T13:00:00.000Z",
+  );
+
+  const missingSignal = structuredClone(v8Stories);
+  delete missingSignal[0].signal;
+  assert.throws(
+    () => validateReport(reportWith(missingSignal), checkedInput),
+    /stories\[0\]\.signal 必须是对象/,
+  );
 });
 
 test("daily policy refreshes three Beijing checkpoints and deduplicates retries", () => {
@@ -709,6 +821,14 @@ test("news selection removes personal-finance and stock-pick noise", () => {
       facts: "市场情报团队给出多种情景及其主观概率。",
     },
     {
+      title: "城堡证券预计美联储将加息",
+      url: "https://example.com/rate-opinion",
+      source: "Example Wire",
+      publishedAt: "2026-07-24T22:25:00.000Z",
+      regions: ["US"],
+      facts: "该机构给出了主观利率预测。",
+    },
+    {
       title:
         "Fed meeting live: Federal Reserve expected to hold rates steady",
       url: "https://example.com/fed-preview",
@@ -716,6 +836,26 @@ test("news selection removes personal-finance and stock-pick noise", () => {
       publishedAt: "2026-07-24T22:30:00.000Z",
       regions: ["US"],
       facts: "The policy decision has not yet been released.",
+    },
+    {
+      title:
+        "Salesforce’s Agentforce Bet Made It the Dow’s Worst Performer. Is the Market Overreacting?",
+      url: "https://example.com/analyst-rating",
+      source: "Opinion Publisher",
+      publishedAt: "2026-07-24T22:40:00.000Z",
+      regions: ["US"],
+      facts:
+        "An analyst reiterated a Buy rating and price target while arguing that the market is overreacting.",
+    },
+    {
+      title:
+        "Semiconductor stock charts just formed this bearish shape that signals more potential losses",
+      url: "https://example.com/technical-analysis",
+      source: "Opinion Publisher",
+      publishedAt: "2026-07-24T22:50:00.000Z",
+      regions: ["US"],
+      facts:
+        "The chart pattern is presented as a forecast for further semiconductor stock losses.",
     },
   ]);
 
@@ -810,6 +950,30 @@ test("Chinese titles remain distinct and boilerplate facts are rejected", () => 
       "A股风格转换推动红利板块上涨",
     ),
     "",
+  );
+});
+
+test("official and truncated summaries are hydrated from the source page", () => {
+  assert.equal(
+    shouldHydrateFacts(
+      { _tier: "official" },
+      "国家统计局公布规模以上工业企业利润数据，具体行业表现已经披露。",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldHydrateFacts(
+      { _tier: "publisher" },
+      "国家统计局公布规模以上工业企业利润数据，具体行业表现与上月相比出现明显变化...",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldHydrateFacts(
+      { _tier: "publisher" },
+      "企业公布季度营收、利润率和全年指引，实际结果与市场一致预期均已列明，并解释了主要业务分部表现、下一季度经营假设、管理层给出的成本变化原因以及相关产品的区域需求差异。",
+    ),
+    false,
   );
 });
 

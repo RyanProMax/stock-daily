@@ -119,8 +119,8 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           neutralCount: [...document.querySelectorAll('.impact-badge')]
             .filter(element => element.textContent.trim() === '中性').length,
           hasSsrHtml: Boolean(document.querySelector('[data-render="ssr"]')),
-          overviewBackground: getComputedStyle(
-            document.querySelector('.thesis-card')
+          pricingBackground: getComputedStyle(
+            document.querySelector('.pricing-thesis')
           ).backgroundImage,
           wrappedShortLabels: [...document.querySelectorAll(
             '.impact-badge, .hotspot-title i, .hotspot-impact i, ' +
@@ -132,7 +132,7 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     )
 
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-top.png"))
-    page.locator(".thesis-card").first.scroll_into_view_if_needed()
+    page.locator(".pricing-thesis").first.scroll_into_view_if_needed()
     page.wait_for_timeout(250)
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-ai.png"))
     page.locator(".hotspot-board").first.scroll_into_view_if_needed()
@@ -243,7 +243,9 @@ with sync_playwright() as playwright:
     )
     result["english"] = {
         "lang": english.locator("html").get_attribute("lang"),
-        "hasOverview": english.get_by_text("AI Overview", exact=True).count() > 0,
+        "hasOverview": english.get_by_text(
+            "Today's Pricing Thesis", exact=True
+        ).count() > 0,
         "marketCount": english.locator(".market-item").count(),
         "marketUpdate": english.locator(".market-freshness time").inner_text(),
         "marketAsOf": english.locator(
@@ -375,7 +377,7 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["legacyPendingCount"] == 0, result
     assert audit["layout"]["legacyUnclearCount"] == 0, result
     assert audit["layout"]["hasSsrHtml"], result
-    assert audit["layout"]["overviewBackground"].count("radial-gradient") >= 4, result
+    assert audit["layout"]["pricingBackground"] != "none", result
     assert audit["layout"]["wrappedShortLabels"] == [], result
     assert audit["consoleErrors"] == [], result
     assert audit["httpErrors"] == [], result

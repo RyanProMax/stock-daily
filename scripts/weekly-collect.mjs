@@ -150,6 +150,7 @@ async function fetchFedEvents(startDate, endDate) {
         title: "Federal Open Market Committee decision",
         source,
         sourceLabel: "Federal Reserve",
+        baselineKind: "policy",
       });
     }
   }
@@ -181,6 +182,7 @@ async function fetchBeaEvents(startDate, endDate) {
           title,
           source,
           sourceLabel: "U.S. Bureau of Economic Analysis",
+          baselineKind: "none",
         });
       }
     }
@@ -202,6 +204,7 @@ function parseIcs(ics, startDate, endDate) {
       title: decodeHtml(title.replace(/\\,/g, ",")),
       source: "https://www.bls.gov/schedule/news_release/bls.ics",
       sourceLabel: "U.S. Bureau of Labor Statistics",
+      baselineKind: "none",
     });
   }
   return events;

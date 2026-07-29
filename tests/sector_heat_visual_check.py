@@ -186,7 +186,7 @@ for audit in (
         assert audit["streakCount"] >= 1, result
     else:
         assert audit["streakCount"] == 0, result
-        assert "No sector has stayed hot" in audit["streakText"], result
+        assert "No sector has made a large move" in audit["streakText"], result
     assert audit["consoleErrors"] == [], result
     assert audit["httpErrors"] == [], result
     assert "Noto Sans SC Variable" in audit["heatFont"], result
