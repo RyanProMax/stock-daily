@@ -10,6 +10,7 @@ interface LocalizedStory extends Story {
 interface Props {
   story: LocalizedStory;
   number: number;
+  anchorId: string;
   language: Language;
   labels: {
     aiRead: string;
@@ -22,11 +23,12 @@ interface Props {
 export default function DailyStory({
   story,
   number,
+  anchorId,
   language,
   labels,
 }: Props) {
   return (
-    <article className="signal-row">
+    <article className="signal-row" id={anchorId}>
       <div className="signal-body">
         <div className="signal-meta">
           <span className="signal-number">

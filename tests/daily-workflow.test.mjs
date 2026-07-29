@@ -630,6 +630,34 @@ test("news selection removes personal-finance and stock-pick noise", () => {
       publishedAt: "2026-07-24T22:00:00.000Z",
       regions: ["US"],
     },
+    {
+      title:
+        "葛卫东：“我是相信没结束的，谁停下，接下来的就会遭到降维打击”",
+      url: "https://example.com/investor-commentary",
+      source: "Example Wire",
+      publishedAt: "2026-07-24T22:10:00.000Z",
+      regions: ["CN"],
+      facts:
+        "知名私募投资人在朋友圈发文，表达对人工智能产业与市场的个人观点。",
+    },
+    {
+      title:
+        "摩根大通推演美联储决议 认为按兵不动并释放鸽派信号对股市最为有利",
+      url: "https://example.com/bank-scenario",
+      source: "Example Wire",
+      publishedAt: "2026-07-24T22:20:00.000Z",
+      regions: ["US"],
+      facts: "市场情报团队给出多种情景及其主观概率。",
+    },
+    {
+      title:
+        "Fed meeting live: Federal Reserve expected to hold rates steady",
+      url: "https://example.com/fed-preview",
+      source: "Example Wire",
+      publishedAt: "2026-07-24T22:30:00.000Z",
+      regions: ["US"],
+      facts: "The policy decision has not yet been released.",
+    },
   ]);
 
   assert.deepEqual(

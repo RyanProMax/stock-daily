@@ -249,7 +249,7 @@ test("weekly events turn green only after an official result is verified", async
   );
 });
 
-test("daily SSR places the weekly event grid above the report hero", async () => {
+test("daily SSR places weekly events above the hero and groups every hotspot", async () => {
   const [{ default: Document }, { buildWeeklyEventTimeline }] =
     await Promise.all([
       vite.ssrLoadModule("/src/App.tsx"),
@@ -308,6 +308,30 @@ test("daily SSR places the weekly event grid above the report hero", async () =>
     document.querySelector("[data-event-result]").textContent,
     /美联储维持政策利率不变/,
   );
+
+  const marketStories = report.stories.filter((story) =>
+    story.regions.includes("US"),
+  );
+  assert.ok(document.querySelector(".hotspot-board"));
+  assert.equal(
+    document.querySelectorAll(".hotspot-group li").length,
+    marketStories.length,
+  );
+  assert.equal(
+    document.querySelectorAll(".hotspot-group-top li").length,
+    Math.min(3, marketStories.length),
+  );
+  for (const [index, story] of marketStories.entries()) {
+    const hotspotLink = document.querySelector(
+      `.hotspot-title[href="#story-${story.id}"]`,
+    );
+    assert.ok(hotspotLink);
+    assert.equal(
+      hotspotLink.closest("li").querySelector(".hotspot-number").textContent,
+      String(index + 1).padStart(2, "0"),
+    );
+    assert.ok(document.querySelector(`#story-${story.id}`));
+  }
 
   const malformed = structuredClone(timeline);
   malformed.events[1].displayStatus = "realized";

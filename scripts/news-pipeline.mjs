@@ -891,6 +891,25 @@ export function relevanceScore(item) {
   );
 }
 
+export function isOpinionNoise(item) {
+  const title = plainText(item.title).toLocaleLowerCase();
+  const facts = plainText(item.facts ?? "").toLocaleLowerCase();
+  const chineseOpinionTitle =
+    /(?:投资人|私募|机构|投行|券商|分析师|策略师|市场情报团队|研究团队|摩根大通|高盛|花旗|美银|瑞银|野村).{0,30}(?:认为|表示|称|发声|观点|看好|建议|预计|推演|情景|预测|研判)|(?:对股市|对a股|对美股).{0,16}(?:最为有利|最佳结果|最糟糕结果)/u;
+  const englishOpinionTitle =
+    /\b(?:analyst|strategist|portfolio manager|chief investment officer|jpmorgan|goldman sachs|citigroup|bank of america|ubs|nomura)\b.{0,48}\b(?:says?|sees?|expects?|predicts?|forecasts?|recommends?|scenario)\b/u;
+  const pendingEventPreviewTitle =
+    /^(?:fed meeting live|federal reserve live|美联储(?:会议|决议)(?:直播|前瞻))|(?:\bfed(?:eral reserve)?\b|美联储).{0,42}(?:\bexpected to (?:hold|cut|raise)\b|预计(?:按兵不动|降息|加息))/u;
+  const personalCommentaryFacts =
+    /(?:知名)?(?:私募)?投资人.{0,18}(?:密集发声|朋友圈发文|个人观点)|(?:朋友圈|社交平台).{0,12}(?:发文|表示).{0,28}(?:产业|市场|股市|a股|美股)/u;
+  return (
+    chineseOpinionTitle.test(title) ||
+    englishOpinionTitle.test(title) ||
+    pendingEventPreviewTitle.test(title) ||
+    personalCommentaryFacts.test(facts.slice(0, 360))
+  );
+}
+
 export function topicKey(value) {
   const normalized = plainText(value).toLocaleLowerCase();
   if (
@@ -1045,6 +1064,7 @@ export function selectNews(
   } = {},
 ) {
   const ranked = deduplicateNews(candidates)
+    .filter((item) => !isOpinionNoise(item))
     .map((item) => ({ ...item, _score: relevanceScore(item) }))
     .filter((item) => item._score >= minimumScore)
     .sort(

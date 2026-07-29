@@ -1584,6 +1584,224 @@ p {
   border-top: 1px solid var(--line-strong);
 }
 
+.hotspot-board {
+  overflow: hidden;
+  margin-bottom: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+}
+
+.hotspot-board-heading {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(280px, 1fr);
+  align-items: end;
+  padding: 22px 24px 20px 30px;
+  gap: 28px;
+  border-left: 5px solid var(--coral);
+}
+
+.hotspot-board-heading h3 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: 31px;
+  font-weight: 610;
+  letter-spacing: -0.018em;
+  line-height: 1.08;
+}
+
+.hotspot-board-heading > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hotspot-groups {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--line);
+}
+
+.hotspot-group {
+  min-width: 0;
+  background: var(--surface-solid);
+}
+
+.hotspot-group > header {
+  display: flex;
+  align-items: baseline;
+  min-height: 42px;
+  padding: 9px 18px 8px 24px;
+  gap: 10px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--brand-soft) 72%, var(--surface-solid));
+  font-family: var(--sans);
+}
+
+.hotspot-group-top > header {
+  color: #fffaf2;
+  background: var(--coral);
+}
+
+:root[data-theme="dark"] .hotspot-group-top > header {
+  color: #101816;
+}
+
+.hotspot-group > header strong {
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+}
+
+.hotspot-group > header span {
+  opacity: 0.74;
+  font-family: var(--display);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hotspot-group ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hotspot-group li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(92px, 152px);
+  align-items: center;
+  min-height: 76px;
+  padding: 10px 20px 10px 24px;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hotspot-group li:last-child {
+  border-bottom: 0;
+}
+
+.hotspot-number {
+  align-self: start;
+  padding-top: 8px;
+  color: var(--coral);
+  font-family: var(--display);
+  font-size: 17px;
+  font-style: italic;
+  font-weight: 620;
+}
+
+.hotspot-title {
+  display: grid;
+  min-width: 0;
+  padding: 5px 0;
+  gap: 7px;
+}
+
+.hotspot-title:hover strong {
+  color: var(--coral);
+}
+
+.hotspot-title strong {
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 590;
+  letter-spacing: -0.008em;
+  line-height: 1.42;
+  transition: color 140ms ease;
+}
+
+.hotspot-title > span {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--sans);
+}
+
+.hotspot-title i {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 620;
+}
+
+.hotspot-title .hotspot-tone {
+  min-height: 21px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.hotspot-title .hotspot-tone-positive {
+  color: var(--positive);
+  border-color: color-mix(in srgb, var(--positive) 38%, var(--line));
+}
+
+.hotspot-title .hotspot-tone-negative {
+  color: var(--negative);
+  border-color: color-mix(in srgb, var(--negative) 38%, var(--line));
+}
+
+.hotspot-title .hotspot-tone-mixed {
+  color: var(--coral);
+  border-color: color-mix(in srgb, var(--coral) 38%, var(--line));
+}
+
+.hotspot-source {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 6px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 560;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.hotspot-source:hover {
+  color: var(--coral);
+}
+
+.hotspot-source span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hotspot-source svg {
+  width: 13px;
+  height: 13px;
+}
+
+.signal-analysis-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 4px 12px 76px;
+  gap: 18px;
+  font-family: var(--sans);
+}
+
+.signal-analysis-heading span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+}
+
+.signal-analysis-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .empty-market-news {
   margin: 0;
   padding: 28px 0;
@@ -1599,6 +1817,7 @@ p {
   grid-template-columns: minmax(0, 1fr);
   padding: 34px 0 36px 76px;
   border-bottom: 1px solid var(--line);
+  scroll-margin-top: 110px;
 }
 
 .signal-body {
@@ -2503,6 +2722,66 @@ footer {
 
   .signal-row {
     padding: 29px 0;
+  }
+
+  .hotspot-board {
+    margin-bottom: 28px;
+    border-radius: 18px;
+  }
+
+  .hotspot-board-heading {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px 17px 17px 18px;
+    gap: 9px;
+    border-left-width: 4px;
+  }
+
+  .hotspot-board-heading h3 {
+    font-size: 27px;
+  }
+
+  .hotspot-board-heading > p {
+    font-size: 12px;
+  }
+
+  .hotspot-group > header {
+    min-height: 39px;
+    padding: 8px 14px;
+  }
+
+  .hotspot-group li {
+    grid-template-columns: 34px minmax(0, 1fr);
+    min-height: 88px;
+    padding: 12px 14px;
+    gap: 7px 9px;
+  }
+
+  .hotspot-number {
+    padding-top: 5px;
+    font-size: 15px;
+  }
+
+  .hotspot-title {
+    gap: 5px;
+  }
+
+  .hotspot-title strong {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .hotspot-source {
+    grid-column: 2;
+    justify-content: flex-start;
+    margin-top: -4px;
+    text-align: left;
+  }
+
+  .signal-analysis-heading {
+    align-items: flex-start;
+    padding: 0 0 11px;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .signal-number {

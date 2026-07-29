@@ -77,6 +77,12 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           marketCount: document.querySelectorAll('.market-item').length,
           heatCount: document.querySelectorAll('.heat-item').length,
           storyCount: document.querySelectorAll('.signal-row').length,
+          hotspotCount: document.querySelectorAll('.hotspot-group li').length,
+          hotspotGroupCount: document.querySelectorAll('.hotspot-group').length,
+          hotspotOverflowCount: [...document.querySelectorAll(
+            '.hotspot-group li, .hotspot-source'
+          )].filter(element => element.scrollWidth > element.clientWidth + 1)
+            .length,
           marketUpdateCount: document.querySelectorAll(
             '.market-freshness time'
           ).length,

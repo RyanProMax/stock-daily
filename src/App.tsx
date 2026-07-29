@@ -3,6 +3,7 @@ import CopyButton from "./components/CopyButton";
 import DailyStory from "./components/DailyStory";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
+import HotspotBoard from "./components/HotspotBoard";
 import MarketHeatHistory from "./components/MarketHeatHistory";
 import WeeklyEventTimeline from "./components/WeeklyEventTimeline";
 import {
@@ -412,11 +413,36 @@ ${t.disclaimer}`;
           </div>
           <p>{t.signalsHint}</p>
         </div>
+        <HotspotBoard
+          stories={marketStories}
+          language={language}
+          labels={{
+            title: t.hotspotIndex,
+            eyebrow: t.hotspotIndexEyebrow,
+            hint: t.hotspotIndexHint,
+            top: t.hotspotTop,
+            topEyebrow: t.hotspotTopEyebrow,
+            macro: t.hotspotMacro,
+            macroEyebrow: t.hotspotMacroEyebrow,
+            company: t.hotspotCompany,
+            companyEyebrow: t.hotspotCompanyEyebrow,
+            industry: t.hotspotIndustry,
+            industryEyebrow: t.hotspotIndustryEyebrow,
+            source: t.hotspotSource,
+          }}
+        />
+        {marketStories.length > 0 && (
+          <div className="signal-analysis-heading">
+            <span>{t.signalAnalysis}</span>
+            <p>{t.signalAnalysisHint}</p>
+          </div>
+        )}
         <div className="signal-list">
           {visibleStories.map((story, index) => (
             <DailyStory
               story={story}
               number={index + 1}
+              anchorId={`story-${story.id}`}
               language={language}
               labels={{
                 aiRead: t.aiRead,
@@ -447,6 +473,7 @@ ${t.disclaimer}`;
                 <DailyStory
                   story={story}
                   number={index + 4}
+                  anchorId={`story-${story.id}`}
                   language={language}
                   labels={{
                     aiRead: t.aiRead,
