@@ -1,18 +1,15 @@
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import CopyButton from "./components/CopyButton";
-import DailyStory from "./components/DailyStory";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import HotspotBoard from "./components/HotspotBoard";
 import MarketHeatHistory from "./components/MarketHeatHistory";
-import WeeklyEventTimeline from "./components/WeeklyEventTimeline";
 import {
   copy,
   formatDate,
   formatMarketAsOfLabel,
   formatMarketUpdateTime,
   formatTemplate,
-  formatWeekday,
   localizeDailyReport,
   localizeWeeklyReport,
   marketTrendLabel,
@@ -86,7 +83,6 @@ function AppHeader({ data }: { data: PageData }) {
           </span>
           <span className="brand-copy">
             <strong>Stock Daily</strong>
-            <span>{t.tagline}</span>
           </span>
         </a>
         <div className="header-navigation">
@@ -154,7 +150,6 @@ function AppFooter({ language }: { language: Language }) {
       <div className="footer-inner">
         <p>
           <strong>Stock Daily</strong>
-          <span>{t.footerLine}</span>
         </p>
         <nav aria-label={language === "zh" ? "页脚导航" : "Footer"}>
           <a href="/api/health" target="_blank" rel="noreferrer">
@@ -183,9 +178,7 @@ function OverviewCard({
       aria-label={t.agentOverview}
     >
       <div className="thesis-heading">
-        <span className="eyebrow">
-          {weekly ? t.agentOverview : t.agentOverviewEyebrow}
-        </span>
+        {weekly && <span className="eyebrow">{t.agentOverview}</span>}
         <span className={`impact-badge impact-badge-${overview.tone}`}>
           {toneLabel(overview.tone, language)}
         </span>
@@ -261,8 +254,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const otherEditions = displayArchive
     .filter((item) => item.reportDate !== report.reportDate)
     .slice(0, 6);
-  const visibleStories = marketStories.slice(0, 3);
-  const remainingStories = marketStories.slice(3);
   const marketAsOf =
     report.marketAsOf?.[data.market] ??
     report.sectorHeat.find((sector) => sector.market === data.market)?.asOf;
@@ -297,25 +288,6 @@ ${t.disclaimer}`;
         />
       </section>
 
-      {data.weekEvents && (
-        <WeeklyEventTimeline
-          timeline={data.weekEvents}
-          language={language}
-          labels={{
-            title: t.weekEvents,
-            eyebrow: t.weekEventsEyebrow,
-            hint: t.weekEventsHint,
-            scheduled: t.eventScheduled,
-            awaiting: t.eventAwaiting,
-            realized: t.eventRealized,
-            cancelled: t.eventCancelled,
-            postponed: t.eventPostponed,
-            result: t.eventResult,
-            noData: t.eventNoData,
-          }}
-        />
-      )}
-
       <article className="hero">
         <div className="hero-copy">
           <div className="edition-row">
@@ -329,9 +301,6 @@ ${t.disclaimer}`;
             </span>
             {report.isSample && <span className="sample-badge">{t.sample}</span>}
           </div>
-          <p className="kicker">
-            {formatWeekday(report.reportDate, language)} · {t.kicker}
-          </p>
           <h1>{marketView.headline}</h1>
           <p className="hero-summary">{marketView.summary}</p>
           <div className="publish-row">
@@ -355,13 +324,11 @@ ${t.disclaimer}`;
         <div className="section-intro">
           <span className="section-index">01</span>
           <div>
-            <span className="eyebrow">{t.marketEyebrow}</span>
             <h2 id="market-title">
               {t.market}
               <small>{data.market}</small>
             </h2>
           </div>
-          <p>{t.marketHint}</p>
         </div>
         <MarketHeatHistory
           view={data.sectorHeat}
@@ -401,91 +368,36 @@ ${t.disclaimer}`;
         </div>
       </section>
 
-      <section id="signals" className="signals-section">
-        <div className="section-intro">
-          <span className="section-index">02</span>
-          <div>
-            <span className="eyebrow">{t.signalsEyebrow}</span>
-            <h2>
-              {t.signals}
-              <small>{data.market}</small>
-            </h2>
-          </div>
-          <p>{t.signalsHint}</p>
-        </div>
+      <section className="signals-section">
         <HotspotBoard
           stories={marketStories}
+          timeline={data.weekEvents}
+          market={data.market}
           language={language}
           labels={{
             title: t.hotspotIndex,
-            eyebrow: t.hotspotIndexEyebrow,
-            hint: t.hotspotIndexHint,
+            events: t.weekEvents,
             top: t.hotspotTop,
-            topEyebrow: t.hotspotTopEyebrow,
             macro: t.hotspotMacro,
-            macroEyebrow: t.hotspotMacroEyebrow,
             company: t.hotspotCompany,
-            companyEyebrow: t.hotspotCompanyEyebrow,
             industry: t.hotspotIndustry,
-            industryEyebrow: t.hotspotIndustryEyebrow,
             source: t.hotspotSource,
+            facts: t.signalFacts,
+            logic: t.signalLogic,
+            impact: t.impact,
+            priority: t.priority,
+            proof: t.proof,
+            scheduled: t.eventScheduled,
+            awaiting: t.eventAwaiting,
+            realized: t.eventRealized,
+            cancelled: t.eventCancelled,
+            postponed: t.eventPostponed,
+            result: t.eventResult,
+            noData: t.eventNoData,
           }}
         />
-        {marketStories.length > 0 && (
-          <div className="signal-analysis-heading">
-            <span>{t.signalAnalysis}</span>
-            <p>{t.signalAnalysisHint}</p>
-          </div>
-        )}
-        <div className="signal-list">
-          {visibleStories.map((story, index) => (
-            <DailyStory
-              story={story}
-              number={index + 1}
-              anchorId={`story-${story.id}`}
-              language={language}
-              labels={{
-                aiRead: t.aiRead,
-                impact: t.impact,
-                priority: t.priority,
-                proof: t.proof,
-              }}
-              key={story.id}
-            />
-          ))}
-        </div>
         {marketStories.length === 0 && (
           <p className="empty-market-news">{t.noMarketNews}</p>
-        )}
-        {remainingStories.length > 0 && (
-          <details className="remaining-signals">
-            <summary>
-              <span className="remaining-open-label">
-                {formatTemplate(t.remaining, {
-                  count: remainingStories.length,
-                })}
-              </span>
-              <span className="remaining-close-label">{t.collapse}</span>
-              <ChevronDown aria-hidden="true" />
-            </summary>
-            <div className="signal-list">
-              {remainingStories.map((story, index) => (
-                <DailyStory
-                  story={story}
-                  number={index + 4}
-                  anchorId={`story-${story.id}`}
-                  language={language}
-                  labels={{
-                    aiRead: t.aiRead,
-                    impact: t.impact,
-                    priority: t.priority,
-                    proof: t.proof,
-                  }}
-                  key={story.id}
-                />
-              ))}
-            </div>
-          </details>
         )}
       </section>
 
@@ -493,10 +405,8 @@ ${t.disclaimer}`;
         <div className="section-intro">
           <span className="section-index">03</span>
           <div>
-            <span className="eyebrow">{t.previousEyebrow}</span>
             <h2>{t.previous}</h2>
           </div>
-          <p>{t.previousHint}</p>
         </div>
         <div className="archive-list">
           {otherEditions.map((edition) => (

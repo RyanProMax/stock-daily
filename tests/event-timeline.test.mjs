@@ -249,7 +249,7 @@ test("weekly events turn green only after an official result is verified", async
   );
 });
 
-test("daily SSR places weekly events above the hero and groups every hotspot", async () => {
+test("daily SSR merges weekly events and analysis into the hotspot board", async () => {
   const [{ default: Document }, { buildWeeklyEventTimeline }] =
     await Promise.all([
       vite.ssrLoadModule("/src/App.tsx"),
@@ -283,12 +283,25 @@ test("daily SSR places weekly events above the hero and groups every hotspot", a
   const { document, Node } = dom.window;
   const eventSection = document.querySelector("[data-weekly-events]");
   const hero = document.querySelector(".hero");
+  const hotspotBoard = document.querySelector(".hotspot-board");
+  const topGroup = document.querySelector(".hotspot-group-top");
 
   assert.ok(eventSection);
   assert.ok(hero);
+  assert.ok(hotspotBoard);
+  assert.ok(topGroup);
+  assert.ok(hotspotBoard.contains(eventSection));
   assert.ok(
-    eventSection.compareDocumentPosition(hero) &
+    hero.compareDocumentPosition(hotspotBoard) &
       Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  assert.ok(
+    eventSection.compareDocumentPosition(topGroup) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  assert.doesNotMatch(
+    document.body.textContent,
+    /按公布日跟踪|先扫热点版图|全期热点按优先级|影响拆解/,
   );
   assert.equal(
     document.querySelectorAll('[data-event-state="realized"]').length,
@@ -312,7 +325,6 @@ test("daily SSR places weekly events above the hero and groups every hotspot", a
   const marketStories = report.stories.filter((story) =>
     story.regions.includes("US"),
   );
-  assert.ok(document.querySelector(".hotspot-board"));
   assert.equal(
     document.querySelectorAll(".hotspot-group li").length,
     marketStories.length,
@@ -322,16 +334,19 @@ test("daily SSR places weekly events above the hero and groups every hotspot", a
     Math.min(3, marketStories.length),
   );
   for (const [index, story] of marketStories.entries()) {
-    const hotspotLink = document.querySelector(
-      `.hotspot-title[href="#story-${story.id}"]`,
-    );
-    assert.ok(hotspotLink);
+    const analysis = document.querySelector(`#story-${story.id}`);
+    const storyDetails = analysis?.closest(".hotspot-story");
+    assert.ok(analysis);
+    assert.ok(storyDetails);
     assert.equal(
-      hotspotLink.closest("li").querySelector(".hotspot-number").textContent,
+      storyDetails.querySelector(".hotspot-number").textContent,
       String(index + 1).padStart(2, "0"),
     );
-    assert.ok(document.querySelector(`#story-${story.id}`));
+    assert.ok(storyDetails.querySelector(".hotspot-analysis-copy"));
+    assert.ok(storyDetails.querySelector(".hotspot-impact"));
+    assert.equal(storyDetails.open, index === 0);
   }
+  assert.equal(document.querySelectorAll(".signal-row").length, 0);
 
   const malformed = structuredClone(timeline);
   malformed.events[1].displayStatus = "realized";

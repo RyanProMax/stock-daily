@@ -19,7 +19,6 @@ AUDIT_LABEL = os.environ.get("STYLE_AUDIT_LABEL", "audit")
 SELECTORS = {
     "brand": ".brand-copy strong",
     "date": ".date-select-trigger",
-    "hero_kicker": ".kicker",
     "hero_title": ".hero h1",
     "hero_summary": ".hero-summary",
     "overview_title": ".thesis-card h2",
@@ -27,12 +26,12 @@ SELECTORS = {
     "section_title": ".section-intro h2",
     "market_name": ".market-item span",
     "market_value": ".market-item strong",
-    "story_meta": ".signal-meta",
-    "story_title": ".signal-row h3",
-    "story_body": ".signal-row > .signal-body > p",
-    "ai_label": ".ai-insight-heading",
-    "ai_body": ".ai-insight > p",
-    "impact_tag": ".impact-tags .sector-tag",
+    "story_meta": ".hotspot-title > span",
+    "story_title": ".hotspot-title > strong",
+    "story_body": ".hotspot-analysis-copy > div:first-child p",
+    "ai_label": ".hotspot-analysis-copy > div:last-child > strong",
+    "ai_body": ".hotspot-analysis-copy > div:last-child p",
+    "impact_tag": ".hotspot-impact .sector-tag",
 }
 
 

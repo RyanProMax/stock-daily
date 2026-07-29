@@ -76,11 +76,11 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           fontsLoaded: document.fonts.status,
           marketCount: document.querySelectorAll('.market-item').length,
           heatCount: document.querySelectorAll('.heat-item').length,
-          storyCount: document.querySelectorAll('.signal-row').length,
+          storyCount: document.querySelectorAll('.hotspot-story').length,
           hotspotCount: document.querySelectorAll('.hotspot-group li').length,
           hotspotGroupCount: document.querySelectorAll('.hotspot-group').length,
           hotspotOverflowCount: [...document.querySelectorAll(
-            '.hotspot-group li, .hotspot-source'
+            '.hotspot-story > summary, .hotspot-source, .hotspot-analysis'
           )].filter(element => element.scrollWidth > element.clientWidth + 1)
             .length,
           marketUpdateCount: document.querySelectorAll(
@@ -123,7 +123,7 @@ def inspect_page(page, prefix, path, market, expected_market_count):
             document.querySelector('.thesis-card')
           ).backgroundImage,
           wrappedShortLabels: [...document.querySelectorAll(
-            '.impact-badge, .category, .importance, .impact-tags > span, ' +
+            '.impact-badge, .hotspot-title i, .hotspot-impact i, ' +
             '.control-button, .market-switcher a, .section-intro h2 small, ' +
             '.archive-tag, .market-freshness time, .market-freshness span'
           )].filter(element => element.scrollHeight > element.clientHeight + 1)
@@ -135,7 +135,7 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     page.locator(".thesis-card").first.scroll_into_view_if_needed()
     page.wait_for_timeout(250)
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-ai.png"))
-    page.locator(".signal-row").first.scroll_into_view_if_needed()
+    page.locator(".hotspot-board").first.scroll_into_view_if_needed()
     page.wait_for_timeout(250)
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-signal.png"))
     page.add_style_tag(
