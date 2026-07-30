@@ -51,6 +51,8 @@ interface Labels {
   cancelled: string;
   postponed: string;
   result: string;
+  assessment: string;
+  next: string;
   noData: string;
   pricingThesis: string;
   expectationGap: string;
@@ -91,6 +93,7 @@ interface Props {
   stories: LocalizedStory[];
   timeline: WeeklyEventTimeline | null;
   overview: MarketOverview;
+  pricingConclusion: string;
   thesisLedger: ThesisLedgerEntry[];
   market: MarketRegion;
   language: Language;
@@ -118,6 +121,18 @@ function localizedEvent(event: WeeklyEventTimelineItem, language: Language) {
         ? event.whyItMattersEn ?? event.whyItMatters
         : event.whyItMatters,
     result: language === "en" ? event.resultEn ?? event.result : event.result,
+    expectation:
+      language === "en"
+        ? event.expectationEn ?? event.expectation
+        : event.expectation,
+    assessment:
+      language === "en"
+        ? event.assessmentEn ?? event.assessment
+        : event.assessment,
+    nextWatch:
+      language === "en"
+        ? event.nextWatchEn ?? event.nextWatch
+        : event.nextWatch,
   };
 }
 
@@ -488,6 +503,7 @@ export default function HotspotBoard({
   stories,
   timeline,
   overview,
+  pricingConclusion,
   thesisLedger,
   market,
   language,
@@ -572,8 +588,10 @@ export default function HotspotBoard({
                         </span>
                       </div>
                       <h4>{localized.title}</h4>
-                      <p>{localized.why}</p>
-                      {event.metrics && event.metrics.length > 0 && (
+                      {status !== "realized" && <p>{localized.why}</p>}
+                      {status !== "realized" &&
+                        event.metrics &&
+                        event.metrics.length > 0 && (
                         <div className="event-metrics">
                           {event.metrics.slice(0, 2).map((metric) => (
                             <span key={metric.id}>
@@ -591,16 +609,51 @@ export default function HotspotBoard({
                       )}
                       {status === "realized" && localized.result ? (
                         <div className="hotspot-event-result" data-event-result>
-                          <strong>{labels.result}</strong>
-                          <p>{localized.result}</p>
-                          <a
-                            href={event.resultSource}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {event.resultSourceLabel ?? event.sourceLabel}
-                            <ExternalLink aria-hidden="true" />
-                          </a>
+                          <dl>
+                            {localized.expectation && (
+                              <div>
+                                <dt>{labels.expected}</dt>
+                                <dd>{localized.expectation}</dd>
+                              </div>
+                            )}
+                            <div>
+                              <dt>{labels.actual}</dt>
+                              <dd>{localized.result}</dd>
+                            </div>
+                            {localized.assessment && (
+                              <div>
+                                <dt>{labels.assessment}</dt>
+                                <dd>{localized.assessment}</dd>
+                              </div>
+                            )}
+                            {localized.nextWatch && (
+                              <div>
+                                <dt>{labels.next}</dt>
+                                <dd>{localized.nextWatch}</dd>
+                              </div>
+                            )}
+                          </dl>
+                          <div className="hotspot-event-sources">
+                            {event.expectationSource && (
+                              <a
+                                href={event.expectationSource}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {event.expectationSourceLabel ??
+                                  labels.expected}
+                                <ExternalLink aria-hidden="true" />
+                              </a>
+                            )}
+                            <a
+                              href={event.resultSource}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {event.resultSourceLabel ?? event.sourceLabel}
+                              <ExternalLink aria-hidden="true" />
+                            </a>
+                          </div>
                         </div>
                       ) : (
                         <a
@@ -628,7 +681,7 @@ export default function HotspotBoard({
               {toneLabel(overview.tone, language)}
             </span>
           </header>
-          <p>{overview.interpretation}</p>
+          <p>{pricingConclusion}</p>
           <div className="pricing-thesis-impacts">
             {impactGroups
               .filter((group) => group.items.length > 0)

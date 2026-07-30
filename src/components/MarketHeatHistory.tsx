@@ -80,12 +80,12 @@ export default function MarketHeatHistory({
       <div className="heat-market-grid">
         {marketPanel(market)}
       </div>
-      <div className="heat-streaks">
-        <header>
-          <strong>{labels.streakTitle}</strong>
-          <small>|%| ≥ {(view.threshold / 20).toFixed(1)}</small>
-        </header>
-        {streaks.length > 0 ? (
+      {streaks.length > 0 && (
+        <div className="heat-streaks">
+          <header>
+            <strong>{labels.streakTitle}</strong>
+            <small>|%| ≥ {(view.threshold / 20).toFixed(1)}</small>
+          </header>
           <div>
             {streaks.map((sector) => (
               <span key={`${sector.market}:${sector.symbol}`}>
@@ -99,10 +99,8 @@ export default function MarketHeatHistory({
               </span>
             ))}
           </div>
-        ) : (
-          <p>{labels.noStreak}</p>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -79,6 +79,18 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           viewportWidth: innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
           fontsLoaded: document.fonts.status,
+          reportToolbarCount: document.querySelectorAll(
+            '.report-toolbar'
+          ).length,
+          heroDateCount: document.querySelectorAll(
+            '.hero .hero-date-nav'
+          ).length,
+          heroHeight: Math.round(document.querySelector(
+            '.hero'
+          ).getBoundingClientRect().height),
+          marketStatusHeight: Math.round(document.querySelector(
+            '.market-status-layout'
+          ).getBoundingClientRect().height),
           marketCount: document.querySelectorAll('.market-item').length,
           heatCount: document.querySelectorAll('.heat-item').length,
           storyCount: document.querySelectorAll('.hotspot-story').length,
@@ -163,6 +175,23 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           neutralCount: [...document.querySelectorAll('.impact-badge')]
             .filter(element => element.textContent.trim() === '中性').length,
           hasSsrHtml: Boolean(document.querySelector('[data-render="ssr"]')),
+          realizedEventCount: document.querySelectorAll(
+            '[data-event-state="realized"]'
+          ).length,
+          richEventResultCount: [...document.querySelectorAll(
+            '[data-event-result] dl'
+          )].filter(element => element.querySelectorAll(':scope > div').length >= 4)
+            .length,
+          eventGridHorizontalOverflow: [...document.querySelectorAll(
+            '.hotspot-event-grid'
+          )].filter(element => element.scrollWidth > element.clientWidth + 1)
+            .length,
+          pricingText: document.querySelector(
+            '.pricing-thesis > p'
+          )?.textContent.trim(),
+          archiveHeadingText: document.querySelector(
+            '.archive-heading h2'
+          )?.textContent.trim(),
           pricingBackground: getComputedStyle(
             document.querySelector('.pricing-thesis')
           ).backgroundImage,
@@ -295,7 +324,7 @@ with sync_playwright() as playwright:
     result["english"] = {
         "lang": english.locator("html").get_attribute("lang"),
         "hasOverview": english.get_by_text(
-            "Today's Pricing Thesis", exact=True
+            "Market Read", exact=True
         ).count() > 0,
         "marketCount": english.locator(".market-item").count(),
         "marketUpdate": english.locator(".market-freshness time").inner_text(),
@@ -386,7 +415,9 @@ with sync_playwright() as playwright:
 for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     audit = result[key]
     is_mobile = key.startswith("mobile")
-    assert audit["controlHeights"] == [46, 46, 46], result
+    assert audit["controlHeights"] == (
+        [30, 30, 30] if is_mobile else [36, 36, 36]
+    ), result
     assert audit["headerControlHeights"] == (
         [42] if is_mobile else [46, 46]
     ), result
@@ -396,6 +427,8 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["scrollWidth"] <= (
         390 if is_mobile else 1440
     ), result
+    assert audit["layout"]["reportToolbarCount"] == 0, result
+    assert audit["layout"]["heroDateCount"] == 1, result
     assert audit["layout"]["fontsLoaded"] == "loaded", result
     assert audit["layout"]["marketCount"] == audit["expectedMarketCount"], result
     assert audit["layout"]["heatCount"] == 3, result
@@ -423,7 +456,7 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
         for count in audit["layout"]["archiveCounts"]
     ), result
     assert audit["layout"]["marketUpdateCount"] == 1, result
-    assert audit["layout"]["marketUpdateText"].startswith("市场信息更新于 "), result
+    assert audit["layout"]["marketUpdateText"].startswith("更新："), result
     assert audit["layout"]["marketAsOfCount"] == 1, result
     market_label = "A股" if audit["market"] == "CN" else "美股"
     assert audit["layout"]["marketAsOfText"].startswith(
@@ -451,6 +484,12 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["legacyPendingCount"] == 0, result
     assert audit["layout"]["legacyUnclearCount"] == 0, result
     assert audit["layout"]["hasSsrHtml"], result
+    assert audit["layout"]["realizedEventCount"] == 3, result
+    assert audit["layout"]["richEventResultCount"] == 3, result
+    if is_mobile:
+        assert audit["layout"]["eventGridHorizontalOverflow"] == 0, result
+    assert "%" in audit["layout"]["pricingText"], result
+    assert audit["layout"]["archiveHeadingText"] == "往期日报", result
     assert audit["layout"]["pricingBackground"] != "none", result
     assert audit["layout"]["wrappedShortLabels"] == [], result
     assert audit["consoleErrors"] == [], result
@@ -471,7 +510,7 @@ assert result["mobileCN"]["layout"]["archiveTitles"] != result["mobileUS"]["layo
 assert result["english"]["lang"] == "en", result
 assert result["english"]["hasOverview"], result
 assert result["english"]["marketCount"] == 4, result
-assert result["english"]["marketUpdate"].startswith("Market info updated "), result
+assert result["english"]["marketUpdate"].startswith("Updated "), result
 assert result["english"]["marketAsOf"].startswith("U.S. data through "), result
 assert result["english"]["marketAsOf"].endswith(")"), result
 assert result["english"]["activeMarket"] == "US", result

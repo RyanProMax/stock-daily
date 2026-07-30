@@ -430,6 +430,9 @@ export function buildWeeklyEventTimeline(
         id: eventId(event, index),
         titleEn: translation?.title,
         whyItMattersEn: translation?.whyItMatters,
+        expectationEn: translation?.expectation,
+        assessmentEn: translation?.assessment,
+        nextWatchEn: translation?.nextWatch,
         displayStatus,
         ...outcome,
       };

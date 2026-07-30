@@ -272,8 +272,13 @@ export interface WeeklyEvent {
   whyItMatters: string;
   source: string;
   sourceLabel: string;
+  expectation?: string;
+  expectationSource?: string;
+  expectationSourceLabel?: string;
   status?: "scheduled" | "realized" | "cancelled" | "postponed";
   result?: string;
+  assessment?: string;
+  nextWatch?: string;
   resultSource?: string;
   resultSourceLabel?: string;
   resultVerifiedAt?: string;
@@ -292,8 +297,11 @@ export interface WeeklyEventTimelineItem extends WeeklyEvent {
   id: string;
   titleEn?: string;
   whyItMattersEn?: string;
+  expectationEn?: string;
   displayStatus: WeeklyEventDisplayStatus;
   resultEn?: string;
+  assessmentEn?: string;
+  nextWatchEn?: string;
   realizedAt?: string;
 }
 
@@ -328,7 +336,10 @@ export interface WeeklyReport {
       outlook: WeeklyReport["outlook"];
       events: Array<
         Pick<WeeklyEvent, "title" | "whyItMatters"> & {
+          expectation?: string;
           result?: string;
+          assessment?: string;
+          nextWatch?: string;
         }
       >;
     };

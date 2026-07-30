@@ -37,6 +37,124 @@ function strings(value, label, min, max, itemMax) {
   );
 }
 
+function optionalText(value, label, min, max) {
+  if (value === undefined || value === null || value === "") return undefined;
+  return text(value, label, min, max);
+}
+
+function sourceAuthority(value) {
+  try {
+    const parts = new URL(value).hostname
+      .toLowerCase()
+      .replace(/^www\./, "")
+      .split(".");
+    return parts.slice(-2).join(".");
+  } catch {
+    return "";
+  }
+}
+
+function verifiedEventFields(source, index) {
+  const fields = {
+    expectation: optionalText(
+      source.expectation,
+      `upcomingEvents[${index}].expectation`,
+      6,
+      180,
+    ),
+    expectationSource: source.expectationSource,
+    expectationSourceLabel: optionalText(
+      source.expectationSourceLabel,
+      `upcomingEvents[${index}].expectationSourceLabel`,
+      2,
+      60,
+    ),
+  };
+  const hasExpectationFields = Boolean(
+    fields.expectation ||
+      fields.expectationSource ||
+      fields.expectationSourceLabel,
+  );
+  if (
+    hasExpectationFields &&
+    (!fields.expectation ||
+      !fields.expectationSource ||
+      !fields.expectationSourceLabel)
+  ) {
+    throw new Error(
+      `upcomingEvents[${index}] 预期信息必须同时提供内容与来源`,
+    );
+  }
+  if (hasExpectationFields) {
+    if (!sourceAuthority(fields.expectationSource)) {
+      throw new Error(`upcomingEvents[${index}].expectationSource 无效`);
+    }
+  }
+
+  if (!source.verifiedOutcome) {
+    return Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value !== undefined),
+    );
+  }
+
+  const outcome = object(
+    source.verifiedOutcome,
+    `upcomingEvents[${index}].verifiedOutcome`,
+  );
+  const resultSource = optionalText(
+    outcome.source,
+    `upcomingEvents[${index}].verifiedOutcome.source`,
+    12,
+    500,
+  );
+  const resultVerifiedAt = optionalText(
+    outcome.verifiedAt,
+    `upcomingEvents[${index}].verifiedOutcome.verifiedAt`,
+    10,
+    40,
+  );
+  if (
+    !resultSource ||
+    sourceAuthority(resultSource) !== sourceAuthority(source.source) ||
+    !resultVerifiedAt ||
+    !Number.isFinite(Date.parse(resultVerifiedAt))
+  ) {
+    throw new Error(
+      `upcomingEvents[${index}].verifiedOutcome 必须由事件一手来源核验`,
+    );
+  }
+  return {
+    ...fields,
+    status: "realized",
+    result: text(
+      outcome.result,
+      `upcomingEvents[${index}].verifiedOutcome.result`,
+      12,
+      240,
+    ),
+    assessment: text(
+      outcome.assessment,
+      `upcomingEvents[${index}].verifiedOutcome.assessment`,
+      8,
+      180,
+    ),
+    nextWatch: text(
+      outcome.nextWatch,
+      `upcomingEvents[${index}].verifiedOutcome.nextWatch`,
+      8,
+      180,
+    ),
+    resultSource,
+    resultSourceLabel: text(
+      outcome.sourceLabel,
+      `upcomingEvents[${index}].verifiedOutcome.sourceLabel`,
+      2,
+      60,
+    ),
+    resultVerifiedAt,
+  };
+}
+
 function validateOverview(value, label, english = false) {
   const overview = object(value, label);
   if (!tones.has(overview.tone)) throw new Error(`${label}.tone 无效`);
@@ -250,29 +368,79 @@ function eventId(source) {
 }
 
 export function buildContent(input, report) {
+  const events = report.events.map((event) => {
+    const source = input.upcomingEvents[event.sourceIndex];
+    return {
+      id: eventId(source),
+      date: source.date,
+      title: event.title,
+      whyItMatters: event.whyItMatters,
+      source: source.source,
+      sourceLabel: source.sourceLabel,
+      status: "scheduled",
+      ...(source.baselineKind
+        ? { baselineKind: source.baselineKind }
+        : {}),
+      ...(Array.isArray(source.metrics) && source.metrics.length > 0
+        ? { metrics: source.metrics }
+        : {}),
+      ...verifiedEventFields(source, event.sourceIndex),
+    };
+  });
+  const englishEvents = report.translations.en.events.map(
+    (event, index) => {
+      const source =
+        input.upcomingEvents[report.events[index].sourceIndex];
+      const outcome = source.verifiedOutcome;
+      return {
+        ...event,
+        ...(source.expectationEn
+          ? {
+              expectation: text(
+                source.expectationEn,
+                `upcomingEvents[${report.events[index].sourceIndex}].expectationEn`,
+                6,
+                320,
+              ),
+            }
+          : {}),
+        ...(outcome
+          ? {
+              result: text(
+                outcome.resultEn,
+                `upcomingEvents[${report.events[index].sourceIndex}].verifiedOutcome.resultEn`,
+                12,
+                420,
+              ),
+              assessment: text(
+                outcome.assessmentEn,
+                `upcomingEvents[${report.events[index].sourceIndex}].verifiedOutcome.assessmentEn`,
+                8,
+                320,
+              ),
+              nextWatch: text(
+                outcome.nextWatchEn,
+                `upcomingEvents[${report.events[index].sourceIndex}].verifiedOutcome.nextWatchEn`,
+                8,
+                320,
+              ),
+            }
+          : {}),
+      };
+    },
+  );
   return JSON.stringify({
     overview: report.overview,
     highlights: report.highlights,
     outlook: report.outlook,
-    events: report.events.map((event) => {
-      const source = input.upcomingEvents[event.sourceIndex];
-      return {
-        id: eventId(source),
-        date: source.date,
-        title: event.title,
-        whyItMatters: event.whyItMatters,
-        source: source.source,
-        sourceLabel: source.sourceLabel,
-        status: "scheduled",
-        ...(source.baselineKind
-          ? { baselineKind: source.baselineKind }
-          : {}),
-        ...(Array.isArray(source.metrics) && source.metrics.length > 0
-          ? { metrics: source.metrics }
-          : {}),
-      };
-    }),
-    translations: report.translations,
+    events,
+    translations: {
+      ...report.translations,
+      en: {
+        ...report.translations.en,
+        events: englishEvents,
+      },
+    },
   });
 }
 

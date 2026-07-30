@@ -22,6 +22,22 @@ const input = {
       source: "https://www.federalreserve.gov/",
       sourceLabel: "Federal Reserve",
       baselineKind: "consensus",
+      expectation: "市场预期维持政策利率不变。",
+      expectationEn: "Markets expected the policy rate to remain unchanged.",
+      expectationSource: "https://www.reuters.com/markets/rates-bonds/",
+      expectationSourceLabel: "Reuters",
+      verifiedOutcome: {
+        result: "维持政策利率不变，三名委员主张加息。",
+        resultEn: "The policy rate was held; three members preferred a hike.",
+        assessment: "结果符合基准预期，但投票结构偏鹰。",
+        assessmentEn: "The result matched the base case, but the vote was hawkish.",
+        nextWatch: "后续利率方向取决于通胀和就业。",
+        nextWatchEn: "The next rate move depends on inflation and employment.",
+        source:
+          "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm",
+        sourceLabel: "Federal Reserve",
+        verifiedAt: "2026-07-29T18:00:00.000Z",
+      },
       metrics: [
         {
           id: "policy-rate",
@@ -112,9 +128,14 @@ test("weekly contract validates scenarios, impact labels and event sources", () 
   assert.equal(checkedReport.translations.en.events.length, 1);
   const stored = JSON.parse(buildContent(checkedInput, checkedReport));
   assert.equal(stored.events[0].id, "fed-fomc-2026-07-29");
-  assert.equal(stored.events[0].status, "scheduled");
+  assert.equal(stored.events[0].status, "realized");
   assert.equal(stored.events[0].baselineKind, "consensus");
   assert.equal(stored.events[0].metrics[0].expected, 4.5);
+  assert.match(stored.events[0].expectation, /维持政策利率/);
+  assert.match(stored.events[0].result, /三名委员主张加息/);
+  assert.match(stored.events[0].assessment, /偏鹰/);
+  assert.match(stored.events[0].nextWatch, /通胀和就业/);
+  assert.match(stored.translations.en.events[0].result, /three members/);
 });
 
 test("weekly contract rejects investment instructions", () => {
@@ -131,5 +152,25 @@ test("weekly contract rejects investment instructions", () => {
         input,
       ),
     /不得包含投资建议/,
+  );
+});
+
+test("weekly contract rejects event outcomes from a different authority", () => {
+  const unsafe = structuredClone(input);
+  unsafe.upcomingEvents[0].verifiedOutcome.source =
+    "https://example.com/unverified";
+  const checkedReport = validateWeeklyReport(report, unsafe);
+  assert.throws(
+    () => buildContent(unsafe, checkedReport),
+    /必须由事件一手来源核验/,
+  );
+});
+
+test("weekly contract requires a source for event expectations", () => {
+  const incomplete = structuredClone(input);
+  delete incomplete.upcomingEvents[0].expectationSource;
+  assert.throws(
+    () => buildContent(incomplete, validateWeeklyReport(report, incomplete)),
+    /预期信息必须同时提供内容与来源/,
   );
 });

@@ -41,6 +41,11 @@ function weeklyFixture() {
         date: "2026-07-29",
         title: "美联储 FOMC 利率决议",
         whyItMatters: "决定美元流动性与风险资产折现率。",
+        expectation: "市场预期维持政策利率不变。",
+        expectationSource: "https://www.reuters.com/markets/rates-bonds/",
+        expectationSourceLabel: "Reuters",
+        assessment: "结果符合基准预期，但投票结构偏鹰。",
+        nextWatch: "后续利率方向取决于通胀和就业。",
         source:
           "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
         sourceLabel: "Federal Reserve",
@@ -81,6 +86,9 @@ function weeklyFixture() {
           {
             title: "Federal Reserve FOMC decision",
             whyItMatters: "Sets the discount-rate backdrop for risk assets.",
+            expectation: "Markets expected the policy rate to remain unchanged.",
+            assessment: "The result matched the base case, but the vote was hawkish.",
+            nextWatch: "The next rate move depends on inflation and employment.",
           },
           {
             title: "U.S. advance GDP",
@@ -478,9 +486,24 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   );
   assert.equal(document.querySelectorAll("[data-event-check]").length, 1);
   assert.equal(document.querySelectorAll("[data-event-result]").length, 1);
+  assert.equal(
+    document.querySelectorAll("[data-event-result] dl > div").length,
+    4,
+  );
   assert.match(
     document.querySelector("[data-event-result]").textContent,
-    /美联储维持政策利率不变/,
+    /预期.*维持政策利率不变.*实际.*美联储维持政策利率不变.*判断.*偏鹰.*下一步.*通胀和就业/s,
+  );
+  assert.equal(document.querySelectorAll(".report-toolbar").length, 0);
+  assert.equal(document.querySelectorAll(".hero-date-nav").length, 1);
+  assert.equal(document.querySelectorAll(".market-status-layout").length, 1);
+  assert.match(
+    document.querySelector(".pricing-thesis").textContent,
+    /盘面结论.*%/s,
+  );
+  assert.equal(
+    document.querySelector(".archive-heading h2").textContent,
+    "往期日报",
   );
 
   const marketStories = report.stories.filter((story) =>
