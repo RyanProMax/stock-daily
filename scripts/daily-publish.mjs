@@ -323,7 +323,7 @@ export function validateInput(value) {
     !DAILY_UPDATE_KINDS.includes(input.updateKind) ||
     input.cutoffAt !== dailyCutoffAt(input.reportDate, input.updateKind) ||
     !Array.isArray(input.markets) ||
-    input.markets.length !== 6 ||
+    input.markets.length !== 10 ||
     !Array.isArray(input.sectorHeat) ||
     input.sectorHeat.length !== 6 ||
     !Array.isArray(input.news) ||
@@ -390,8 +390,8 @@ export function validateInput(value) {
     }
     marketCounts.set(market.region, marketCounts.get(market.region) + 1);
   }
-  if (marketCounts.get("CN") !== 2 || marketCounts.get("US") !== 4) {
-    throw new Error("行情必须包含 2 个 CN 与 4 个 US 指标");
+  if (marketCounts.get("CN") !== 6 || marketCounts.get("US") !== 4) {
+    throw new Error("行情必须包含 6 个 CN 与 4 个 US 指标");
   }
   const marketDataDiagnostics = requireObject(
     input.marketDataDiagnostics,
@@ -406,13 +406,22 @@ export function validateInput(value) {
     marketDataDiagnostics.source !== "market_data_query" ||
     marketDataDiagnostics.persistence !== "none" ||
     Date.parse(marketDataDiagnostics.cutoffAt) !== Date.parse(input.cutoffAt) ||
-    marketDataDiagnostics.marketCount !== 6 ||
+    marketDataDiagnostics.marketCount !== 10 ||
     !Number.isFinite(Date.parse(marketDataDiagnostics.computedAt)) ||
-    providerSymbols.length !== 6 ||
-    new Set(providerSymbols).size !== 6 ||
-    !["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"].every((symbol) =>
-      providerSymbols.includes(symbol),
-    )
+    providerSymbols.length !== 10 ||
+    new Set(providerSymbols).size !== 10 ||
+    ![
+      "SPX",
+      "IXIC",
+      "DJI",
+      "DGS10",
+      "SSE",
+      "SZSE",
+      "CSI300",
+      "CSI500",
+      "CHINEXT",
+      "STAR50",
+    ].every((symbol) => providerSymbols.includes(symbol))
   ) {
     throw new Error("行情必须来自完整、无持久化的 API daily-pack");
   }

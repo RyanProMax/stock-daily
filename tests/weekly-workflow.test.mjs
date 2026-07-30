@@ -27,6 +27,7 @@ const input = {
       expectationSource: "https://www.reuters.com/markets/rates-bonds/",
       expectationSourceLabel: "Reuters",
       verifiedOutcome: {
+        impact: "negative",
         result: "维持政策利率不变，三名委员主张加息。",
         resultEn: "The policy rate was held; three members preferred a hike.",
         assessment: "结果符合基准预期，但投票结构偏鹰。",
@@ -129,6 +130,7 @@ test("weekly contract validates scenarios, impact labels and event sources", () 
   const stored = JSON.parse(buildContent(checkedInput, checkedReport));
   assert.equal(stored.events[0].id, "fed-fomc-2026-07-29");
   assert.equal(stored.events[0].status, "realized");
+  assert.equal(stored.events[0].impactTone, "negative");
   assert.equal(stored.events[0].baselineKind, "consensus");
   assert.equal(stored.events[0].metrics[0].expected, 4.5);
   assert.match(stored.events[0].expectation, /维持政策利率/);

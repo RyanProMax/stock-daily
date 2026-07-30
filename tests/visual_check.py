@@ -92,7 +92,26 @@ def inspect_page(page, prefix, path, market, expected_market_count):
             '.market-status-layout'
           ).getBoundingClientRect().height),
           marketCount: document.querySelectorAll('.market-item').length,
+          marketValueOverlapCount: [...document.querySelectorAll(
+            '.market-item'
+          )].filter(element => {
+            const value = element.querySelector('strong');
+            const change = element.querySelector('em');
+            if (!value || !change) return false;
+            const valueBox = value.getBoundingClientRect();
+            const changeBox = change.getBoundingClientRect();
+            return valueBox.left < changeBox.right &&
+              valueBox.right > changeBox.left &&
+              valueBox.top < changeBox.bottom &&
+              valueBox.bottom > changeBox.top;
+          }).length,
           heatCount: document.querySelectorAll('.heat-item').length,
+          heatUpColors: [...document.querySelectorAll(
+            '.heat-item-up .heat-item-top b'
+          )].map(element => getComputedStyle(element).color),
+          heatDownColors: [...document.querySelectorAll(
+            '.heat-item-down .heat-item-top b'
+          )].map(element => getComputedStyle(element).color),
           storyCount: document.querySelectorAll('.hotspot-story').length,
           hotspotCount: document.querySelectorAll('.hotspot-group li').length,
           hotspotGroupCount: document.querySelectorAll('.hotspot-group').length,
@@ -155,6 +174,12 @@ def inspect_page(page, prefix, path, market, expected_market_count):
             '.market-price-meta time'
           ).length,
           heroHeadline: document.querySelector('.hero h1')?.textContent.trim(),
+          heroSummaryCount: document.querySelectorAll('.hero-summary').length,
+          copyButtonCount: document.querySelectorAll('.copy-button').length,
+          duplicateEditionCount: [...document.querySelectorAll(
+            '.edition-row > span'
+          )].filter(element => /第\\s*\\d+\\s*期/.test(element.textContent))
+            .length,
           archiveTitles: [...document.querySelectorAll('.archive-list strong')]
             .map(element => element.textContent.trim()),
           archiveCounts: [...document.querySelectorAll('.archive-list i')]
@@ -178,6 +203,15 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           realizedEventCount: document.querySelectorAll(
             '[data-event-state="realized"]'
           ).length,
+          pendingEventCount: document.querySelectorAll(
+            '[data-event-state="awaiting"], [data-event-state="scheduled"]'
+          ).length,
+          eventImpactLabels: [...document.querySelectorAll(
+            '[data-event-impact]'
+          )].map(element => element.textContent.trim()),
+          realizedStatusLabelCount: [...document.querySelectorAll(
+            '.hotspot-event-meta span'
+          )].filter(element => element.textContent.trim() === '已兑现').length,
           richEventResultCount: [...document.querySelectorAll(
             '[data-event-result] dl'
           )].filter(element => element.querySelectorAll(':scope > div').length >= 4)
@@ -186,17 +220,15 @@ def inspect_page(page, prefix, path, market, expected_market_count):
             '.hotspot-event-grid'
           )].filter(element => element.scrollWidth > element.clientWidth + 1)
             .length,
-          pricingText: document.querySelector(
-            '.pricing-thesis > p'
-          )?.textContent.trim(),
+          pricingThesisCount: document.querySelectorAll(
+            '.pricing-thesis'
+          ).length,
           archiveHeadingText: document.querySelector(
             '.archive-heading h2'
           )?.textContent.trim(),
-          pricingBackground: getComputedStyle(
-            document.querySelector('.pricing-thesis')
-          ).backgroundImage,
           wrappedShortLabels: [...document.querySelectorAll(
-            '.impact-badge, .hotspot-title i, .hotspot-impact i, ' +
+            '.impact-badge, .event-impact-tag, .event-status-tag, ' +
+            '.hotspot-title i, .hotspot-impact i, ' +
             '.control-button, .market-switcher a, .section-intro h2 small, ' +
             '.archive-tag, .market-freshness time, .market-freshness span'
           )].filter(element => element.scrollHeight > element.clientHeight + 1)
@@ -205,20 +237,24 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     )
 
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-top.png"))
-    page.locator(".pricing-thesis").first.scroll_into_view_if_needed()
+    page.locator(".hotspot-events").first.scroll_into_view_if_needed()
     page.wait_for_timeout(250)
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-ai.png"))
-    page.locator(".hotspot-board").first.scroll_into_view_if_needed()
-    page.wait_for_timeout(250)
-    page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-signal.png"))
-    page.locator(".hotspot-board").first.screenshot(
-        path=str(SCREENSHOT_DIR / f"{prefix}-board-expanded.png")
-    )
     page.add_style_tag(
         content=(
             ".masthead { position: static !important; } "
             ".skip-link { display: none !important; }"
         )
+    )
+    first_expanded_story = page.locator(".hotspot-story[open]").first
+    first_expanded_story.scroll_into_view_if_needed()
+    page.wait_for_timeout(250)
+    page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-signal.png"))
+    first_expanded_story.screenshot(
+        path=str(SCREENSHOT_DIR / f"{prefix}-first-expanded.png")
+    )
+    page.locator(".hotspot-board").first.screenshot(
+        path=str(SCREENSHOT_DIR / f"{prefix}-board-expanded.png")
     )
     page.locator(".archive-section").scroll_into_view_if_needed()
     page.wait_for_timeout(250)
@@ -289,7 +325,7 @@ with sync_playwright() as playwright:
             launch_options["executable_path"] = CHROME_PATH
         browser = playwright.chromium.launch(**launch_options)
     result = {}
-    for market, count in (("CN", 2), ("US", 4)):
+    for market, count in (("CN", 6), ("US", 4)):
         mobile = browser.new_page(
             viewport={"width": 390, "height": 844},
             device_scale_factor=3,
@@ -431,7 +467,15 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["heroDateCount"] == 1, result
     assert audit["layout"]["fontsLoaded"] == "loaded", result
     assert audit["layout"]["marketCount"] == audit["expectedMarketCount"], result
+    assert audit["layout"]["marketValueOverlapCount"] == 0, result
     assert audit["layout"]["heatCount"] == 3, result
+    if (
+        audit["layout"]["heatUpColors"]
+        and audit["layout"]["heatDownColors"]
+    ):
+        assert set(audit["layout"]["heatUpColors"]).isdisjoint(
+            audit["layout"]["heatDownColors"]
+        ), result
     assert 3 <= audit["layout"]["storyCount"] <= 6, result
     assert audit["layout"]["expandedStoryCount"] == audit["layout"]["storyCount"], result
     assert audit["layout"]["hotspotOverflowCount"] == 0, result
@@ -468,6 +512,9 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     ), result
     assert audit["layout"]["marketAsOfText"].endswith("收盘"), result
     assert audit["layout"]["duplicateMarketDateCount"] == 0, result
+    assert audit["layout"]["heroSummaryCount"] == 0, result
+    assert audit["layout"]["copyButtonCount"] == 0, result
+    assert audit["layout"]["duplicateEditionCount"] == 0, result
     assert len(audit["layout"]["archiveTones"]) == len(
         audit["layout"]["archiveTitles"]
     ), result
@@ -485,12 +532,18 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["legacyUnclearCount"] == 0, result
     assert audit["layout"]["hasSsrHtml"], result
     assert audit["layout"]["realizedEventCount"] == 3, result
+    assert len(audit["layout"]["eventImpactLabels"]) == (
+        audit["layout"]["realizedEventCount"]
+    ), result
+    assert set(audit["layout"]["eventImpactLabels"]).issubset(
+        {"利好", "利空", "中性"}
+    ), result
+    assert audit["layout"]["realizedStatusLabelCount"] == 0, result
     assert audit["layout"]["richEventResultCount"] == 3, result
     if is_mobile:
         assert audit["layout"]["eventGridHorizontalOverflow"] == 0, result
-    assert "%" in audit["layout"]["pricingText"], result
+    assert audit["layout"]["pricingThesisCount"] == 0, result
     assert audit["layout"]["archiveHeadingText"] == "往期日报", result
-    assert audit["layout"]["pricingBackground"] != "none", result
     assert audit["layout"]["wrappedShortLabels"] == [], result
     assert audit["consoleErrors"] == [], result
     assert audit["httpErrors"] == [], result

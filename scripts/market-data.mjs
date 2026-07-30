@@ -8,7 +8,18 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectDir = resolve(scriptDir, "..");
-const requiredSymbols = ["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"];
+const requiredSymbols = [
+  "SPX",
+  "IXIC",
+  "DJI",
+  "DGS10",
+  "SSE",
+  "SZSE",
+  "CSI300",
+  "CSI500",
+  "CHINEXT",
+  "STAR50",
+];
 
 async function executable(path) {
   if (!path || !isAbsolute(path)) return false;

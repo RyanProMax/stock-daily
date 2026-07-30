@@ -87,6 +87,17 @@ const input = {
     },
     {
       region: "CN",
+      name: "深证成指",
+      symbol: "SZSE",
+      value: "12,155.67",
+      change: "+0.31%",
+      direction: "up",
+      note: "A股日收盘",
+      source: "https://quote.eastmoney.com/zs399001.html",
+      asOf: "2026-07-24",
+    },
+    {
+      region: "CN",
       name: "沪深 300",
       symbol: "CSI300",
       value: "4,728.00",
@@ -94,6 +105,39 @@ const input = {
       direction: "up",
       note: "A股日收盘",
       source: "https://quote.eastmoney.com/zs000300.html",
+      asOf: "2026-07-24",
+    },
+    {
+      region: "CN",
+      name: "中证 500",
+      symbol: "CSI500",
+      value: "6,988.12",
+      change: "-0.18%",
+      direction: "down",
+      note: "A股日收盘",
+      source: "https://quote.eastmoney.com/zs000905.html",
+      asOf: "2026-07-24",
+    },
+    {
+      region: "CN",
+      name: "创业板指",
+      symbol: "CHINEXT",
+      value: "2,744.39",
+      change: "+0.42%",
+      direction: "up",
+      note: "A股日收盘",
+      source: "https://quote.eastmoney.com/zs399006.html",
+      asOf: "2026-07-24",
+    },
+    {
+      region: "CN",
+      name: "科创 50",
+      symbol: "STAR50",
+      value: "1,132.08",
+      change: "-0.09%",
+      direction: "down",
+      note: "A股日收盘",
+      source: "https://quote.eastmoney.com/zs000688.html",
       asOf: "2026-07-24",
     },
   ],
@@ -104,7 +148,7 @@ const input = {
     computedAt: "2026-07-25T01:00:01.000Z",
     cutoffAt: "2026-07-25T01:00:00.000Z",
     persistence: "none",
-    marketCount: 6,
+    marketCount: 10,
     providers: [
       { symbol: "SPX", provider: "fred", asOf: "2026-07-24", attempts: [] },
       { symbol: "IXIC", provider: "fred", asOf: "2026-07-24", attempts: [] },
@@ -112,7 +156,31 @@ const input = {
       { symbol: "DGS10", provider: "fred", asOf: "2026-07-23", attempts: [] },
       { symbol: "SSE", provider: "tencent", asOf: "2026-07-24", attempts: [] },
       {
+        symbol: "SZSE",
+        provider: "tencent",
+        asOf: "2026-07-24",
+        attempts: [],
+      },
+      {
         symbol: "CSI300",
+        provider: "tencent",
+        asOf: "2026-07-24",
+        attempts: [],
+      },
+      {
+        symbol: "CSI500",
+        provider: "tencent",
+        asOf: "2026-07-24",
+        attempts: [],
+      },
+      {
+        symbol: "CHINEXT",
+        provider: "tencent",
+        asOf: "2026-07-24",
+        attempts: [],
+      },
+      {
+        symbol: "STAR50",
         provider: "tencent",
         asOf: "2026-07-24",
         attempts: [],
@@ -661,13 +729,24 @@ test("daily market pack keeps implementation labels out of reader-facing notes",
       cutoff_at: "2026-07-25T01:00:00.000Z",
       persistence: "none",
     },
-    summary: { requested: 6, succeeded: 6, failed: 0 },
+    summary: { requested: 10, succeeded: 10, failed: 0 },
     data: { markets: apiMarkets, failures: [] },
   });
 
   assert.deepEqual(
     normalized.markets.map((market) => market.symbol),
-    ["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"],
+    [
+      "SPX",
+      "IXIC",
+      "DJI",
+      "DGS10",
+      "SSE",
+      "SZSE",
+      "CSI300",
+      "CSI500",
+      "CHINEXT",
+      "STAR50",
+    ],
   );
   assert.equal(normalized.markets[3].value, "4.71%");
   assert.equal(normalized.markets[3].note, "Fixture close · 07-23");
@@ -676,7 +755,7 @@ test("daily market pack keeps implementation labels out of reader-facing notes",
     /API\s*Skill|market_data_query/i,
   );
   assert.equal(normalized.diagnostics.persistence, "none");
-  assert.equal(normalized.diagnostics.providers.length, 6);
+  assert.equal(normalized.diagnostics.providers.length, 10);
 });
 
 test("daily market pack rejects partial or incomplete API output", () => {

@@ -1,5 +1,4 @@
 import { ExternalLink } from "lucide-react";
-import CopyButton from "./components/CopyButton";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import HotspotBoard from "./components/HotspotBoard";
@@ -215,93 +214,6 @@ function OverviewCard({
   );
 }
 
-function localizedSectorName(
-  sector: SectorHeatView["current"][number],
-  language: Language,
-) {
-  return language === "en" ? sector.nameEn : sector.name;
-}
-
-function buildMarketConclusion({
-  markets,
-  heat,
-  market,
-  language,
-}: {
-  markets: DailyReport["markets"];
-  heat: SectorHeatView["current"];
-  market: MarketRegion;
-  language: Language;
-}) {
-  const equityMarkets = markets.filter((item) => item.symbol !== "DGS10");
-  const rate = markets.find((item) => item.symbol === "DGS10");
-  const indexMoves = equityMarkets
-    .map((item) => `${item.name} ${item.change}`)
-    .join(language === "zh" ? "、" : ", ");
-  const allDown =
-    equityMarkets.length > 0 &&
-    equityMarkets.every((item) => item.direction === "down");
-  const allUp =
-    equityMarkets.length > 0 &&
-    equityMarkets.every((item) => item.direction === "up");
-  const declines = heat
-    .filter((item) => item.direction === "down")
-    .slice(0, 2);
-  const advances = heat
-    .filter((item) => item.direction === "up")
-    .slice(0, 1);
-  const declineText = declines
-    .map((item) => `${localizedSectorName(item, language)} ${item.change}`)
-    .join(language === "zh" ? "、" : ", ");
-  const advanceText = advances
-    .map((item) => `${localizedSectorName(item, language)} ${item.change}`)
-    .join(language === "zh" ? "、" : ", ");
-
-  if (language === "en") {
-    const direction = allDown
-      ? "all fell"
-      : allUp
-        ? "all rose"
-        : "diverged";
-    const rateText = rate ? `; ${rate.name} moved ${rate.change}` : "";
-    const sectorText = [
-      declineText ? `${declineText} led declines` : "",
-      advanceText ? `${advanceText} rose against the tape` : "",
-    ]
-      .filter(Boolean)
-      .join(", while ");
-    const read = allDown
-      ? market === "US" && rate?.direction === "up"
-        ? "Equities and duration were under pressure at the same time."
-        : "The tape favored defense over risk-taking."
-      : allUp
-        ? "Breadth favored risk-taking."
-        : "Rotation mattered more than the index headline.";
-    return `Key indexes ${direction}: ${indexMoves}${rateText}. ${
-      sectorText ? `${sectorText}. ` : ""
-    }${read}`;
-  }
-
-  const direction = allDown ? "同步下跌" : allUp ? "同步上涨" : "走势分化";
-  const rateText = rate ? `；${rate.name} ${rate.change}` : "";
-  const sectorText = [
-    declineText ? `${declineText}领跌` : "",
-    advanceText ? `${advanceText}逆势上涨` : "",
-  ]
-    .filter(Boolean)
-    .join("，");
-  const read = allDown
-    ? market === "US" && rate?.direction === "up"
-      ? "股市与久期资产同时承压。"
-      : "资金偏防守，短线风险偏好走弱。"
-    : allUp
-      ? "上涨覆盖主要指数，风险偏好占优。"
-      : "指数之外的板块轮动比总量方向更重要。";
-  return `主要指数${direction}：${indexMoves}${rateText}。${
-    sectorText ? `板块上，${sectorText}。` : ""
-  }${read}`;
-}
-
 function DailyPage({ data }: { data: DailyPageData }) {
   const { language } = data;
   const t = copy[language];
@@ -310,15 +222,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const marketMetrics = report.markets.filter(
     (market) => market.region === data.market,
   );
-  const marketHeat = data.sectorHeat.current.filter(
-    (sector) => sector.market === data.market,
-  );
-  const marketConclusion = buildMarketConclusion({
-    markets: marketMetrics,
-    heat: marketHeat,
-    market: data.market,
-    language,
-  });
   const marketStories = report.stories.filter((story) =>
     story.regions.includes(data.market),
   );
@@ -366,13 +269,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
         language,
       )
     : "";
-  const copyText = `Stock Daily | ${formatDate(report.reportDate, language)}
-${marketView.headline}
-${marketView.overview.interpretation}
-${marketUpdatedLabel}
-${marketAsOfLabel}
-${t.disclaimer}`;
-
   return (
     <div className="page-shell" data-render="ssr">
       <article className="hero hero-daily">
@@ -381,11 +277,6 @@ ${t.disclaimer}`;
             <div className="edition-row">
               <span className="edition-label">
                 {archiveIndex === 0 ? t.latest : t.history}
-              </span>
-              <span>
-                {formatTemplate(t.edition, {
-                  edition: String(report.edition).padStart(2, "0"),
-                })}
               </span>
               {report.isSample && (
                 <span className="sample-badge">{t.sample}</span>
@@ -403,7 +294,6 @@ ${t.disclaimer}`;
             </div>
           </div>
           <h1>{marketView.headline}</h1>
-          <p className="hero-summary">{marketView.summary}</p>
           <div className="publish-row">
             <div className="market-freshness">
               <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
@@ -411,11 +301,6 @@ ${t.disclaimer}`;
                 <span data-market-as-of={marketAsOf}>{marketAsOfLabel}</span>
               )}
             </div>
-            <CopyButton
-              text={copyText}
-              label={t.copy}
-              copiedLabel={t.copied}
-            />
           </div>
         </div>
       </article>
@@ -446,23 +331,14 @@ ${t.disclaimer}`;
           <div className="market-prices">
             <p className="market-price-heading">{t.currentMarkets}</p>
             <div
-              className={`market-grid${
-                marketMetrics.length === 4
-                  ? " market-grid-four"
-                  : marketMetrics.length === 2
-                    ? " market-grid-two"
-                    : ""
-              }`}
+              className={`market-grid market-grid-count-${marketMetrics.length}`}
             >
               {marketMetrics.map((market) => (
                 <article
                   className={`market-item market-item-${market.direction}`}
                   key={market.symbol ?? market.name}
                 >
-                  <div>
-                    <span>{market.name}</span>
-                    <small>{market.note}</small>
-                  </div>
+                  <span>{market.name}</span>
                   <strong>{market.value}</strong>
                   <em>{market.change}</em>
                 </article>
@@ -476,8 +352,6 @@ ${t.disclaimer}`;
         <HotspotBoard
           stories={marketStories}
           timeline={data.weekEvents}
-          overview={marketView.overview}
-          pricingConclusion={marketConclusion}
           thesisLedger={data.thesisLedger ?? []}
           market={data.market}
           language={language}
@@ -493,10 +367,8 @@ ${t.disclaimer}`;
             proof: t.proof,
             scheduled: t.eventScheduled,
             awaiting: t.eventAwaiting,
-            realized: t.eventRealized,
             cancelled: t.eventCancelled,
             postponed: t.eventPostponed,
-            result: t.eventResult,
             assessment: t.eventAssessment,
             next: t.eventNext,
             noData: t.eventNoData,
@@ -531,8 +403,6 @@ ${t.disclaimer}`;
             statusInvalidated: t.statusInvalidated,
             statusInconclusive: t.statusInconclusive,
             observation: t.observation,
-            favorable: t.favorable,
-            adverse: t.adverse,
           }}
         />
         {marketStories.length === 0 && (

@@ -1,5 +1,4 @@
 import {
-  Check,
   ChevronDown,
   Clock3,
   ExternalLink,
@@ -7,9 +6,7 @@ import {
 } from "lucide-react";
 import { toneLabel } from "../lib/i18n";
 import type {
-  ImpactTone,
   Language,
-  MarketOverview,
   MarketRegion,
   PricingSignal,
   SignalConfidence,
@@ -47,10 +44,8 @@ interface Labels {
   proof: string;
   scheduled: string;
   awaiting: string;
-  realized: string;
   cancelled: string;
   postponed: string;
-  result: string;
   assessment: string;
   next: string;
   noData: string;
@@ -85,15 +80,11 @@ interface Labels {
   statusInvalidated: string;
   statusInconclusive: string;
   observation: string;
-  favorable: string;
-  adverse: string;
 }
 
 interface Props {
   stories: LocalizedStory[];
   timeline: WeeklyEventTimeline | null;
-  overview: MarketOverview;
-  pricingConclusion: string;
   thesisLedger: ThesisLedgerEntry[];
   market: MarketRegion;
   language: Language;
@@ -168,9 +159,6 @@ function safeDisplayStatus(
 }
 
 function StatusIcon({ status }: { status: WeeklyEventDisplayStatus }) {
-  if (status === "realized") {
-    return <Check data-event-check aria-hidden="true" />;
-  }
   if (status === "cancelled") return <Minus aria-hidden="true" />;
   return <Clock3 aria-hidden="true" />;
 }
@@ -502,8 +490,6 @@ function SignalAnalysis({
 export default function HotspotBoard({
   stories,
   timeline,
-  overview,
-  pricingConclusion,
   thesisLedger,
   market,
   language,
@@ -530,19 +516,11 @@ export default function HotspotBoard({
 
   const statusLabels: Record<WeeklyEventDisplayStatus, string> = {
     scheduled: labels.scheduled,
-    awaiting: labels.awaiting,
-    realized: labels.realized,
+    awaiting: labels.scheduled,
+    realized: "",
     cancelled: labels.cancelled,
     postponed: labels.postponed,
   };
-  const impactGroups: Array<{
-    tone: Extract<ImpactTone, "positive" | "negative">;
-    title: string;
-    items: string[];
-  }> = [
-    { tone: "positive", title: labels.favorable, items: overview.positive },
-    { tone: "negative", title: labels.adverse, items: overview.negative },
-  ];
 
   return (
     <section
@@ -582,9 +560,26 @@ export default function HotspotBoard({
                         <time dateTime={event.date}>
                           {eventDate(event.date, language)}
                         </time>
-                        <span>
-                          <StatusIcon status={status} />
-                          {statusLabels[status]}
+                        <span
+                          className={
+                            status === "realized"
+                              ? `event-impact-tag event-impact-${event.impactTone ?? "neutral"}`
+                              : `event-status-tag event-status-${status}`
+                          }
+                          data-event-impact={
+                            status === "realized"
+                              ? event.impactTone ?? "neutral"
+                              : undefined
+                          }
+                        >
+                          {status === "realized" ? (
+                            toneLabel(event.impactTone ?? "neutral", language)
+                          ) : (
+                            <>
+                              <StatusIcon status={status} />
+                              {statusLabels[status]}
+                            </>
+                          )}
                         </span>
                       </div>
                       <h4>{localized.title}</h4>
@@ -673,32 +668,6 @@ export default function HotspotBoard({
             )}
           </section>
         )}
-
-        <section className="pricing-thesis">
-          <header>
-            <strong>{labels.pricingThesis}</strong>
-            <span className={`impact-badge impact-badge-${overview.tone}`}>
-              {toneLabel(overview.tone, language)}
-            </span>
-          </header>
-          <p>{pricingConclusion}</p>
-          <div className="pricing-thesis-impacts">
-            {impactGroups
-              .filter((group) => group.items.length > 0)
-              .map((group) => (
-                <div key={group.tone}>
-                  <strong>{group.title}</strong>
-                  <span>
-                    {group.items.map((item) => (
-                      <i className={`impact-${group.tone}`} key={item}>
-                        {item}
-                      </i>
-                    ))}
-                  </span>
-                </div>
-              ))}
-          </div>
-        </section>
 
         {groups.map((group) => (
           <section

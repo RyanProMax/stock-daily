@@ -279,6 +279,7 @@ export interface WeeklyEvent {
   result?: string;
   assessment?: string;
   nextWatch?: string;
+  impactTone?: Exclude<ImpactTone, "mixed">;
   resultSource?: string;
   resultSourceLabel?: string;
   resultVerifiedAt?: string;

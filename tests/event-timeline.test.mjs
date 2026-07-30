@@ -44,6 +44,7 @@ function weeklyFixture() {
         expectation: "市场预期维持政策利率不变。",
         expectationSource: "https://www.reuters.com/markets/rates-bonds/",
         expectationSourceLabel: "Reuters",
+        impactTone: "negative",
         assessment: "结果符合基准预期，但投票结构偏鹰。",
         nextWatch: "后续利率方向取决于通胀和就业。",
         source:
@@ -484,7 +485,12 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
     document.querySelectorAll('[data-event-state="scheduled"]').length,
     1,
   );
-  assert.equal(document.querySelectorAll("[data-event-check]").length, 1);
+  assert.equal(document.querySelectorAll("[data-event-impact]").length, 1);
+  assert.match(
+    document.querySelector("[data-event-impact]").textContent,
+    /利好|利空|中性/,
+  );
+  assert.doesNotMatch(document.body.textContent, /已兑现/);
   assert.equal(document.querySelectorAll("[data-event-result]").length, 1);
   assert.equal(
     document.querySelectorAll("[data-event-result] dl > div").length,
@@ -497,9 +503,12 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   assert.equal(document.querySelectorAll(".report-toolbar").length, 0);
   assert.equal(document.querySelectorAll(".hero-date-nav").length, 1);
   assert.equal(document.querySelectorAll(".market-status-layout").length, 1);
-  assert.match(
-    document.querySelector(".pricing-thesis").textContent,
-    /盘面结论.*%/s,
+  assert.equal(document.querySelectorAll(".pricing-thesis").length, 0);
+  assert.equal(document.querySelectorAll(".hero-summary").length, 0);
+  assert.equal(document.querySelectorAll(".copy-button").length, 0);
+  assert.doesNotMatch(
+    document.querySelector(".edition-row").textContent,
+    /第\s*\d+\s*期/,
   );
   assert.equal(
     document.querySelector(".archive-heading h2").textContent,

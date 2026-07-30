@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-weekly";
 const tones = new Set(["positive", "negative", "mixed"]);
+const eventImpactTones = new Set(["positive", "negative", "neutral"]);
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -123,6 +124,11 @@ function verifiedEventFields(source, index) {
       `upcomingEvents[${index}].verifiedOutcome 必须由事件一手来源核验`,
     );
   }
+  if (!eventImpactTones.has(outcome.impact)) {
+    throw new Error(
+      `upcomingEvents[${index}].verifiedOutcome.impact 必须为 positive、negative 或 neutral`,
+    );
+  }
   return {
     ...fields,
     status: "realized",
@@ -144,6 +150,7 @@ function verifiedEventFields(source, index) {
       8,
       180,
     ),
+    impactTone: outcome.impact,
     resultSource,
     resultSourceLabel: text(
       outcome.sourceLabel,

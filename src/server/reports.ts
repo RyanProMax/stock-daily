@@ -77,7 +77,7 @@ const fallbackReports = [...(fallbackReportsJson as DailyReport[])].sort((a, b) 
 const legacyInsights = storyInsightsJson as Record<string, StoryInsight>;
 const heatThreshold = 70;
 const primaryIndexSymbols: Record<MarketRegion, Set<string>> = {
-  CN: new Set(["SSE", "CSI300"]),
+  CN: new Set(["SSE", "SZSE", "CSI300", "CSI500", "CHINEXT", "STAR50"]),
   US: new Set(["SPX", "IXIC", "DJI"]),
 };
 const eventTokenStopwords = new Set([
@@ -368,6 +368,10 @@ function findEventOutcome(
       return {
         result: story.summary,
         resultEn: report.translations?.en?.stories[index]?.summary,
+        impactTone:
+          story.ai?.tone === "positive" || story.ai?.tone === "negative"
+            ? story.ai.tone
+            : ("neutral" as Exclude<ImpactTone, "mixed">),
         resultSource: story.source,
         resultSourceLabel: story.sourceLabel,
         resultVerifiedAt: story.publishedAt,
@@ -411,6 +415,10 @@ export function buildWeeklyEventTimeline(
         ? {
             result: event.result,
             resultEn: translation?.result,
+            impactTone: (event.impactTone ?? "neutral") as Exclude<
+              ImpactTone,
+              "mixed"
+            >,
             resultSource: event.resultSource,
             resultSourceLabel: event.resultSourceLabel,
             resultVerifiedAt: event.resultVerifiedAt,
@@ -504,7 +512,11 @@ function normalizeOverview(
 function marketRegion(market: Partial<MarketMetric>): MarketRegion {
   return market.region === "CN" ||
     market.symbol === "SSE" ||
-    market.symbol === "CSI300"
+    market.symbol === "SZSE" ||
+    market.symbol === "CSI300" ||
+    market.symbol === "CSI500" ||
+    market.symbol === "CHINEXT" ||
+    market.symbol === "STAR50"
     ? "CN"
     : "US";
 }
