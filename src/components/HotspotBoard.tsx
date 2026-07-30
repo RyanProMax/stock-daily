@@ -5,7 +5,7 @@ import {
   ExternalLink,
   Minus,
 } from "lucide-react";
-import { formatTemplate, toneLabel } from "../lib/i18n";
+import { toneLabel } from "../lib/i18n";
 import type {
   ImpactTone,
   Language,
@@ -66,7 +66,6 @@ interface Labels {
   invalidateIf: string;
   verifyBy: string;
   confidence: string;
-  signalScore: string;
   coreSignal: string;
   supportingSignal: string;
   horizonIntraday: string;
@@ -78,8 +77,6 @@ interface Labels {
   sourceFirstParty: string;
   sourceWire: string;
   sourceSecondary: string;
-  thesisLedger: string;
-  ledgerEmpty: string;
   statusPending: string;
   statusConfirmed: string;
   statusPartial: string;
@@ -307,10 +304,12 @@ function MetricGrid({
 
 function SignalAnalysis({
   story,
+  ledgerEntry,
   labels,
   language,
 }: {
   story: LocalizedStory;
+  ledgerEntry?: ThesisLedgerEntry;
   labels: Labels;
   language: Language;
 }) {
@@ -353,6 +352,9 @@ function SignalAnalysis({
       </div>
     );
   }
+  const checkpoint = ledgerEntry
+    ? localizedLedgerEntry(ledgerEntry, language).checkpoint
+    : signal.checkpoint;
 
   return (
     <div className="hotspot-analysis signal-analysis" id={`story-${story.id}`}>
@@ -423,27 +425,52 @@ function SignalAnalysis({
       <section className="signal-checkpoint">
         <header>
           <strong>{labels.checkpoint}</strong>
-          <span className={`ledger-status status-${signal.checkpoint.status}`}>
-            {statusLabel(signal.checkpoint.status, labels)}
+          <span className={`ledger-status status-${checkpoint.status}`}>
+            {statusLabel(checkpoint.status, labels)}
           </span>
         </header>
-        <h5>{signal.checkpoint.metric}</h5>
+        <h5>{checkpoint.metric}</h5>
         <dl>
           <div>
             <dt>{labels.confirmIf}</dt>
-            <dd>{signal.checkpoint.confirmIf}</dd>
+            <dd>{checkpoint.confirmIf}</dd>
           </div>
           <div>
             <dt>{labels.invalidateIf}</dt>
-            <dd>{signal.checkpoint.invalidateIf}</dd>
+            <dd>{checkpoint.invalidateIf}</dd>
           </div>
         </dl>
         <p>
           {labels.verifyBy}{" "}
-          <time dateTime={signal.checkpoint.dueAt}>
-            {eventDate(signal.checkpoint.dueAt, language)}
+          <time dateTime={checkpoint.dueAt}>
+            {eventDate(checkpoint.dueAt, language)}
           </time>
         </p>
+        {checkpoint.observation && (
+          <div className="checkpoint-observation" data-signal-review>
+            <strong>{labels.observation}</strong>
+            <p>{checkpoint.observation}</p>
+            {(checkpoint.resultSource || checkpoint.verifiedAt) && (
+              <div>
+                {checkpoint.resultSource && (
+                  <a
+                    href={checkpoint.resultSource.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {checkpoint.resultSource.label}
+                    <ExternalLink aria-hidden="true" />
+                  </a>
+                )}
+                {checkpoint.verifiedAt && (
+                  <time dateTime={checkpoint.verifiedAt}>
+                    {eventDate(checkpoint.verifiedAt, language)}
+                  </time>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <details className="hotspot-proof">
@@ -479,6 +506,9 @@ export default function HotspotBoard({
       stories: rankedStories.filter((item) => item.role === "supporting"),
     },
   ].filter((group) => group.stories.length > 0);
+  const ledgerByStory = new Map(
+    thesisLedger.map((entry) => [entry.storyId, entry]),
+  );
 
   if (groups.length === 0 && !timeline) return null;
 
@@ -658,11 +688,6 @@ export default function HotspotBoard({
                                   labels,
                                 )}
                               </i>
-                              <i>
-                                {formatTemplate(labels.signalScore, {
-                                  value: story.signal.score,
-                                })}
-                              </i>
                             </>
                           ) : (
                             <>
@@ -700,6 +725,7 @@ export default function HotspotBoard({
                     </summary>
                     <SignalAnalysis
                       story={story}
+                      ledgerEntry={ledgerByStory.get(story.id)}
                       labels={labels}
                       language={language}
                     />
@@ -710,62 +736,6 @@ export default function HotspotBoard({
           </section>
         ))}
 
-        <section className="thesis-ledger">
-          <header>
-            <strong>{labels.thesisLedger}</strong>
-          </header>
-          {thesisLedger.length === 0 ? (
-            <p>{labels.ledgerEmpty}</p>
-          ) : (
-            <div className="thesis-ledger-grid">
-              {thesisLedger.slice(0, 6).map((entry) => {
-                const localized = localizedLedgerEntry(entry, language);
-                return (
-                  <article key={entry.id}>
-                    <div>
-                      <time dateTime={entry.reportDate}>
-                        {entry.reportDate.slice(5).replace("-", ".")}
-                      </time>
-                      <span
-                        className={`ledger-status status-${entry.checkpoint.status}`}
-                      >
-                        {statusLabel(entry.checkpoint.status, labels)}
-                      </span>
-                    </div>
-                    <h4>{localized.title}</h4>
-                    <p>{localized.thesis}</p>
-                    <dl>
-                      <div>
-                        <dt>{labels.checkpoint}</dt>
-                        <dd>{localized.checkpoint.metric}</dd>
-                      </div>
-                      <div>
-                        <dt>{labels.verifyBy}</dt>
-                        <dd>{entry.checkpoint.dueAt}</dd>
-                      </div>
-                    </dl>
-                    {localized.checkpoint.observation && (
-                      <div className="ledger-observation">
-                        <strong>{labels.observation}</strong>
-                        <p>{localized.checkpoint.observation}</p>
-                        {entry.checkpoint.resultSource && (
-                          <a
-                            href={entry.checkpoint.resultSource.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {entry.checkpoint.resultSource.label}
-                            <ExternalLink aria-hidden="true" />
-                          </a>
-                        )}
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
       </div>
     </section>
   );

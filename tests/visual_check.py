@@ -42,6 +42,11 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     page.add_style_tag(content="html { scroll-behavior: auto !important; }")
     page.wait_for_selector(".date-select-trigger")
     page.wait_for_timeout(600)
+    page.locator(".hotspot-story").evaluate_all(
+        "(elements) => elements.forEach((element) => { element.open = true; })"
+    )
+    page.evaluate("document.fonts.ready")
+    page.wait_for_timeout(200)
 
     controls = page.locator(".date-arrow, .date-select-trigger")
     control_heights = [
@@ -83,6 +88,45 @@ def inspect_page(page, prefix, path, market, expected_market_count):
             '.hotspot-story > summary, .hotspot-source, .hotspot-analysis'
           )].filter(element => element.scrollWidth > element.clientWidth + 1)
             .length,
+          expandedStoryCount: document.querySelectorAll(
+            '.hotspot-story[open]'
+          ).length,
+          clippedExpandedContent: [...document.querySelectorAll(
+            '.hotspot-story[open] .hotspot-analysis *'
+          )].filter(element => {
+            const style = getComputedStyle(element);
+            const clippedX = ['hidden', 'clip'].includes(style.overflowX) &&
+              element.scrollWidth > element.clientWidth + 1;
+            const clippedY = ['hidden', 'clip'].includes(style.overflowY) &&
+              element.scrollHeight > element.clientHeight + 1;
+            return clippedX || clippedY;
+          }).map(element => element.textContent.trim().slice(0, 80)),
+          analysisHorizontalOverflow: [...document.querySelectorAll(
+            '.hotspot-story[open] .hotspot-analysis'
+          )].filter(element => element.scrollWidth > element.clientWidth + 1)
+            .length,
+          separateLedgerCount: document.querySelectorAll(
+            '.thesis-ledger'
+          ).length,
+          visibleForbiddenCopy: (
+            document.querySelector('main')?.innerText.match(
+              /API\\s*Skill|market_data_query|codex-daily|agentModel|信号分|Signal score/gi
+            ) ?? []
+          ),
+          visibleRawTimestamps: (
+            document.querySelector('main')?.innerText.match(
+              /\\b\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z\\b/g
+            ) ?? []
+          ),
+          archiveRowHeights: [...document.querySelectorAll(
+            '.archive-list a'
+          )].map(element => Math.round(element.getBoundingClientRect().height)),
+          archiveTitleSizes: [...document.querySelectorAll(
+            '.archive-list strong'
+          )].map(element => Number.parseFloat(getComputedStyle(element).fontSize)),
+          archiveHeadingSize: Number.parseFloat(getComputedStyle(
+            document.querySelector('.archive-heading h2')
+          ).fontSize),
           marketUpdateCount: document.querySelectorAll(
             '.market-freshness time'
           ).length,
@@ -138,6 +182,9 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     page.locator(".hotspot-board").first.scroll_into_view_if_needed()
     page.wait_for_timeout(250)
     page.screenshot(path=str(SCREENSHOT_DIR / f"{prefix}-signal.png"))
+    page.locator(".hotspot-board").first.screenshot(
+        path=str(SCREENSHOT_DIR / f"{prefix}-board-expanded.png")
+    )
     page.add_style_tag(
         content=(
             ".masthead { position: static !important; } "
@@ -148,6 +195,10 @@ def inspect_page(page, prefix, path, market, expected_market_count):
     page.wait_for_timeout(250)
     page.locator(".archive-section").screenshot(
         path=str(SCREENSHOT_DIR / f"{prefix}-archive.png")
+    )
+    page.screenshot(
+        path=str(SCREENSHOT_DIR / f"{prefix}-full-expanded.png"),
+        full_page=True,
     )
 
     drawer = None
@@ -277,17 +328,22 @@ with sync_playwright() as playwright:
     )
     neutral.evaluate("document.fonts.ready")
     neutral_badge = neutral.locator(".impact-badge").filter(has_text="中性")
-    neutral_badge.first.scroll_into_view_if_needed()
-    neutral.wait_for_timeout(250)
-    neutral.screenshot(
-        path=str(SCREENSHOT_DIR / f"{ENGINE}-mobile-390-neutral.png")
-    )
+    if neutral_badge.count() > 0:
+        neutral_badge.first.scroll_into_view_if_needed()
+        neutral.wait_for_timeout(250)
+        neutral.screenshot(
+            path=str(SCREENSHOT_DIR / f"{ENGINE}-mobile-390-neutral.png")
+        )
     result["neutral"] = {
         "count": neutral_badge.count(),
         "legacyPendingCount": neutral.get_by_text("待确认", exact=True).count(),
         "legacyUnclearCount": neutral.get_by_text("方向未明", exact=True).count(),
-        "wrapped": neutral_badge.first.evaluate(
-            "element => element.scrollHeight > element.clientHeight + 1"
+        "wrapped": (
+            neutral_badge.first.evaluate(
+                "element => element.scrollHeight > element.clientHeight + 1"
+            )
+            if neutral_badge.count() > 0
+            else False
         ),
     }
 
@@ -344,6 +400,24 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["marketCount"] == audit["expectedMarketCount"], result
     assert audit["layout"]["heatCount"] == 3, result
     assert 3 <= audit["layout"]["storyCount"] <= 6, result
+    assert audit["layout"]["expandedStoryCount"] == audit["layout"]["storyCount"], result
+    assert audit["layout"]["hotspotOverflowCount"] == 0, result
+    assert audit["layout"]["analysisHorizontalOverflow"] == 0, result
+    assert audit["layout"]["clippedExpandedContent"] == [], result
+    assert audit["layout"]["separateLedgerCount"] == 0, result
+    assert audit["layout"]["visibleForbiddenCopy"] == [], result
+    assert audit["layout"]["visibleRawTimestamps"] == [], result
+    assert all(
+        height <= (54 if is_mobile else 60)
+        for height in audit["layout"]["archiveRowHeights"]
+    ), result
+    assert all(
+        size <= (13 if is_mobile else 14)
+        for size in audit["layout"]["archiveTitleSizes"]
+    ), result
+    assert audit["layout"]["archiveHeadingSize"] <= (
+        12 if is_mobile else 14
+    ), result
     assert all(
         any(str(value) in count for value in range(3, 7))
         for count in audit["layout"]["archiveCounts"]
@@ -407,12 +481,9 @@ assert all(
 assert set(result["english"]["archiveTrends"]).issubset(
     {"Indexes up", "Indexes down", "Indexes mixed", "Indexes flat"}
 ), result
-assert result["neutral"] == {
-    "count": 1,
-    "legacyPendingCount": 0,
-    "legacyUnclearCount": 0,
-    "wrapped": False,
-}, result
+assert result["neutral"]["legacyPendingCount"] == 0, result
+assert result["neutral"]["legacyUnclearCount"] == 0, result
+assert result["neutral"]["wrapped"] is False, result
 assert result["weekly"]["hasSsrHtml"], result
 assert (
     result["weekly"]["hasOutlook"] and result["weekly"]["hasEvents"]

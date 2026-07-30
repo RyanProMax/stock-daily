@@ -631,7 +631,7 @@ test("CN sector close accepts only Yahoo quotes inside settlement grace", () => 
   assert.equal(yahooSectorPoint(payload, cutoffTime), null);
 });
 
-test("daily market pack maps the API Skill contract without changing report fields", () => {
+test("daily market pack keeps implementation labels out of reader-facing notes", () => {
   const apiMarkets = input.markets.map((market) => ({
     symbol: market.symbol,
     name: market.name,
@@ -670,7 +670,11 @@ test("daily market pack maps the API Skill contract without changing report fiel
     ["SPX", "IXIC", "DJI", "DGS10", "SSE", "CSI300"],
   );
   assert.equal(normalized.markets[3].value, "4.71%");
-  assert.match(normalized.markets[3].note, /API Skill/);
+  assert.equal(normalized.markets[3].note, "Fixture close · 07-23");
+  assert.doesNotMatch(
+    normalized.markets.map((market) => market.note).join(" "),
+    /API\s*Skill|market_data_query/i,
+  );
   assert.equal(normalized.diagnostics.persistence, "none");
   assert.equal(normalized.diagnostics.providers.length, 6);
 });
@@ -977,7 +981,7 @@ test("official and truncated summaries are hydrated from the source page", () =>
   );
 });
 
-test("header rejects duplicate market numbers and named companies require tickers", () => {
+test("header rejects duplicate market numbers and derives verified company tickers", () => {
   assert.throws(
     () =>
       validateReport(
@@ -998,12 +1002,20 @@ test("header rejects duplicate market numbers and named companies require ticker
     "Apple与Nvidia上调业绩指引，收入增长改善盈利预期。";
   storiesWithoutNvidia[0].sectors = ["消费电子", "半导体"];
   storiesWithoutNvidia[0].tickers = ["AAPL"];
-  assert.throws(
-    () =>
-      validateReport(
-        reportWith(storiesWithoutNvidia),
-        missingTicker,
-      ),
-    /必须填写 NVDA/,
+  const enrichedReport = validateReport(
+    reportWith(storiesWithoutNvidia),
+    missingTicker,
   );
+  assert.deepEqual(enrichedReport.stories[0].tickers, ["AAPL", "NVDA"]);
+
+  const chineseAliasInput = structuredClone(input);
+  chineseAliasInput.news[0].title =
+    "Apple raises guidance while 微软 expands cloud capacity";
+  chineseAliasInput.news[0].facts =
+    `${chineseAliasInput.news[0].facts} 微软扩大了云计算容量。`;
+  const chineseAliasReport = validateReport(
+    reportWith(validStories),
+    chineseAliasInput,
+  );
+  assert.deepEqual(chineseAliasReport.stories[0].tickers, ["AAPL", "MSFT"]);
 });

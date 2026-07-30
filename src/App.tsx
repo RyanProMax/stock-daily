@@ -408,7 +408,6 @@ ${t.disclaimer}`;
             invalidateIf: t.invalidateIf,
             verifyBy: t.verifyBy,
             confidence: t.confidence,
-            signalScore: t.signalScore,
             coreSignal: t.coreSignal,
             supportingSignal: t.supportingSignal,
             horizonIntraday: t.horizonIntraday,
@@ -420,8 +419,6 @@ ${t.disclaimer}`;
             sourceFirstParty: t.sourceFirstParty,
             sourceWire: t.sourceWire,
             sourceSecondary: t.sourceSecondary,
-            thesisLedger: t.thesisLedger,
-            ledgerEmpty: t.ledgerEmpty,
             statusPending: t.statusPending,
             statusConfirmed: t.statusConfirmed,
             statusPartial: t.statusPartial,
@@ -438,11 +435,8 @@ ${t.disclaimer}`;
       </section>
 
       <section id="archive" className="archive-section">
-        <div className="section-intro">
-          <span className="section-index">03</span>
-          <div>
-            <h2>{t.previous}</h2>
-          </div>
+        <div className="archive-heading">
+          <h2>{t.previous}</h2>
         </div>
         <div className="archive-list">
           {otherEditions.map((edition) => (

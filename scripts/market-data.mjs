@@ -123,7 +123,7 @@ export function normalizeDailyMarketPack(payload) {
       note: `${requireText(
         market.source_label,
         `${symbol}.source_label`,
-      )} · API Skill · ${asOf.slice(5)}`,
+      )} · ${asOf.slice(5)}`,
       source,
       asOf,
     };

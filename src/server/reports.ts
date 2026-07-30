@@ -212,6 +212,7 @@ export function deriveThesisLedger(
   reports: DailyReport[],
   throughDate: string,
   market: MarketRegion,
+  originDate?: string,
 ): ThesisLedgerEntry[] {
   const ordered = [...reports]
     .filter((report) => report.reportDate <= throughDate)
@@ -219,6 +220,7 @@ export function deriveThesisLedger(
   const entries: ThesisLedgerEntry[] = [];
 
   for (const report of ordered) {
+    if (originDate && report.reportDate !== originDate) continue;
     for (const [index, story] of report.stories.entries()) {
       const signal = story.signal;
       const role = signal?.roleByMarket[market];
@@ -570,6 +572,14 @@ function normalizeMarketAsOf(
   );
 }
 
+function readerFacingMarketNote(note: string) {
+  return note
+    .replace(/\s*·\s*API\s*Skill\b/giu, "")
+    .replace(/\s*·\s*market_data_query\b/giu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function normalizeReport(report: StoredDailyReport): DailyReport {
   const marketViews =
     report.marketViews?.CN && report.marketViews?.US
@@ -583,6 +593,7 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
     markets: report.markets.map((market) => ({
       ...market,
       region: marketRegion(market),
+      note: readerFacingMarketNote(market.note),
     })),
     stories: report.stories.map((story) => ({
       ...story,
@@ -892,11 +903,16 @@ export async function getDailyReport(
 
 export async function getThesisLedger(
   db: D1Database | undefined,
-  throughDate: string,
+  reportDate: string,
   market: MarketRegion,
 ): Promise<ThesisLedgerEntry[]> {
   if (!db) {
-    return deriveThesisLedger(fallbackReports, throughDate, market);
+    return deriveThesisLedger(
+      fallbackReports,
+      fallbackReports[0]?.reportDate ?? reportDate,
+      market,
+      reportDate,
+    );
   }
   const rows = await db
     .prepare(
@@ -910,11 +926,9 @@ export async function getThesisLedger(
          agent_model AS agentModel,
          content
        FROM daily_reports
-       WHERE report_date <= ?
        ORDER BY report_date DESC
        LIMIT 30`,
     )
-    .bind(throughDate)
     .all<LedgerDailyRow>();
   const reports = rows.results.flatMap((row) => {
     try {
@@ -923,7 +937,12 @@ export async function getThesisLedger(
       return [];
     }
   });
-  return deriveThesisLedger(reports, throughDate, market);
+  return deriveThesisLedger(
+    reports,
+    reports[0]?.reportDate ?? reportDate,
+    market,
+    reportDate,
+  );
 }
 
 export async function getDailyHeatHistory(

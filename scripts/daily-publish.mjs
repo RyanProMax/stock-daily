@@ -151,6 +151,9 @@ function topicTags(title) {
   if (/\bopec\b|\boil\b|\bcrude\b|欧佩克|原油|油价/.test(normalized)) {
     topics.add("energy");
   }
+  if (/\bgold\b|\bsilver\b|\bcopper\b|黄金|白银|铜价/.test(normalized)) {
+    topics.add("metals");
+  }
   if (
     /\btariff\b|\btrade deal\b|\bsanction\b|关税|贸易|出口|进口/.test(normalized)
   ) {
@@ -226,7 +229,7 @@ function assertToneIsAnalyzed(tone, interpretation, generatedText, label) {
   }
   const toneSignals = {
     positive: /利好|支撑|改善|提振|增强|上修|受益/,
-    negative: /利空|压制|恶化|下修|承压|削弱|挤压/,
+    negative: /利空|压制|压低|恶化|下修|承压|削弱|挤压|拖累/,
     mixed: /分化|利好.{0,50}利空|受益.{0,50}承压|支撑.{0,50}压制|一方面.{0,80}(另一方面|但|同时)/,
     neutral: /中性|整体稳定|例行(?:发行|公布|更新)|正负因素.{0,20}(抵消|平衡)|不改变.{0,20}(预期|方向|定价)/,
   };
@@ -795,7 +798,7 @@ function validateAgentSignal(
   ].join(" ");
   assertStoryFactsBounded(sourceFacts, generatedText);
   if (
-    /投资者(可以|应当|应该)|值得关注|投资机会|建议|买入|卖出|仓位|目标价/.test(
+    /投资者(可以|应当|应该)|值得关注|投资机会|(?:建议|应该|应当|可以).{0,6}(?:买入|卖出)|(?:买入|卖出)(?:建议|评级)|仓位|目标价/.test(
       generatedText,
     )
   ) {
@@ -976,20 +979,32 @@ export function validateReport(value, input) {
     ) {
       throw new Error(`stories[${index}] 缺少具体市场传导机制`);
     }
-    const tickers = stringArray(
-      story.tickers,
-      `stories[${index}].tickers`,
-      4,
-      6,
-      0,
-    )
-      .map((ticker) => ticker.toUpperCase())
-      .filter(
-        (ticker) =>
-          (/^[A-Z][A-Z0-9.-]{0,7}$/.test(ticker) ||
-            /^\d{6}$/.test(ticker)) &&
-          tickerIsSupported(ticker, sourceFacts),
-      );
+    const enrichedTickers = new Set(
+      enrichment.entities.map((entity) => entity.ticker),
+    );
+    const tickers = [
+      ...new Set([
+        ...stringArray(
+          story.tickers,
+          `stories[${index}].tickers`,
+          4,
+          6,
+          0,
+        )
+          .map((ticker) => ticker.toUpperCase())
+          .filter(
+            (ticker) =>
+              (/^[A-Z][A-Z0-9.-]{0,7}$/.test(ticker) ||
+                /^\d{6}$/.test(ticker)) &&
+              (tickerIsSupported(ticker, sourceFacts) ||
+                enrichedTickers.has(ticker)),
+          ),
+        ...enrichedTickers,
+      ]),
+    ];
+    if (tickers.length > 4) {
+      throw new Error(`stories[${index}].tickers 来源公司超过 4 个`);
+    }
     for (const group of requiredTickerGroups(sourceFacts)) {
       if (!group.accepted.some((ticker) => tickers.includes(ticker))) {
         throw new Error(
