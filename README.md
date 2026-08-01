@@ -1,6 +1,6 @@
 # Stock Daily
 
-一个部署在 Cloudflare Pages、使用 Cloudflare D1 保存历史日报和周报的双语市场备忘录。页面以“本周关键事件 → AI 总览 → 中美市场状态 → 重点新闻 → 其他日报”组织核心信息。
+一个部署在 Cloudflare Pages、使用 Cloudflare D1 保存历史日报和周报的双语市场备忘录。页面以“市场快照 → 定价信号板 → 往期日报”组织核心信息。
 
 线上地址：[stock-daily-4ip.pages.dev](https://stock-daily-4ip.pages.dev/)
 
@@ -11,9 +11,9 @@
 - `/api/reports` 返回日报归档
 - `/api/reports/:date` 返回指定日期完整日报
 - 首页使用单一日期入口切换期次，并通过归档列表回溯
-- 数据库不可用时回退到内置样刊
+- 本地 SSR 与本地 API 读取线上只读数据，不使用本地样刊或空数据库降级
 - Agent 每日解读重点新闻，标注利好/利空、受影响板块与可验证个股
-- 采集器按本期期数计算 CN/US 各 3 个一级行业价格热度，SSR 按交易日识别连续高热板块
+- 采集器按本期期数计算 CN/US 各 6 个一级行业价格热度，SSR 按交易日识别连续高热板块
 - 日报顶部按格子展示本周关键事件；只有兑现结果、同一官方来源和核验时间齐全时才标绿打勾
 - 市场状态明确显示数据截至今天、昨天或最近交易日的具体收盘日
 - 每条新闻保留原始标题、最小核验事实、来源 URL、发布时间和模型版本
@@ -25,12 +25,10 @@
 
 ```bash
 npm install
-npm run data:compact
-npm run db:migrate:local
 npm run pages:dev
 ```
 
-`npm run dev` 会先构建 Pages Advanced Mode worker，再启动本地 Wrangler。
+`npm run dev` 会先构建 Pages Advanced Mode worker，再启动本地 Wrangler。Cloudflare Pages 本地模式不支持直接绑定远程 D1，因此本地 SSR 和 `/api/*` 均通过线上只读 API 读取生产数据；线上页面仍直接读取 D1。线上数据不可用时本地会返回明确错误，不会回退到仓库内的历史样刊。
 
 ## 数据更新
 

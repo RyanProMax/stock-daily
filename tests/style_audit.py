@@ -21,9 +21,9 @@ SELECTORS = {
     "date": ".date-select-trigger",
     "hero_title": ".hero h1",
     "section_title": ".section-intro h2",
-    "market_name": ".market-item span",
-    "market_value": ".market-item strong",
-    "market_change": ".market-item em",
+    "market_name": ".snapshot-item-top span, .snapshot-item-top a",
+    "market_value": ".snapshot-item strong",
+    "market_change": ".snapshot-item-top em",
     "event_impact": "[data-event-impact]",
     "story_meta": ".hotspot-title > span",
     "story_title": ".hotspot-title > strong",
@@ -98,7 +98,7 @@ def audit_page(browser, path, viewport, prefix):
           const shortSelectors = [
             '.control-button',
             '.date-select-trigger',
-            '.edition-row > span',
+            '.sample-badge',
             '.impact-badge',
             '.category',
             '.importance',
@@ -108,7 +108,7 @@ def audit_page(browser, path, viewport, prefix):
           const boxes = [...document.querySelectorAll(shortSelectors)];
           const overlaps = [];
           const visible = [...document.querySelectorAll(
-            '.masthead-inner > *, .hero > *, .market-item, .signal-meta > *'
+            '.masthead-inner > *, .hero-meta-row > *, .snapshot-item, .signal-meta > *'
           )].filter(element => {
             const rect = element.getBoundingClientRect();
             return rect.width > 0 && rect.height > 0;

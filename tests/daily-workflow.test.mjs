@@ -225,6 +225,42 @@ const input = {
         "https://www.csindex.com.cn/#/indices/family/detail?indexCode=932082",
     },
     {
+      market: "CN",
+      symbol: "932077",
+      name: "能源",
+      nameEn: "Energy",
+      score: 50,
+      change: "+2.50%",
+      direction: "up",
+      asOf: "2026-07-24",
+      source:
+        "https://www.csindex.com.cn/#/indices/family/detail?indexCode=932077",
+    },
+    {
+      market: "CN",
+      symbol: "932079",
+      name: "工业",
+      nameEn: "Industrials",
+      score: 40,
+      change: "-2.00%",
+      direction: "down",
+      asOf: "2026-07-24",
+      source:
+        "https://www.csindex.com.cn/#/indices/family/detail?indexCode=932079",
+    },
+    {
+      market: "CN",
+      symbol: "932080",
+      name: "可选消费",
+      nameEn: "Consumer Discretionary",
+      score: 30,
+      change: "+1.50%",
+      direction: "up",
+      asOf: "2026-07-24",
+      source:
+        "https://www.csindex.com.cn/#/indices/family/detail?indexCode=932080",
+    },
+    {
       market: "US",
       symbol: "XLRE",
       name: "房地产",
@@ -259,6 +295,42 @@ const input = {
       asOf: "2026-07-24",
       source:
         "https://www.nasdaq.com/market-activity/etf/xlk/historical",
+    },
+    {
+      market: "US",
+      symbol: "XLE",
+      name: "能源",
+      nameEn: "Energy",
+      score: 40,
+      change: "+1.20%",
+      direction: "up",
+      asOf: "2026-07-24",
+      source:
+        "https://www.nasdaq.com/market-activity/etf/xle/historical",
+    },
+    {
+      market: "US",
+      symbol: "XLF",
+      name: "金融",
+      nameEn: "Financials",
+      score: 30,
+      change: "-0.90%",
+      direction: "down",
+      asOf: "2026-07-24",
+      source:
+        "https://www.nasdaq.com/market-activity/etf/xlf/historical",
+    },
+    {
+      market: "US",
+      symbol: "XLU",
+      name: "公用事业",
+      nameEn: "Utilities",
+      score: 20,
+      change: "+0.60%",
+      direction: "up",
+      asOf: "2026-07-24",
+      source:
+        "https://www.nasdaq.com/market-activity/etf/xlu/historical",
     },
   ],
   news: [
@@ -585,6 +657,15 @@ test("local Codex report contract accepts bounded facts and filters tickers", ()
   const checkedInput = validateInput(input);
   const checkedReport = validateReport(reportWith(validStories), checkedInput);
 
+  assert.equal(checkedInput.sectorHeat.length, 12);
+  assert.equal(
+    checkedInput.sectorHeat.filter((sector) => sector.market === "CN").length,
+    6,
+  );
+  assert.equal(
+    checkedInput.sectorHeat.filter((sector) => sector.market === "US").length,
+    6,
+  );
   assert.deepEqual(checkedReport.stories[0].tickers, ["AAPL"]);
   assert.equal(checkedReport.stories[1].tone, "negative");
 });

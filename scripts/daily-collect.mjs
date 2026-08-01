@@ -4,7 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchDailyMarketPack } from "./market-data.mjs";
 import { collectNews } from "./news-pipeline.mjs";
-import { collectSectorHeat } from "./sector-heat.mjs";
+import {
+  SECTOR_COUNT_PER_MARKET,
+  collectSectorHeat,
+} from "./sector-heat.mjs";
 import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
@@ -145,9 +148,12 @@ async function main() {
   }
   if (
     heatInputIndex >= 0 &&
-    (!Array.isArray(sectorHeatOverride) || sectorHeatOverride.length !== 6)
+    (!Array.isArray(sectorHeatOverride) ||
+      sectorHeatOverride.length !== SECTOR_COUNT_PER_MARKET * 2)
   ) {
-    throw new Error("--heat-input 必须包含六项已审计 sectorHeat");
+    throw new Error(
+      `--heat-input 必须包含 ${SECTOR_COUNT_PER_MARKET * 2} 项已审计 sectorHeat`,
+    );
   }
   const input = await collectDailyInput({
     reportDate,

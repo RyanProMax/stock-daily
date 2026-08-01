@@ -88,12 +88,24 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           heroHeight: Math.round(document.querySelector(
             '.hero'
           ).getBoundingClientRect().height),
+          heroBorderTopWidth: getComputedStyle(
+            document.querySelector('.hero')
+          ).borderTopWidth,
+          heroBorderBottomWidth: getComputedStyle(
+            document.querySelector('.hero')
+          ).borderBottomWidth,
+          publishBorderTopWidth: getComputedStyle(
+            document.querySelector('.hero .publish-row')
+          ).borderTopWidth,
           marketStatusHeight: Math.round(document.querySelector(
-            '.market-status-layout'
+            '.market-snapshot'
           ).getBoundingClientRect().height),
-          marketCount: document.querySelectorAll('.market-item').length,
+          marketCount: document.querySelectorAll('.snapshot-item-index').length,
+          indexColumnCount: getComputedStyle(document.querySelector(
+            '.snapshot-index-grid'
+          )).gridTemplateColumns.split(' ').length,
           marketValueOverlapCount: [...document.querySelectorAll(
-            '.market-item'
+            '.snapshot-item-index'
           )].filter(element => {
             const value = element.querySelector('strong');
             const change = element.querySelector('em');
@@ -105,12 +117,12 @@ def inspect_page(page, prefix, path, market, expected_market_count):
               valueBox.top < changeBox.bottom &&
               valueBox.bottom > changeBox.top;
           }).length,
-          heatCount: document.querySelectorAll('.heat-item').length,
+          heatCount: document.querySelectorAll('.snapshot-item-sector').length,
           heatUpColors: [...document.querySelectorAll(
-            '.heat-item-up .heat-item-top b'
+            '.snapshot-item-sector.snapshot-item-up .snapshot-item-top em'
           )].map(element => getComputedStyle(element).color),
           heatDownColors: [...document.querySelectorAll(
-            '.heat-item-down .heat-item-top b'
+            '.snapshot-item-sector.snapshot-item-down .snapshot-item-top em'
           )].map(element => getComputedStyle(element).color),
           storyCount: document.querySelectorAll('.hotspot-story').length,
           hotspotCount: document.querySelectorAll('.hotspot-group li').length,
@@ -177,7 +189,7 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           heroSummaryCount: document.querySelectorAll('.hero-summary').length,
           copyButtonCount: document.querySelectorAll('.copy-button').length,
           duplicateEditionCount: [...document.querySelectorAll(
-            '.edition-row > span'
+            '.hero-title-row > span'
           )].filter(element => /第\\s*\\d+\\s*期/.test(element.textContent))
             .length,
           archiveTitles: [...document.querySelectorAll('.archive-list strong')]
@@ -223,6 +235,30 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           pricingThesisCount: document.querySelectorAll(
             '.pricing-thesis'
           ).length,
+          groupHeaderStyles: [...document.querySelectorAll(
+            '.hotspot-events > header, .hotspot-group > header'
+          )].map(element => {
+            const style = getComputedStyle(element);
+            return {
+              backgroundColor: style.backgroundColor,
+              borderLeftColor: style.borderLeftColor,
+              borderLeftWidth: style.borderLeftWidth,
+              color: style.color,
+              height: Math.round(element.getBoundingClientRect().height)
+            };
+          }),
+          realizedEventShadows: [...document.querySelectorAll(
+            '.hotspot-event-realized'
+          )].map(element => getComputedStyle(element).boxShadow),
+          pricingBoardStyle: (() => {
+            const style = getComputedStyle(document.querySelector(
+              '.pricing-board'
+            ));
+            return {
+              borderRadius: style.borderRadius,
+              boxShadow: style.boxShadow
+            };
+          })(),
           archiveHeadingText: document.querySelector(
             '.archive-heading h2'
           )?.textContent.trim(),
@@ -362,7 +398,7 @@ with sync_playwright() as playwright:
         "hasOverview": english.get_by_text(
             "Market Read", exact=True
         ).count() > 0,
-        "marketCount": english.locator(".market-item").count(),
+        "marketCount": english.locator(".snapshot-item-index").count(),
         "marketUpdate": english.locator(".market-freshness time").inner_text(),
         "marketAsOf": english.locator(
             ".market-freshness [data-market-as-of]"
@@ -465,10 +501,22 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     ), result
     assert audit["layout"]["reportToolbarCount"] == 0, result
     assert audit["layout"]["heroDateCount"] == 1, result
+    assert audit["layout"]["heroHeight"] <= (150 if is_mobile else 110), result
+    assert audit["layout"]["heroBorderTopWidth"] == "0px", result
+    assert audit["layout"]["heroBorderBottomWidth"] == "1px", result
+    assert audit["layout"]["publishBorderTopWidth"] == "0px", result
+    assert audit["layout"]["marketStatusHeight"] <= (
+        350 if is_mobile else 220
+    ), result
     assert audit["layout"]["fontsLoaded"] == "loaded", result
     assert audit["layout"]["marketCount"] == audit["expectedMarketCount"], result
+    assert audit["layout"]["indexColumnCount"] == (
+        (3 if audit["market"] == "CN" else 2)
+        if is_mobile
+        else audit["expectedMarketCount"]
+    ), result
     assert audit["layout"]["marketValueOverlapCount"] == 0, result
-    assert audit["layout"]["heatCount"] == 3, result
+    assert audit["layout"]["heatCount"] == 6, result
     if (
         audit["layout"]["heatUpColors"]
         and audit["layout"]["heatDownColors"]
@@ -543,6 +591,18 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     if is_mobile:
         assert audit["layout"]["eventGridHorizontalOverflow"] == 0, result
     assert audit["layout"]["pricingThesisCount"] == 0, result
+    group_headers = audit["layout"]["groupHeaderStyles"]
+    assert len(group_headers) >= 2, result
+    assert len({item["backgroundColor"] for item in group_headers}) == 1, result
+    assert len({item["color"] for item in group_headers}) == 1, result
+    assert all(item["borderLeftWidth"] == "3px" for item in group_headers), result
+    assert len({item["borderLeftColor"] for item in group_headers}) >= 2, result
+    assert len({item["height"] for item in group_headers}) == 1, result
+    assert set(audit["layout"]["realizedEventShadows"]) <= {"none"}, result
+    assert audit["layout"]["pricingBoardStyle"] == {
+        "borderRadius": "12px" if is_mobile else "14px",
+        "boxShadow": "none",
+    }, result
     assert audit["layout"]["archiveHeadingText"] == "往期日报", result
     assert audit["layout"]["wrappedShortLabels"] == [], result
     assert audit["consoleErrors"] == [], result

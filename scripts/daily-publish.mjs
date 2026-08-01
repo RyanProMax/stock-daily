@@ -8,7 +8,10 @@ import {
   getNewsBudget,
   NEWS_MAX_PER_MARKET,
 } from "./news-pipeline.mjs";
-import { sectorHeatScore } from "./sector-heat.mjs";
+import {
+  SECTOR_COUNT_PER_MARKET,
+  sectorHeatScore,
+} from "./sector-heat.mjs";
 import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
@@ -325,7 +328,7 @@ export function validateInput(value) {
     !Array.isArray(input.markets) ||
     input.markets.length !== 10 ||
     !Array.isArray(input.sectorHeat) ||
-    input.sectorHeat.length !== 6 ||
+    input.sectorHeat.length !== SECTOR_COUNT_PER_MARKET * 2 ||
     !Array.isArray(input.news) ||
     input.news.length === 0 ||
     input.news.length > NEWS_MAX_PER_MARKET * 2
@@ -370,8 +373,13 @@ export function validateInput(value) {
     sectorKeys.add(key);
     sectorCounts.set(sector.market, sectorCounts.get(sector.market) + 1);
   }
-  if (sectorCounts.get("CN") !== 3 || sectorCounts.get("US") !== 3) {
-    throw new Error("板块行情必须分别包含 3 个 CN 与 3 个 US 行业");
+  if (
+    sectorCounts.get("CN") !== SECTOR_COUNT_PER_MARKET ||
+    sectorCounts.get("US") !== SECTOR_COUNT_PER_MARKET
+  ) {
+    throw new Error(
+      `板块行情必须分别包含 ${SECTOR_COUNT_PER_MARKET} 个 CN 与 ${SECTOR_COUNT_PER_MARKET} 个 US 行业`,
+    );
   }
   const marketCounts = new Map([
     ["CN", 0],

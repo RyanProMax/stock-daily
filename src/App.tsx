@@ -2,7 +2,7 @@ import { ExternalLink } from "lucide-react";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import HotspotBoard from "./components/HotspotBoard";
-import MarketHeatHistory from "./components/MarketHeatHistory";
+import MarketSnapshot from "./components/MarketSnapshot";
 import {
   copy,
   formatDate,
@@ -249,9 +249,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
       trend: marketArchive?.trend,
     };
   });
-  const archiveIndex = displayArchive.findIndex(
-    (item) => item.reportDate === report.reportDate,
-  );
   const otherEditions = displayArchive
     .filter((item) => item.reportDate !== report.reportDate)
     .slice(0, 6);
@@ -271,16 +268,12 @@ function DailyPage({ data }: { data: DailyPageData }) {
     : "";
   return (
     <div className="page-shell" data-render="ssr">
-      <article className="hero hero-daily">
+      <header className="hero hero-daily">
         <div className="hero-copy">
           <div className="hero-meta-row">
-            <div className="edition-row">
-              <span className="edition-label">
-                {archiveIndex === 0 ? t.latest : t.history}
-              </span>
-              {report.isSample && (
-                <span className="sample-badge">{t.sample}</span>
-              )}
+            <div className="hero-title-row">
+              <h1>{marketView.headline}</h1>
+              {report.isSample && <span className="sample-badge">{t.sample}</span>}
             </div>
             <div className="hero-date-nav" aria-label={t.selectDate}>
               <DateNavigator
@@ -293,7 +286,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
               />
             </div>
           </div>
-          <h1>{marketView.headline}</h1>
           <div className="publish-row">
             <div className="market-freshness">
               <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
@@ -303,7 +295,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
             </div>
           </div>
         </div>
-      </article>
+      </header>
 
       <section className="market-section" aria-labelledby="market-title">
         <div className="section-intro">
@@ -315,37 +307,18 @@ function DailyPage({ data }: { data: DailyPageData }) {
             </h2>
           </div>
         </div>
-        <div className="market-status-layout">
-          <MarketHeatHistory
-            view={data.sectorHeat}
-            market={data.market}
-            language={language}
-            labels={{
-              title: t.sectorHeat,
-              range: t.heatRange,
-              streakTitle: t.heatStreak,
-              streakDays: t.heatStreakDays,
-              noStreak: t.noHeatStreak,
-            }}
-          />
-          <div className="market-prices">
-            <p className="market-price-heading">{t.currentMarkets}</p>
-            <div
-              className={`market-grid market-grid-count-${marketMetrics.length}`}
-            >
-              {marketMetrics.map((market) => (
-                <article
-                  className={`market-item market-item-${market.direction}`}
-                  key={market.symbol ?? market.name}
-                >
-                  <span>{market.name}</span>
-                  <strong>{market.value}</strong>
-                  <em>{market.change}</em>
-                </article>
-              ))}
-            </div>
-          </div>
-        </div>
+        <MarketSnapshot
+          markets={marketMetrics}
+          sectorView={data.sectorHeat}
+          market={data.market}
+          language={language}
+          labels={{
+            indices: t.currentMarkets,
+            sectors: t.sectorHeat,
+            range: t.heatRange,
+            streakDays: t.heatStreakDays,
+          }}
+        />
       </section>
 
       <section className="signals-section">

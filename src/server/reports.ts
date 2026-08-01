@@ -1,5 +1,3 @@
-import fallbackReportsJson from "../../data/reports.json";
-import storyInsightsJson from "../../data/story-insights.json";
 import type {
   DailyReport,
   DailyMarketView,
@@ -13,7 +11,6 @@ import type {
   SectorHeatMetric,
   SectorHeatStreak,
   SectorHeatView,
-  StoryInsight,
   ThesisLedgerEntry,
   WeeklyEvent,
   WeeklyEventTimeline,
@@ -71,10 +68,6 @@ interface DailyArchiveRow extends Omit<ReportListItem, "marketViews"> {
   marketsJson: string | null;
 }
 
-const fallbackReports = [...(fallbackReportsJson as DailyReport[])].sort((a, b) =>
-  b.reportDate.localeCompare(a.reportDate),
-);
-const legacyInsights = storyInsightsJson as Record<string, StoryInsight>;
 const heatThreshold = 70;
 const primaryIndexSymbols: Record<MarketRegion, Set<string>> = {
   CN: new Set(["SSE", "SZSE", "CSI300", "CSI500", "CHINEXT", "STAR50"]),
@@ -613,7 +606,7 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
     stories: report.stories.map((story) => ({
       ...story,
       regions: storyRegions(story),
-      ai: story.ai ?? legacyInsights[story.id],
+      ai: story.ai,
     })),
   };
 }
@@ -719,53 +712,9 @@ function parseWeeklyRow(row: WeeklyRow): WeeklyReport {
 }
 
 export async function getDailyArchive(
-  db: D1Database | undefined,
+  db: D1Database,
   limit = 100,
 ): Promise<ReportListItem[]> {
-  if (!db) {
-    return fallbackReports.map((report) => ({
-      reportDate: report.reportDate,
-      edition: report.edition,
-      title: report.headline,
-      summary: report.summary,
-      signalCount: report.stories.filter((story) => story.importance >= 3)
-        .length,
-      generatedAt: report.generatedAt,
-      titleEn: report.translations?.en?.headline,
-      summaryEn: report.translations?.en?.summary,
-      marketSignalCounts: {
-        CN: report.stories.filter((story) =>
-          visibleStoryForMarket(story, "CN"),
-        ).length,
-        US: report.stories.filter((story) =>
-          visibleStoryForMarket(story, "US"),
-        ).length,
-      },
-      marketViews: {
-        CN: {
-          title: report.marketViews.CN.headline,
-          summary: report.marketViews.CN.summary,
-          tone: report.marketViews.CN.overview.tone,
-          trend: summarizeMarketTrend(report.markets, "CN"),
-          titleEn:
-            report.translations?.en?.marketViews.CN.headline,
-          summaryEn:
-            report.translations?.en?.marketViews.CN.summary,
-        },
-        US: {
-          title: report.marketViews.US.headline,
-          summary: report.marketViews.US.summary,
-          tone: report.marketViews.US.overview.tone,
-          trend: summarizeMarketTrend(report.markets, "US"),
-          titleEn:
-            report.translations?.en?.marketViews.US.headline,
-          summaryEn:
-            report.translations?.en?.marketViews.US.summary,
-        },
-      },
-    }));
-  }
-
   const rows = await db
     .prepare(
       `SELECT
@@ -884,16 +833,9 @@ export async function getDailyArchive(
 }
 
 export async function getDailyReport(
-  db: D1Database | undefined,
+  db: D1Database,
   date?: string | null,
 ): Promise<DailyReport | null> {
-  if (!db) {
-    const report =
-      fallbackReports.find((item) => item.reportDate === date) ??
-      (date ? null : fallbackReports[0]);
-    return report ? normalizeReport(report) : null;
-  }
-
   const where = date ? "WHERE report_date = ?" : "";
   const statement = db.prepare(
     `SELECT
@@ -917,18 +859,10 @@ export async function getDailyReport(
 }
 
 export async function getThesisLedger(
-  db: D1Database | undefined,
+  db: D1Database,
   reportDate: string,
   market: MarketRegion,
 ): Promise<ThesisLedgerEntry[]> {
-  if (!db) {
-    return deriveThesisLedger(
-      fallbackReports,
-      fallbackReports[0]?.reportDate ?? reportDate,
-      market,
-      reportDate,
-    );
-  }
   const rows = await db
     .prepare(
       `SELECT
@@ -961,20 +895,9 @@ export async function getThesisLedger(
 }
 
 export async function getDailyHeatHistory(
-  db: D1Database | undefined,
+  db: D1Database,
   throughDate?: string | null,
 ): Promise<SectorHeatDay[]> {
-  if (!db) {
-    return fallbackReports
-      .filter((report) => !throughDate || report.reportDate <= throughDate)
-      .slice(0, 7)
-      .filter((report) => report.sectorHeat.length > 0)
-      .map((report) => ({
-        reportDate: report.reportDate,
-        sectors: report.sectorHeat,
-      }));
-  }
-
   const rows = await db
     .prepare(
       `SELECT
@@ -994,10 +917,10 @@ export async function getDailyHeatHistory(
 }
 
 export async function getWeeklyEventTimeline(
-  db: D1Database | undefined,
+  db: D1Database,
   targetDate: string,
 ): Promise<WeeklyEventTimeline | null> {
-  if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) return null;
   const row = await db
     .prepare(
       `SELECT
@@ -1046,10 +969,9 @@ export async function getWeeklyEventTimeline(
 }
 
 export async function getWeeklyArchive(
-  db: D1Database | undefined,
+  db: D1Database,
   limit = 52,
 ): Promise<WeeklyListItem[]> {
-  if (!db) return [];
   const rows = await db
     .prepare(
       `SELECT
@@ -1070,10 +992,9 @@ export async function getWeeklyArchive(
 }
 
 export async function getWeeklyReport(
-  db: D1Database | undefined,
+  db: D1Database,
   weekEnd?: string | null,
 ): Promise<WeeklyReport | null> {
-  if (!db) return null;
   const where = weekEnd ? "WHERE week_end = ?" : "";
   const statement = db.prepare(
     `SELECT

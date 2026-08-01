@@ -40,7 +40,7 @@ export const copy = {
     agentOverview: "盘面结论",
     favorable: "主要利好",
     adverse: "主要利空",
-    market: "市场状态",
+    market: "市场快照",
     sectorHeat: "高波动板块",
     heatRange: "按当日绝对涨跌幅排序",
     heatStreak: "连续大幅波动",

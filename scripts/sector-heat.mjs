@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export const HEAT_THRESHOLD = 70;
+export const SECTOR_COUNT_PER_MARKET = 6;
 
 const cnSectors = [
   ["932077", "能源", "Energy"],
@@ -73,7 +74,7 @@ function topHeat(metrics) {
           Math.abs(Number.parseFloat(left.change)) ||
         left.symbol.localeCompare(right.symbol),
     )
-    .slice(0, 3);
+    .slice(0, SECTOR_COUNT_PER_MARKET);
 }
 
 async function mapWithConcurrency(items, limit, worker) {

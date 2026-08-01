@@ -189,7 +189,7 @@ Codex 运行在 `workspace-write` 沙箱中，只允许修改 `work/daily-report
 - 不得新增该条原始标题与 `facts` 没有的数字、公司或已发生事实。条件情景必须保留“若”“如果”等条件措辞。
 - 原始标题或 `facts` 明确出现 Apple、Amazon、Google/Alphabet、Meta、Microsoft、Nvidia、Tesla、AliExpress/Alibaba、Crown Holdings 或 Verisign 时，必须填写对应 ticker；没有明确公司时保持空数组。
 - `translations.en` 只能翻译已经通过事实校验的中文内容，不增加数字、公司、事件或判断。中文“亿”金额应改写为自然英文金额；需要换算时用英文单词拼写数值（如 “eight hundred sixty million yuan”），避免生硬的 “hundred million” 直译和新增阿拉伯数字。
-- `daily-input.json.sectorHeat` 由采集器确定性生成，不属于 Agent 输出：CN 使用中证全指 11 个一级行业指数，US 使用 11 个 GICS Sector SPDR，每边只保留价格波动强度最高的 3 个板块。
+- `daily-input.json.sectorHeat` 由采集器确定性生成，不属于 Agent 输出：CN 使用中证全指 11 个一级行业指数，US 使用 11 个 GICS Sector SPDR，每边只保留价格波动强度最高的 6 个板块。
 - 热度为 `0–100` 的价格波动强度，涨跌方向单独存储；连续高热按实际交易日去重，周末重复引用同一收盘不会增加天数。Agent 不得改写或推断该数据。
 - 只输出页面需要的内容；D1 仅保存原始标题、最小核验事实摘要、来源链接和最终解读，不保存文章全文、网页 HTML、推理过程、prompt、token 明细或抓取原始响应。
 

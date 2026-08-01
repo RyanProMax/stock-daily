@@ -502,14 +502,17 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   );
   assert.equal(document.querySelectorAll(".report-toolbar").length, 0);
   assert.equal(document.querySelectorAll(".hero-date-nav").length, 1);
-  assert.equal(document.querySelectorAll(".market-status-layout").length, 1);
+  assert.equal(document.querySelectorAll(".market-snapshot").length, 1);
+  assert.equal(document.querySelectorAll(".snapshot-group").length, 2);
+  assert.ok(
+    document.querySelector(".snapshot-group-indices")
+      .compareDocumentPosition(document.querySelector(".snapshot-group-sectors")) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  );
   assert.equal(document.querySelectorAll(".pricing-thesis").length, 0);
   assert.equal(document.querySelectorAll(".hero-summary").length, 0);
   assert.equal(document.querySelectorAll(".copy-button").length, 0);
-  assert.doesNotMatch(
-    document.querySelector(".edition-row").textContent,
-    /第\s*\d+\s*期/,
-  );
+  assert.equal(document.querySelectorAll(".edition-row").length, 0);
   assert.equal(
     document.querySelector(".archive-heading h2").textContent,
     "往期日报",
@@ -565,5 +568,32 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   assert.equal(
     unsafeDocument.querySelectorAll('[data-event-state="awaiting"]').length,
     1,
+  );
+});
+
+test("local SSR maps to production read APIs without bundled report fallbacks", async () => {
+  const worker = await vite.ssrLoadModule("/src/worker.tsx");
+  const target = new URL(
+    worker.productionDataUrl(
+      "http://127.0.0.1:8788/?market=us&date=2026-07-31",
+      "/api/reports?limit=1",
+    ),
+  );
+  assert.equal(worker.isLocalDevelopmentUrl("http://localhost:8788/"), true);
+  assert.equal(worker.isLocalDevelopmentUrl("https://stock-daily-4ip.pages.dev/"), false);
+  assert.equal(target.origin, "https://stock-daily-4ip.pages.dev");
+  assert.equal(target.pathname, "/api/reports");
+  assert.equal(target.searchParams.get("limit"), "1");
+  assert.equal(target.searchParams.get("market"), "us");
+  assert.equal(target.searchParams.get("date"), "2026-07-31");
+
+  const [workerSource, reportSource] = await Promise.all([
+    readFile("src/worker.tsx", "utf8"),
+    readFile("src/server/reports.ts", "utf8"),
+  ]);
+  assert.doesNotMatch(workerSource, /getDailyReport\(undefined\)|bundled fallback/);
+  assert.doesNotMatch(
+    reportSource,
+    /data\/reports\.json|data\/story-insights\.json|fallbackReportsJson/,
   );
 });

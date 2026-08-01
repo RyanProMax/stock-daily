@@ -54,13 +54,14 @@ def inspect(browser, viewport, language, market, label):
 
     result = page.evaluate(
         """() => {
-          const rows = [...document.querySelectorAll('.heat-item')];
+          const rows = [...document.querySelectorAll('.snapshot-item-sector')];
           const shortText = [...document.querySelectorAll(
-            '.heat-heading strong, .heat-heading span, ' +
-            '.heat-streaks > header strong, ' +
-            '.heat-streaks > div > span'
+            '.snapshot-heading strong, .snapshot-heading span, ' +
+            '.snapshot-item-detail'
           )];
-          const heatNames = [...document.querySelectorAll('.heat-item-top a')]
+          const heatNames = [...document.querySelectorAll(
+            '.snapshot-item-sector .snapshot-item-top a'
+          )]
             .map((element) => element.textContent.trim());
           return {
             viewportWidth: innerWidth,
@@ -71,11 +72,12 @@ def inspect(browser, viewport, language, market, label):
             nestedHeatDateControls: document.querySelectorAll(
               '.heat-date-rail, .heat-date-nav, .heat-timeline, .heat-tabs'
             ).length,
-            marketHeaderCount: document.querySelectorAll(
-              '.heat-market > header'
-            ).length,
-            cnCount: document.querySelectorAll('.heat-market-cn .heat-item').length,
-            usCount: document.querySelectorAll('.heat-market-us .heat-item').length,
+            groupCount: document.querySelectorAll('.snapshot-group').length,
+            indexCount: document.querySelectorAll('.snapshot-item-index').length,
+            indexColumnCount: getComputedStyle(document.querySelector(
+              '.snapshot-index-grid'
+            )).gridTemplateColumns.split(' ').length,
+            sectorCount: document.querySelectorAll('.snapshot-item-sector').length,
             heatNames,
             activeMarket: document.querySelector(
               '.market-switcher a[aria-current="page"]'
@@ -90,11 +92,12 @@ def inspect(browser, viewport, language, market, label):
               .filter((element) => element.scrollHeight > element.clientHeight + 1)
               .map((element) => element.textContent.trim()),
             streakCount: document.querySelectorAll(
-              '.heat-streaks > div > span'
+              '.snapshot-item-detail'
             ).length,
-            streakText: document.querySelector('.heat-streaks')?.textContent.trim(),
+            streakText: [...document.querySelectorAll('.snapshot-item-detail')]
+              .map((element) => element.textContent.trim()).join(' '),
             heatFont: getComputedStyle(
-              document.querySelector('.heat-item-top a')
+              document.querySelector('.snapshot-item-sector .snapshot-item-top a')
             ).fontFamily
           };
         }"""
@@ -109,7 +112,7 @@ def inspect_edition_navigation(browser):
     page = browser.new_page(viewport={"width": 390, "height": 844})
     page.goto(f"{BASE_URL}/?lang=zh", wait_until="networkidle")
     current_names = page.locator(
-        ".heat-market-cn .heat-item-top a"
+        ".snapshot-item-sector .snapshot-item-top a"
     ).all_text_contents()
     page.locator(".date-select-trigger").click()
     page.get_by_role(
@@ -118,7 +121,7 @@ def inspect_edition_navigation(browser):
     page.wait_for_url(re.compile(r"date=2026-07-22"))
     page.wait_for_load_state("networkidle")
     selected_names = page.locator(
-        ".heat-market-cn .heat-item-top a"
+        ".snapshot-item-sector .snapshot-item-top a"
     ).all_text_contents()
     result = {
         "dateNavCount": page.locator(".date-nav").count(),
@@ -174,11 +177,14 @@ for audit in (
     assert audit["ssr"], result
     assert audit["dateNavCount"] == 1, result
     assert audit["nestedHeatDateControls"] == 0, result
-    assert audit["marketHeaderCount"] == 0, result
-    expected_cn = 3 if audit["activeMarket"] == "CN" else 0
-    expected_us = 3 if audit["activeMarket"] == "US" else 0
-    assert audit["cnCount"] == expected_cn, result
-    assert audit["usCount"] == expected_us, result
+    assert audit["groupCount"] == 2, result
+    assert audit["indexCount"] in (2, 4, 6), result
+    assert audit["indexColumnCount"] == (
+        2
+        if audit["viewportWidth"] <= 920 and audit["indexCount"] == 4
+        else audit["indexCount"]
+    ), result
+    assert audit["sectorCount"] == 3, result
     assert audit["forbiddenHeatNames"] == [], result
     assert max(audit["rowHeights"]) - min(audit["rowHeights"]) <= 1, result
     assert audit["wrappedShortText"] == [], result
@@ -186,7 +192,7 @@ for audit in (
         assert audit["streakCount"] >= 1, result
     else:
         assert audit["streakCount"] == 0, result
-        assert "No sector has made a large move" in audit["streakText"], result
+        assert audit["streakText"] == "", result
     assert audit["consoleErrors"] == [], result
     assert audit["httpErrors"] == [], result
     assert "Noto Sans SC Variable" in audit["heatFont"], result
@@ -194,7 +200,7 @@ for audit in (
 assert "连续 3 个交易日" in result["mobileCnZh"]["streakText"], result
 assert result["editionNavigation"]["dateNavCount"] == 1, result
 assert "date=2026-07-22" in result["editionNavigation"]["selectedUrl"], result
-assert len(result["editionNavigation"]["currentNames"]) == 3, result
+assert len(result["editionNavigation"]["currentNames"]) == 6, result
 assert (
     result["editionNavigation"]["currentNames"]
     != result["editionNavigation"]["selectedNames"]
