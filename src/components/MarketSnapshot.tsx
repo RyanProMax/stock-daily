@@ -10,7 +10,7 @@ import type {
 
 interface SnapshotItemProps {
   name: string;
-  value: string;
+  value?: string;
   change: string;
   direction: MarketDirection;
   href?: string;
@@ -56,10 +56,12 @@ function SnapshotItem({
         {label}
         <em>{change}</em>
       </div>
-      <div className="snapshot-item-bottom">
-        <strong>{value}</strong>
-        {detail && <small className="snapshot-item-detail">{detail}</small>}
-      </div>
+      {(value || detail) && (
+        <div className="snapshot-item-bottom">
+          {value && <strong>{value}</strong>}
+          {detail && <small className="snapshot-item-detail">{detail}</small>}
+        </div>
+      )}
     </article>
   );
 }
@@ -101,11 +103,14 @@ export default function MarketSnapshot({
         </div>
       </section>
 
-      <section className="snapshot-group snapshot-group-sectors">
-        <header className="snapshot-heading">
+      <details
+        className="snapshot-group snapshot-group-sectors snapshot-sector-disclosure"
+        data-sector-disclosure
+      >
+        <summary className="snapshot-heading">
           <strong>{labels.sectors}</strong>
           <span>{labels.range}</span>
-        </header>
+        </summary>
         <div
           className={`snapshot-grid snapshot-sector-grid${
             sectors.length >= 6 ? " snapshot-sector-grid-expanded" : ""
@@ -119,7 +124,6 @@ export default function MarketSnapshot({
               <SnapshotItem
                 key={`${market}:${sector.symbol}`}
                 name={localizedName(sector, language)}
-                value={sector.symbol}
                 change={sector.change}
                 direction={sector.direction}
                 href={sector.source}
@@ -135,7 +139,7 @@ export default function MarketSnapshot({
             );
           })}
         </div>
-      </section>
+      </details>
     </div>
   );
 }

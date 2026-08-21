@@ -441,6 +441,23 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
         },
       },
     ],
+    thesisHistory: [
+      {
+        id: `2026-07-29:${ledgerStory.id}:US`,
+        reportDate: "2026-07-29",
+        storyId: ledgerStory.id,
+        market: "US",
+        title: ledgerStory.title,
+        thesis: ledgerStory.signal.thesis,
+        horizon: ledgerStory.signal.horizon,
+        confidence: ledgerStory.signal.confidence,
+        checkpoint: {
+          ...ledgerStory.signal.checkpoint,
+          status: "confirmed",
+          observation: "后续一手结果与原定价逻辑一致。",
+        },
+      },
+    ],
   };
   const markup = renderToStaticMarkup(React.createElement(Document, { data }));
   const dom = new JSDOM(`<!doctype html>${markup}`);
@@ -454,7 +471,11 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   assert.ok(hero);
   assert.ok(hotspotBoard);
   assert.ok(topGroup);
-  assert.equal(document.querySelectorAll(".thesis-ledger").length, 0);
+  assert.equal(document.querySelectorAll(".thesis-ledger").length, 1);
+  assert.match(
+    document.querySelector(".thesis-ledger").textContent,
+    /观点验证.*已验证/s,
+  );
   assert.equal(document.querySelectorAll("[data-signal-review]").length, 1);
   assert.doesNotMatch(
     document.querySelector("main").textContent,
@@ -520,14 +541,11 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
 
   const marketStories = report.stories.filter((story) =>
     story.regions.includes("US") && story.importance >= 3,
-  ).sort((left, right) => right.importance - left.importance).slice(0, 5);
+  );
   const renderedDetails = [
     ...document.querySelectorAll(".hotspot-story"),
   ];
-  assert.equal(
-    renderedDetails.length,
-    marketStories.length,
-  );
+  assert.equal(renderedDetails.length, Math.min(3, marketStories.length));
   assert.equal(
     document.querySelectorAll(".hotspot-group-core > ol > li").length,
     Math.min(3, marketStories.length),
@@ -539,7 +557,12 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
     );
     assert.equal(details.open, index === 0);
   });
-  for (const story of marketStories) {
+  const renderedStories = renderedDetails.map((details) => {
+    const analysis = details.querySelector(".hotspot-analysis");
+    return marketStories.find((story) => analysis?.id === `story-${story.id}`);
+  });
+  assert.ok(renderedStories.every(Boolean));
+  for (const story of renderedStories) {
     const analysis = document.querySelector(`#story-${story.id}`);
     const storyDetails = analysis?.closest(".hotspot-story");
     assert.ok(analysis);

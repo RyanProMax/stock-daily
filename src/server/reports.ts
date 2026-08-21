@@ -206,6 +206,7 @@ export function deriveThesisLedger(
   throughDate: string,
   market: MarketRegion,
   originDate?: string,
+  limit = 8,
 ): ThesisLedgerEntry[] {
   const ordered = [...reports]
     .filter((report) => report.reportDate <= throughDate)
@@ -279,7 +280,7 @@ export function deriveThesisLedger(
         left.checkpoint.dueAt.localeCompare(right.checkpoint.dueAt) ||
         right.reportDate.localeCompare(left.reportDate),
     )
-    .slice(0, 8);
+    .slice(0, limit);
 }
 
 function eventStoryPattern(eventTitle: string) {
@@ -892,6 +893,42 @@ export async function getThesisLedger(
     market,
     reportDate,
   );
+}
+
+export async function getThesisHistory(
+  db: D1Database,
+  reportDate: string,
+  market: MarketRegion,
+): Promise<ThesisLedgerEntry[]> {
+  const rows = await db
+    .prepare(
+      `SELECT
+         report_date AS reportDate,
+         edition,
+         headline,
+         summary,
+         generated_at AS generatedAt,
+         data_cut AS dataCut,
+         agent_model AS agentModel,
+         content
+       FROM daily_reports
+       WHERE report_date <= ?
+       ORDER BY report_date DESC
+       LIMIT 45`,
+    )
+    .bind(reportDate)
+    .all<LedgerDailyRow>();
+  const reports = rows.results.flatMap((row) => {
+    try {
+      return [parseDailyRow(row)];
+    } catch {
+      return [];
+    }
+  });
+  return deriveThesisLedger(reports, reportDate, market, undefined, 45)
+    .filter((entry) => entry.reportDate < reportDate)
+    .sort((left, right) => right.reportDate.localeCompare(left.reportDate))
+    .slice(0, 6);
 }
 
 export async function getDailyHeatHistory(

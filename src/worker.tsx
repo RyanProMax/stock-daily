@@ -16,6 +16,7 @@ import {
   getDailyArchive,
   getDailyHeatHistory,
   getDailyReport,
+  getThesisHistory,
   getThesisLedger,
   getWeeklyArchive,
   getWeeklyEventTimeline,
@@ -176,6 +177,18 @@ async function fetchProductionDailyPageData(
       market,
       report.reportDate,
     ),
+    thesisHistory: deriveThesisLedger(
+      reports,
+      report.reportDate,
+      market,
+      undefined,
+      45,
+    )
+      .filter((entry) => entry.reportDate < report.reportDate)
+      .sort((left, right) =>
+        right.reportDate.localeCompare(left.reportDate),
+      )
+      .slice(0, 6),
   };
 }
 
@@ -253,9 +266,10 @@ async function buildDailyPageData(
       { reportDate: report.reportDate, sectors: report.sectorHeat },
     ];
   }
-  const [weekEvents, thesisLedger] = await Promise.all([
+  const [weekEvents, thesisLedger, thesisHistory] = await Promise.all([
     getWeeklyEventTimeline(db, report.reportDate),
     getThesisLedger(db, report.reportDate, market),
+    getThesisHistory(db, report.reportDate, market),
   ]);
 
   return {
@@ -268,6 +282,7 @@ async function buildDailyPageData(
     sectorHeat: buildSectorHeatView(report.sectorHeat, marketHistory),
     weekEvents,
     thesisLedger,
+    thesisHistory,
   };
 }
 

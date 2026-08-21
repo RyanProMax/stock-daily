@@ -57,6 +57,7 @@ interface Labels {
   surprise: string;
   marketReaction: string;
   transmission: string;
+  impactPath: string;
   exposure: string;
   checkpoint: string;
   confirmIf: string;
@@ -80,6 +81,7 @@ interface Labels {
   statusInvalidated: string;
   statusInconclusive: string;
   observation: string;
+  whyImportant: string;
 }
 
 interface Props {
@@ -163,24 +165,47 @@ function StatusIcon({ status }: { status: WeeklyEventDisplayStatus }) {
   return <Clock3 aria-hidden="true" />;
 }
 
+function readingScore(story: Story, market: MarketRegion) {
+  const signal = story.signal;
+  if (!signal) return story.importance * 20;
+  const confidenceAdjustment = {
+    high: 12,
+    medium: 4,
+    low: -20,
+  }[signal.confidence];
+  const roleAdjustment =
+    signal.roleByMarket[market] === "core"
+      ? 8
+      : signal.roleByMarket[market] === "supporting"
+        ? 0
+        : -40;
+  return signal.score + confidenceAdjustment + roleAdjustment;
+}
+
+export function sortStoriesForReading<T extends Story>(
+  stories: T[],
+  market: MarketRegion,
+) {
+  return stories
+    .filter((story) => story.importance >= 3)
+    .filter((story) => story.signal?.roleByMarket[market] !== "excluded")
+    .sort(
+      (left, right) =>
+        readingScore(right, market) - readingScore(left, market) ||
+        right.importance - left.importance,
+    );
+}
+
 function rankStories(stories: LocalizedStory[], market: MarketRegion) {
   const eligible = stories.filter((story) => story.importance >= 3);
   const hasStructuredSignals = eligible.some((story) => story.signal);
-  const ranked = eligible
-    .filter(
-      (story) =>
-        !hasStructuredSignals ||
-        story.signal?.roleByMarket[market] !== "excluded",
-    )
-    .sort((left, right) => {
-      const leftRank = left.signal?.rankByMarket[market];
-      const rightRank = right.signal?.rankByMarket[market];
-      if (leftRank && rightRank) return leftRank - rightRank;
-      if (leftRank) return -1;
-      if (rightRank) return 1;
-      return right.importance - left.importance;
-    })
-    .slice(0, 5);
+  const ranked = (
+    hasStructuredSignals
+      ? sortStoriesForReading(eligible, market)
+      : [...eligible].sort(
+          (left, right) => right.importance - left.importance,
+        )
+  ).slice(0, 3);
 
   return ranked.map((story, index): RankedStory => {
     const assignedRole = story.signal?.roleByMarket[market];
@@ -361,15 +386,19 @@ function SignalAnalysis({
 
   return (
     <div className="hotspot-analysis signal-analysis" id={`story-${story.id}`}>
-      <div className="signal-fact-thesis">
-        <div>
-          <strong>{labels.facts}</strong>
-          <p>{story.summary}</p>
-        </div>
-        <div>
+      <div className="signal-opening">
+        <section className="signal-thesis-panel">
           <strong>{labels.pricingThesis}</strong>
           <p>{signal.thesis}</p>
-        </div>
+          <div className="signal-rationale">
+            <strong>{labels.whyImportant}</strong>
+            <p>{signal.scoreReason}</p>
+          </div>
+        </section>
+        <section className="signal-fact-panel">
+          <strong>{labels.facts}</strong>
+          <p>{story.summary}</p>
+        </section>
       </div>
 
       <MetricGrid signal={signal} labels={labels} />
@@ -389,48 +418,58 @@ function SignalAnalysis({
         </section>
       )}
 
-      <section className="signal-block signal-transmission">
-        <strong>{labels.transmission}</strong>
-        <ol>
-          {signal.transmission.map((step) => (
-            <li key={step.order}>
-              <span>{step.from}</span>
-              <i aria-hidden="true">→</i>
-              <span>{step.to}</span>
-              <p>{step.mechanism}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <details className="signal-secondary-details">
+        <summary>
+          <span>{labels.impactPath}</span>
+          <ChevronDown aria-hidden="true" />
+        </summary>
+        <div className="signal-secondary-content">
+          <section className="signal-block signal-transmission">
+            <strong>{labels.transmission}</strong>
+            <ol>
+              {signal.transmission.map((step) => (
+                <li key={step.order}>
+                  <span>{step.from}</span>
+                  <i aria-hidden="true">→</i>
+                  <span>{step.to}</span>
+                  <p>{step.mechanism}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
 
-      <section className="signal-block signal-exposures">
-        <strong>{labels.exposure}</strong>
-        <div>
-          {signal.exposures.map((exposure) => (
-            <article
-              className={`signal-exposure signal-exposure-${exposure.direction}`}
-              key={`${exposure.exchange ?? ""}:${exposure.ticker ?? exposure.name}`}
-            >
-              <span>
-                <b>{exposure.name}</b>
-                {exposure.ticker && (
-                  <i>
-                    {exposure.exchange}:{exposure.ticker}
-                  </i>
-                )}
-              </span>
-              <p>{exposure.basis}</p>
-            </article>
-          ))}
+          <section className="signal-block signal-exposures">
+            <strong>{labels.exposure}</strong>
+            <div>
+              {signal.exposures.map((exposure) => (
+                <article
+                  className={`signal-exposure signal-exposure-${exposure.direction}`}
+                  key={`${exposure.exchange ?? ""}:${exposure.ticker ?? exposure.name}`}
+                >
+                  <span>
+                    <b>{exposure.name}</b>
+                    {exposure.ticker && (
+                      <i>
+                        {exposure.exchange}:{exposure.ticker}
+                      </i>
+                    )}
+                  </span>
+                  <p>{exposure.basis}</p>
+                </article>
+              ))}
+            </div>
+          </section>
         </div>
-      </section>
+      </details>
 
       <section className="signal-checkpoint">
         <header>
           <strong>{labels.checkpoint}</strong>
-          <span className={`ledger-status status-${checkpoint.status}`}>
-            {statusLabel(checkpoint.status, labels)}
-          </span>
+          {checkpoint.status !== "pending" && (
+            <span className={`ledger-status status-${checkpoint.status}`}>
+              {statusLabel(checkpoint.status, labels)}
+            </span>
+          )}
         </header>
         <h5>{checkpoint.metric}</h5>
         <dl>
@@ -512,7 +551,9 @@ export default function HotspotBoard({
     thesisLedger.map((entry) => [entry.storyId, entry]),
   );
 
-  if (groups.length === 0 && !timeline) return null;
+  const hasEvents = Boolean(timeline?.events.length);
+
+  if (groups.length === 0 && !hasEvents) return null;
 
   const statusLabels: Record<WeeklyEventDisplayStatus, string> = {
     scheduled: labels.scheduled,
@@ -526,27 +567,15 @@ export default function HotspotBoard({
     <section
       className="hotspot-board pricing-board"
       id="signals"
-      aria-labelledby="hotspot-board-title"
+      aria-label={labels.title}
     >
-      <header className="hotspot-board-heading">
-        <span className="section-index">02</span>
-        <h2 id="hotspot-board-title">
-          {labels.title}
-          <small>{market}</small>
-        </h2>
-      </header>
       <div className="hotspot-groups">
-        {timeline && (
+        {timeline && timeline.events.length > 0 && (
           <section className="hotspot-events" data-weekly-events>
             <header>
               <strong>{labels.events}</strong>
             </header>
-            {timeline.events.length === 0 ? (
-              <p className="hotspot-events-empty" data-weekly-events-empty>
-                {labels.noData}
-              </p>
-            ) : (
-              <div className="hotspot-event-grid">
+            <div className="hotspot-event-grid">
                 {timeline.events.map((event) => {
                   const localized = localizedEvent(event, language);
                   const status = safeDisplayStatus(event, language);
@@ -664,8 +693,7 @@ export default function HotspotBoard({
                     </article>
                   );
                 })}
-              </div>
-            )}
+            </div>
           </section>
         )}
 

@@ -39,6 +39,7 @@ export interface DailyPageData extends CommonPageData {
   sectorHeat: SectorHeatView;
   weekEvents: WeeklyEventTimelineData | null;
   thesisLedger: ThesisLedgerEntry[];
+  thesisHistory: ThesisLedgerEntry[];
 }
 
 export interface WeeklyPageData extends CommonPageData {
@@ -214,6 +215,78 @@ function OverviewCard({
   );
 }
 
+function ThesisHistory({
+  entries,
+  language,
+}: {
+  entries: ThesisLedgerEntry[];
+  language: Language;
+}) {
+  const t = copy[language];
+  const resolvedEntries = entries.filter(
+    (entry) => entry.checkpoint.status !== "pending",
+  );
+  const statusLabels = {
+    pending: t.statusPending,
+    confirmed: t.statusConfirmed,
+    partial: t.statusPartial,
+    invalidated: t.statusInvalidated,
+    inconclusive: t.statusInconclusive,
+  };
+
+  if (resolvedEntries.length === 0) return null;
+
+  return (
+    <section className="thesis-ledger" aria-labelledby="thesis-ledger-title">
+      <header className="daily-section-heading">
+        <h2 id="thesis-ledger-title">{t.thesisHistory}</h2>
+      </header>
+      <div className="thesis-ledger-list">
+        {resolvedEntries.map((entry) => {
+          const checkpoint =
+            language === "en" && entry.checkpointEn
+              ? { ...entry.checkpoint, ...entry.checkpointEn }
+              : entry.checkpoint;
+          const title =
+            language === "en" ? entry.titleEn ?? entry.title : entry.title;
+          const thesis =
+            language === "en" ? entry.thesisEn ?? entry.thesis : entry.thesis;
+          return (
+            <details className="thesis-ledger-entry" key={entry.id}>
+              <summary>
+                <time dateTime={entry.reportDate}>
+                  {formatDate(entry.reportDate, language)}
+                </time>
+                <strong>{title}</strong>
+                <span
+                  className={`ledger-status status-${checkpoint.status}`}
+                >
+                  {statusLabels[checkpoint.status]}
+                </span>
+              </summary>
+              <div className="thesis-ledger-detail">
+                <p>{thesis}</p>
+                <dl>
+                  <div>
+                    <dt>{t.checkpoint}</dt>
+                    <dd>{checkpoint.metric}</dd>
+                  </div>
+                  {checkpoint.observation && (
+                    <div>
+                      <dt>{t.observation}</dt>
+                      <dd>{checkpoint.observation}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function DailyPage({ data }: { data: DailyPageData }) {
   const { language } = data;
   const t = copy[language];
@@ -266,13 +339,26 @@ function DailyPage({ data }: { data: DailyPageData }) {
         language,
       )
     : "";
+  const overviewBreak = marketView.overview.interpretation.search(/[；;]/u);
+  const overviewLead =
+    overviewBreak >= 0
+      ? marketView.overview.interpretation.slice(0, overviewBreak + 1)
+      : "";
+  const overviewDetail = overviewLead
+    ? marketView.overview.interpretation.slice(overviewLead.length)
+    : marketView.overview.interpretation;
   return (
     <div className="page-shell" data-render="ssr">
       <header className="hero hero-daily">
         <div className="hero-copy">
           <div className="hero-meta-row">
-            <div className="hero-title-row">
-              <h1>{marketView.headline}</h1>
+            <div className="focus-kicker">
+              <span className="eyebrow">{t.todayFocus}</span>
+              <span
+                className={`impact-badge impact-badge-${marketView.overview.tone}`}
+              >
+                {toneLabel(marketView.overview.tone, language)}
+              </span>
               {report.isSample && <span className="sample-badge">{t.sample}</span>}
             </div>
             <div className="hero-date-nav" aria-label={t.selectDate}>
@@ -286,6 +372,40 @@ function DailyPage({ data }: { data: DailyPageData }) {
               />
             </div>
           </div>
+          <div className="daily-focus-main">
+            <h1>{marketView.headline}</h1>
+            <p
+              className={`focus-summary focus-summary-${marketView.overview.tone}`}
+            >
+              {overviewLead && <strong>{overviewLead}</strong>}
+              <span>{overviewDetail}</span>
+            </p>
+            {(marketView.overview.positive.length > 0 ||
+              marketView.overview.negative.length > 0) && (
+              <div className="focus-impact">
+                {marketView.overview.positive.length > 0 && (
+                  <div className="focus-impact-positive">
+                    <strong>{t.favorable}</strong>
+                    <span>
+                      {marketView.overview.positive.map((item) => (
+                        <i key={item}>{item}</i>
+                      ))}
+                    </span>
+                  </div>
+                )}
+                {marketView.overview.negative.length > 0 && (
+                  <div className="focus-impact-negative">
+                    <strong>{t.adverse}</strong>
+                    <span>
+                      {marketView.overview.negative.map((item) => (
+                        <i key={item}>{item}</i>
+                      ))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div className="publish-row">
             <div className="market-freshness">
               <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
@@ -297,16 +417,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
         </div>
       </header>
 
-      <section className="market-section" aria-labelledby="market-title">
-        <div className="section-intro">
-          <span className="section-index">01</span>
-          <div>
-            <h2 id="market-title">
-              {t.market}
-              <small>{data.market}</small>
-            </h2>
-          </div>
-        </div>
+      <section className="market-section" aria-label={t.market}>
         <MarketSnapshot
           markets={marketMetrics}
           sectorView={data.sectorHeat}
@@ -322,6 +433,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
       </section>
 
       <section className="signals-section">
+        <header className="daily-section-heading">
+          <h2>{t.keySignals}</h2>
+        </header>
         <HotspotBoard
           stories={marketStories}
           timeline={data.weekEvents}
@@ -353,6 +467,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
             surprise: t.surprise,
             marketReaction: t.marketReaction,
             transmission: t.transmission,
+            impactPath: t.impactPath,
             exposure: t.exposure,
             checkpoint: t.checkpoint,
             confirmIf: t.confirmIf,
@@ -376,12 +491,18 @@ function DailyPage({ data }: { data: DailyPageData }) {
             statusInvalidated: t.statusInvalidated,
             statusInconclusive: t.statusInconclusive,
             observation: t.observation,
+            whyImportant: t.whyImportant,
           }}
         />
         {marketStories.length === 0 && (
           <p className="empty-market-news">{t.noMarketNews}</p>
         )}
       </section>
+
+      <ThesisHistory
+        entries={data.thesisHistory ?? []}
+        language={language}
+      />
 
       <section id="archive" className="archive-section">
         <div className="archive-heading">
