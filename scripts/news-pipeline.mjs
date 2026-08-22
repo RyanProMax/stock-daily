@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { Readability } from "@mozilla/readability";
 import { XMLParser } from "fast-xml-parser";
 import { JSDOM } from "jsdom";
+import { classifyNewsKind } from "./market-attribution.mjs";
 
 const execFileAsync = promisify(execFile);
 const auditedNews = JSON.parse(
@@ -841,7 +842,7 @@ export function relevanceScore(item) {
       -6,
     ],
     [
-      /十大消息|早报|复盘|周末股市|消息速报|资讯一览|一周市场|weekly review|weekly recap/u,
+      /十大消息|早报|周末股市|消息速报|资讯一览|一周市场|weekly review/u,
       -22,
     ],
     [/新闻联播|要闻\d+条|主要内容有/u, -24],
@@ -1289,7 +1290,7 @@ function marketCounts(items) {
 }
 
 export async function collectNews(referenceTime = Date.now(), reportDate) {
-  const budget = getNewsBudget(reportDate);
+  const budget = { ...getNewsBudget(reportDate), minimumPerMarket: 0 };
   const audited = validateAuditedNews(reportDate, referenceTime);
   const useLiveSources =
     audited.length === 0 ||
@@ -1321,23 +1322,10 @@ export async function collectNews(referenceTime = Date.now(), reportDate) {
     includeInternal: true,
   });
   const counts = marketCounts(selected);
-  if (
-    counts.CN < budget.minimumPerMarket ||
-    counts.US < budget.minimumPerMarket
-  ) {
-    const sourceFailures = sourceResults
-      .filter((result) => result.status === "error")
-      .map((result) => `${result.id}: ${result.error}`)
-      .join("; ");
-    throw new Error(
-      `CN/US 有效新闻不足：CN=${counts.CN}, US=${counts.US}, minimum=${budget.minimumPerMarket}, candidates=${candidates.length}, hydrated=${hydrated.length}${
-        sourceFailures ? `；源错误：${sourceFailures}` : ""
-      }`,
-    );
-  }
-
   return {
-    news: selected.map(stripInternalFields),
+    news: selected.map((item) =>
+      stripInternalFields({ ...item, kind: classifyNewsKind(item) }),
+    ),
     diagnostics: {
       mode:
         audited.length > 0 && useLiveSources

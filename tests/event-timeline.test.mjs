@@ -522,7 +522,7 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
     /预期.*维持政策利率不变.*实际.*美联储维持政策利率不变.*判断.*偏鹰.*下一步.*通胀和就业/s,
   );
   assert.equal(document.querySelectorAll(".report-toolbar").length, 0);
-  assert.equal(document.querySelectorAll(".hero-date-nav").length, 1);
+  assert.equal(document.querySelectorAll(".hero-date-nav").length, 0);
   assert.equal(document.querySelectorAll(".market-snapshot").length, 1);
   assert.equal(document.querySelectorAll(".snapshot-group").length, 2);
   assert.ok(
@@ -534,10 +534,7 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   assert.equal(document.querySelectorAll(".hero-summary").length, 0);
   assert.equal(document.querySelectorAll(".copy-button").length, 0);
   assert.equal(document.querySelectorAll(".edition-row").length, 0);
-  assert.equal(
-    document.querySelector(".archive-heading h2").textContent,
-    "往期日报",
-  );
+  assert.equal(document.querySelectorAll(".archive-section").length, 0);
 
   const marketStories = report.stories.filter((story) =>
     story.regions.includes("US") && story.importance >= 3,

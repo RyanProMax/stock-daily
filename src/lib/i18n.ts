@@ -43,6 +43,8 @@ export const copy = {
     market: "市场快照",
     sectorHeat: "高波动板块",
     heatRange: "按当日绝对涨跌幅排序",
+    sectorPerformance: "行业表现",
+    sectorPerformanceRange: "完整 11 个一级行业 · 按涨跌幅排序",
     heatStreak: "连续大幅波动",
     heatStreakDays: "连续 {count} 个交易日",
     noHeatStreak: "暂无连续两个交易日大幅波动的板块",
@@ -127,6 +129,12 @@ export const copy = {
     upcoming: "未来一周关键事件",
     noWeekly: "首份周报将在周日晚上生成。",
     noMarketNews: "本期暂无该市场的已核验新闻。",
+    primaryDriver: "主驱动",
+    secondaryDriver: "次驱动",
+    driverEvent: "发生了什么",
+    driverMechanism: "如何影响盘面",
+    driverSectors: "对应行业",
+    driverEvidence: "核验来源",
   },
   en: {
     skip: "Skip to content",
@@ -161,6 +169,8 @@ export const copy = {
     market: "Market Pulse",
     sectorHeat: "High-Volatility Sectors",
     heatRange: "Ranked by absolute daily price move",
+    sectorPerformance: "Sector Performance",
+    sectorPerformanceRange: "All 11 sectors · ranked by daily return",
     heatStreak: "Sustained Large Moves",
     heatStreakDays: "{count} trading days",
     noHeatStreak: "No sector has made a large move for two trading days.",
@@ -245,6 +255,12 @@ export const copy = {
     upcoming: "Key Events Next Week",
     noWeekly: "The first weekly report will be generated on Sunday evening.",
     noMarketNews: "No verified news is available for this market in this edition.",
+    primaryDriver: "Primary driver",
+    secondaryDriver: "Secondary driver",
+    driverEvent: "What happened",
+    driverMechanism: "Market transmission",
+    driverSectors: "Affected sectors",
+    driverEvidence: "Verified sources",
   },
 } as const;
 
@@ -334,6 +350,7 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       return [
         market,
         {
+          ...view,
           headline: translatedView?.headline ?? view.headline,
           summary: translatedView?.summary ?? view.summary,
           overview: {
@@ -366,6 +383,13 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
     markets: report.markets.map((market) => ({
       ...market,
       name: marketNames[market.symbol ?? ""]?.[language] ?? market.name,
+    })),
+    drivers: report.drivers?.map((driver, index) => ({
+      ...driver,
+      title: translation?.drivers?.[index]?.title ?? driver.title,
+      summary: translation?.drivers?.[index]?.summary ?? driver.summary,
+      mechanism:
+        translation?.drivers?.[index]?.mechanism ?? driver.mechanism,
     })),
     stories: report.stories.map((story, index) => {
       const translatedStory = translation?.stories[index];

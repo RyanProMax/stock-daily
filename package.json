@@ -22,6 +22,7 @@
     "daily:check": "node scripts/daily-publish.mjs --check",
     "daily:publish": "node scripts/daily-publish.mjs",
     "daily:verify": "node scripts/daily-verify.mjs",
+    "daily:replace": "node scripts/replace-daily-reports.mjs",
     "daily:run": "scripts/run-codex-daily.sh --force --update-kind morning",
     "daily:close": "scripts/run-codex-daily.sh --force --update-kind close",
     "daily:evening": "scripts/run-codex-daily.sh --force --update-kind evening",

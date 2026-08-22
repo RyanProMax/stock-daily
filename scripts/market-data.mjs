@@ -115,11 +115,17 @@ export function normalizeDailyMarketPack(payload) {
     const region = market.region;
     const direction = market.direction;
     const asOf = requireText(market.as_of, `${symbol}.as_of`);
+    const previousAsOf = requireText(
+      market.previous_as_of,
+      `${symbol}.previous_as_of`,
+    );
     const source = requireText(market.source, `${symbol}.source`);
     if (
       !["CN", "US"].includes(region) ||
       !["up", "down", "flat"].includes(direction) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(asOf) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(previousAsOf) ||
+      previousAsOf >= asOf ||
       !source.startsWith("https://")
     ) {
       throw new Error(`API daily-pack ${symbol} 字段无效`);
@@ -137,6 +143,7 @@ export function normalizeDailyMarketPack(payload) {
       )} · ${asOf.slice(5)}`,
       source,
       asOf,
+      previousAsOf,
     };
   });
 
@@ -156,6 +163,7 @@ export function normalizeDailyMarketPack(payload) {
           symbol,
           provider: requireText(market.provider, `${symbol}.provider`),
           asOf: market.as_of,
+          previousAsOf: market.previous_as_of,
           attempts: Array.isArray(market.provider_attempts)
             ? market.provider_attempts
             : [],

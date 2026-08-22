@@ -21,6 +21,8 @@ export type ThesisStatus =
   | "partial"
   | "invalidated"
   | "inconclusive";
+export type DriverStatus = "explained" | "partial" | "unattributed";
+export type DriverRole = "primary" | "secondary";
 
 export interface MarketMetric {
   region: MarketRegion;
@@ -32,6 +34,7 @@ export interface MarketMetric {
   note: string;
   source?: string;
   asOf?: string;
+  previousAsOf?: string;
 }
 
 export interface SectorHeatMetric {
@@ -170,6 +173,40 @@ export interface DailyMarketView {
   headline: string;
   summary: string;
   overview: MarketOverview;
+  driverStatus?: DriverStatus;
+  leaderSectorSymbols?: string[];
+  laggardSectorSymbols?: string[];
+  driverIds?: string[];
+}
+
+export interface MarketSession {
+  market: MarketRegion;
+  asOf: string;
+  previousAsOf: string;
+  windowStart: string;
+  windowEnd: string;
+  wrapDeadline: string;
+}
+
+export interface DriverEvidence {
+  title: string;
+  facts: string;
+  source: string;
+  sourceLabel: string;
+  publishedAt: string;
+  kind: "event" | "market_wrap";
+}
+
+export interface MarketDriver {
+  id: string;
+  market: MarketRegion;
+  role: DriverRole;
+  direction: Exclude<ImpactTone, "neutral">;
+  title: string;
+  summary: string;
+  mechanism: string;
+  sectorSymbols: string[];
+  evidence: DriverEvidence[];
 }
 
 export interface Story {
@@ -189,18 +226,22 @@ export interface Story {
 }
 
 export interface DailyReport {
+  contractVersion?: string;
   reportDate: string;
   edition: number;
   generatedAt: string;
   dataCut: string;
   updateKind?: DailyUpdateKind;
   marketAsOf?: Partial<Record<MarketRegion, string>>;
+  marketSessions?: MarketSession[];
   headline: string;
   summary: string;
   overview: MarketOverview | string[];
   marketViews: Record<MarketRegion, DailyMarketView>;
   markets: MarketMetric[];
   sectorHeat: SectorHeatMetric[];
+  sectorPerformance?: SectorHeatMetric[];
+  drivers?: MarketDriver[];
   stories: Story[];
   agentModel: string;
   isSample: boolean;
@@ -235,6 +276,7 @@ export interface DailyReportTranslation {
       >;
     };
   }>;
+  drivers?: Array<Pick<MarketDriver, "title" | "summary" | "mechanism">>;
 }
 
 export interface ReportListItem {

@@ -22,6 +22,7 @@ interface SnapshotItemProps {
 interface Props {
   markets: MarketMetric[];
   sectorView: SectorHeatView;
+  sectorPerformance?: SectorHeatMetric[];
   market: MarketRegion;
   language: Language;
   labels: {
@@ -80,11 +81,18 @@ function localizedName(sector: SectorHeatMetric, language: Language) {
 export default function MarketSnapshot({
   markets,
   sectorView,
+  sectorPerformance,
   market,
   language,
   labels,
 }: Props) {
   const sectors = sectorView.current.filter((sector) => sector.market === market);
+  const completeSectors = sectorPerformance
+    ?.filter((sector) => sector.market === market)
+    .sort(
+      (left, right) =>
+        Number.parseFloat(right.change) - Number.parseFloat(left.change),
+    );
   const streaks = sectorView.streaks.filter((sector) => sector.market === market);
 
   return (
@@ -111,24 +119,14 @@ export default function MarketSnapshot({
         </div>
       </section>
 
-      <details
-        className="snapshot-group snapshot-group-sectors snapshot-sector-disclosure"
-        data-sector-disclosure
-      >
-        <summary className="snapshot-heading">
-          <strong>{labels.sectors}</strong>
-          <span>{labels.range}</span>
-        </summary>
-        <div
-          className={`snapshot-grid snapshot-sector-grid${
-            sectors.length >= 6 ? " snapshot-sector-grid-expanded" : ""
-          }`}
-        >
-          {sectors.map((sector) => {
-            const streak = streaks.find(
-              (item) => item.symbol === sector.symbol,
-            );
-            return (
+      {completeSectors ? (
+        <section className="snapshot-group snapshot-group-sectors snapshot-sector-complete">
+          <header className="snapshot-heading">
+            <strong>{labels.sectors}</strong>
+            <span>{labels.range}</span>
+          </header>
+          <div className="snapshot-grid snapshot-sector-grid snapshot-sector-grid-complete">
+            {completeSectors.map((sector) => (
               <SnapshotItem
                 key={`${market}:${sector.symbol}`}
                 name={localizedName(sector, language)}
@@ -137,18 +135,50 @@ export default function MarketSnapshot({
                 href={sector.source}
                 kind="sector"
                 language={language}
-                detail={
-                  streak
-                    ? formatTemplate(labels.streakDays, {
-                        count: streak.days,
-                      })
-                    : undefined
-                }
               />
-            );
-          })}
-        </div>
-      </details>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <details
+          className="snapshot-group snapshot-group-sectors snapshot-sector-disclosure"
+          data-sector-disclosure
+        >
+          <summary className="snapshot-heading">
+          <strong>{labels.sectors}</strong>
+          <span>{labels.range}</span>
+          </summary>
+          <div
+            className={`snapshot-grid snapshot-sector-grid${
+              sectors.length >= 6 ? " snapshot-sector-grid-expanded" : ""
+            }`}
+          >
+            {sectors.map((sector) => {
+              const streak = streaks.find(
+                (item) => item.symbol === sector.symbol,
+              );
+              return (
+                <SnapshotItem
+                  key={`${market}:${sector.symbol}`}
+                  name={localizedName(sector, language)}
+                  change={sector.change}
+                  direction={sector.direction}
+                  href={sector.source}
+                  kind="sector"
+                  language={language}
+                  detail={
+                    streak
+                      ? formatTemplate(labels.streakDays, {
+                          count: streak.days,
+                        })
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

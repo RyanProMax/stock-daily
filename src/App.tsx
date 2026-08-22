@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import HotspotBoard from "./components/HotspotBoard";
+import MarketDrivers from "./components/MarketDrivers";
 import MarketSnapshot from "./components/MarketSnapshot";
 import {
   copy,
@@ -71,6 +72,7 @@ function AppHeader({ data }: { data: PageData }) {
       : `/?lang=${data.language}`;
   const weeklyHref = `/weekly?lang=${data.language}`;
   const archiveHref = dailyActive ? "#archive" : `${dailyHref}#archive`;
+  const showArchive = data.kind === "weekly" || data.archive.length > 1;
 
   return (
     <header className="masthead">
@@ -104,9 +106,7 @@ function AppHeader({ data }: { data: PageData }) {
             >
               {t.weekly}
             </a>
-            <a href={archiveHref}>
-              {t.archive}
-            </a>
+            {showArchive && <a href={archiveHref}>{t.archive}</a>}
           </nav>
           <HeaderActions
             languageHref={buildLanguageHref(data)}
@@ -136,6 +136,7 @@ function AppHeader({ data }: { data: PageData }) {
               dailyHref,
               weeklyHref,
               archiveHref,
+              showArchive,
               active: dailyActive ? "daily" : "weekly",
             }}
           />
@@ -298,6 +299,10 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const marketStories = report.stories.filter((story) =>
     story.regions.includes(data.market),
   );
+  const isAttribution = report.contractVersion === "market-attribution-v9";
+  const marketDrivers = (report.drivers ?? []).filter(
+    (driver) => driver.market === data.market,
+  );
   const displayArchive = data.archive.map((item) => {
     const marketArchive = item.marketViews?.[data.market];
     return {
@@ -349,7 +354,11 @@ function DailyPage({ data }: { data: DailyPageData }) {
     ? marketView.overview.interpretation.slice(overviewLead.length)
     : marketView.overview.interpretation;
   return (
-    <div className="page-shell" data-render="ssr">
+    <div
+      className="page-shell"
+      data-render="ssr"
+      data-contract={report.contractVersion}
+    >
       <header className="hero hero-daily">
         <div className="hero-copy">
           <div className="hero-meta-row">
@@ -362,16 +371,18 @@ function DailyPage({ data }: { data: DailyPageData }) {
               </span>
               {report.isSample && <span className="sample-badge">{t.sample}</span>}
             </div>
-            <div className="hero-date-nav" aria-label={t.selectDate}>
-              <DateNavigator
-                archive={displayArchive}
-                selectedDate={report.reportDate}
-                language={language}
-                selectLabel={t.selectDate}
-                newerLabel={t.newer}
-                olderLabel={t.older}
-              />
-            </div>
+            {displayArchive.length > 1 && (
+              <div className="hero-date-nav" aria-label={t.selectDate}>
+                <DateNavigator
+                  archive={displayArchive}
+                  selectedDate={report.reportDate}
+                  language={language}
+                  selectLabel={t.selectDate}
+                  newerLabel={t.newer}
+                  olderLabel={t.older}
+                />
+              </div>
+            )}
           </div>
           <div className="daily-focus-main">
             <h1>{marketView.headline}</h1>
@@ -422,84 +433,108 @@ function DailyPage({ data }: { data: DailyPageData }) {
         <MarketSnapshot
           markets={marketMetrics}
           sectorView={data.sectorHeat}
+          sectorPerformance={report.sectorPerformance}
           market={data.market}
           language={language}
           labels={{
             indices: t.currentMarkets,
-            sectors: t.sectorHeat,
-            range: t.heatRange,
+            sectors: isAttribution ? t.sectorPerformance : t.sectorHeat,
+            range: isAttribution ? t.sectorPerformanceRange : t.heatRange,
             streakDays: t.heatStreakDays,
           }}
         />
       </section>
 
+      {(!isAttribution || marketDrivers.length > 0) && (
       <section className="signals-section">
-        <HotspotBoard
-          stories={marketStories}
-          timeline={data.weekEvents}
-          thesisLedger={data.thesisLedger ?? []}
-          market={data.market}
-          language={language}
-          labels={{
-            title: t.hotspotIndex,
-            events: t.weekEvents,
-            top: t.hotspotTop,
-            supporting: t.hotspotSupporting,
-            source: t.hotspotSource,
-            facts: t.signalFacts,
-            logic: t.signalLogic,
-            impact: t.impact,
-            proof: t.proof,
-            scheduled: t.eventScheduled,
-            awaiting: t.eventAwaiting,
-            cancelled: t.eventCancelled,
-            postponed: t.eventPostponed,
-            assessment: t.eventAssessment,
-            next: t.eventNext,
-            noData: t.eventNoData,
-            pricingThesis: t.pricingThesis,
-            expectationGap: t.expectationGap,
-            actual: t.actual,
-            expected: t.expected,
-            prior: t.prior,
-            surprise: t.surprise,
-            marketReaction: t.marketReaction,
-            transmission: t.transmission,
-            impactPath: t.impactPath,
-            exposure: t.exposure,
-            checkpoint: t.checkpoint,
-            confirmIf: t.confirmIf,
-            invalidateIf: t.invalidateIf,
-            verifyBy: t.verifyBy,
-            impactWindow: t.impactWindow,
-            coreSignal: t.coreSignal,
-            supportingSignal: t.supportingSignal,
-            horizonIntraday: t.horizonIntraday,
-            horizonShort: t.horizonShort,
-            horizonMedium: t.horizonMedium,
-            sourceFirstParty: t.sourceFirstParty,
-            sourceWire: t.sourceWire,
-            sourceSecondary: t.sourceSecondary,
-            statusPending: t.statusPending,
-            statusConfirmed: t.statusConfirmed,
-            statusPartial: t.statusPartial,
-            statusInvalidated: t.statusInvalidated,
-            statusInconclusive: t.statusInconclusive,
-            observation: t.observation,
-            whyImportant: t.whyImportant,
-          }}
-        />
-        {marketStories.length === 0 && (
+        {isAttribution ? (
+          <MarketDrivers
+            drivers={marketDrivers}
+            sectors={(report.sectorPerformance ?? []).filter(
+              (sector) => sector.market === data.market,
+            )}
+            language={language}
+            labels={{
+              primary: t.primaryDriver,
+              secondary: t.secondaryDriver,
+              happened: t.driverEvent,
+              mechanism: t.driverMechanism,
+              sectors: t.driverSectors,
+              evidence: t.driverEvidence,
+            }}
+          />
+        ) : (
+          <HotspotBoard
+            stories={marketStories}
+            timeline={data.weekEvents}
+            thesisLedger={data.thesisLedger ?? []}
+            market={data.market}
+            language={language}
+            labels={{
+              title: t.hotspotIndex,
+              events: t.weekEvents,
+              top: t.hotspotTop,
+              supporting: t.hotspotSupporting,
+              source: t.hotspotSource,
+              facts: t.signalFacts,
+              logic: t.signalLogic,
+              impact: t.impact,
+              proof: t.proof,
+              scheduled: t.eventScheduled,
+              awaiting: t.eventAwaiting,
+              cancelled: t.eventCancelled,
+              postponed: t.eventPostponed,
+              assessment: t.eventAssessment,
+              next: t.eventNext,
+              noData: t.eventNoData,
+              pricingThesis: t.pricingThesis,
+              expectationGap: t.expectationGap,
+              actual: t.actual,
+              expected: t.expected,
+              prior: t.prior,
+              surprise: t.surprise,
+              marketReaction: t.marketReaction,
+              transmission: t.transmission,
+              impactPath: t.impactPath,
+              exposure: t.exposure,
+              checkpoint: t.checkpoint,
+              confirmIf: t.confirmIf,
+              invalidateIf: t.invalidateIf,
+              verifyBy: t.verifyBy,
+              impactWindow: t.impactWindow,
+              coreSignal: t.coreSignal,
+              supportingSignal: t.supportingSignal,
+              horizonIntraday: t.horizonIntraday,
+              horizonShort: t.horizonShort,
+              horizonMedium: t.horizonMedium,
+              sourceFirstParty: t.sourceFirstParty,
+              sourceWire: t.sourceWire,
+              sourceSecondary: t.sourceSecondary,
+              statusPending: t.statusPending,
+              statusConfirmed: t.statusConfirmed,
+              statusPartial: t.statusPartial,
+              statusInvalidated: t.statusInvalidated,
+              statusInconclusive: t.statusInconclusive,
+              observation: t.observation,
+              whyImportant: t.whyImportant,
+            }}
+          />
+        )}
+        {!isAttribution && marketStories.length === 0 && (
           <p className="empty-market-news">{t.noMarketNews}</p>
         )}
       </section>
+      )}
 
-      <ThesisHistory
-        entries={data.thesisHistory ?? []}
-        language={language}
-      />
+      {!isAttribution && (
+        <ThesisHistory
+          entries={data.thesisHistory ?? []}
+          language={language}
+        />
+      )}
 
-      <section id="archive" className="archive-section">
+      {otherEditions.length > 0 && (
+        <section id="archive" className="archive-section">
         <div className="archive-heading">
           <h2>{t.previous}</h2>
         </div>
@@ -547,7 +582,8 @@ function DailyPage({ data }: { data: DailyPageData }) {
             </a>
           ))}
         </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

@@ -183,18 +183,20 @@ async function fetchProductionDailyPageData(
     }));
 
   let weekEvents = null;
-  try {
-    const weekly = await fetchProductionApi<NonNullable<WeeklyPageData["report"]>>(
-      requestUrl,
-      `/api/weekly/${precedingSunday(report.reportDate)}`,
-    );
-    weekEvents = buildWeeklyEventTimeline(
-      weekly,
-      report.reportDate,
-      reports.filter((item) => item.reportDate <= report.reportDate),
-    );
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("404")) throw error;
+  if (report.contractVersion !== "market-attribution-v9") {
+    try {
+      const weekly = await fetchProductionApi<NonNullable<WeeklyPageData["report"]>>(
+        requestUrl,
+        `/api/weekly/${precedingSunday(report.reportDate)}`,
+      );
+      weekEvents = buildWeeklyEventTimeline(
+        weekly,
+        report.reportDate,
+        reports.filter((item) => item.reportDate <= report.reportDate),
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("404")) throw error;
+    }
   }
 
   return {
@@ -301,11 +303,14 @@ async function buildDailyPageData(
       { reportDate: report.reportDate, sectors: report.sectorHeat },
     ];
   }
-  const [weekEvents, thesisLedger, thesisHistory] = await Promise.all([
-    getWeeklyEventTimeline(db, report.reportDate),
-    getThesisLedger(db, report.reportDate, market),
-    getThesisHistory(db, report.reportDate, market),
-  ]);
+  const [weekEvents, thesisLedger, thesisHistory] =
+    report.contractVersion === "market-attribution-v9"
+      ? [null, [], []]
+      : await Promise.all([
+          getWeeklyEventTimeline(db, report.reportDate),
+          getThesisLedger(db, report.reportDate, market),
+          getThesisHistory(db, report.reportDate, market),
+        ]);
 
   return {
     kind: "daily",

@@ -65,8 +65,8 @@ function formatSector(sector, market, changeValue, asOf, source) {
   };
 }
 
-function topHeat(metrics) {
-  return metrics
+export function topSectorHeat(metrics) {
+  return [...metrics]
     .sort(
       (left, right) =>
         right.score - left.score ||
@@ -273,7 +273,7 @@ async function fetchYahooCurrentCnHeat(cutoffTime) {
       4,
       (sector) => fetchYahooCurrentSector(sector, cutoffTime),
     );
-    return topHeat(metrics);
+    return metrics;
   } catch {
     return null;
   }
@@ -388,13 +388,13 @@ function metricAtCutoff(sector, market, points, cutoffTime) {
 async function fetchCurrentMarketHeat(sectors, market, cutoffTime) {
   try {
     const current = await fetchCurrentSectors(sectors, market, cutoffTime);
-    return current ? topHeat(current) : null;
+    return current ?? null;
   } catch {
     return null;
   }
 }
 
-async function collectHistoricalMarketHeat(
+async function collectHistoricalMarketPerformance(
   sectors,
   market,
   cutoffTimes,
@@ -411,15 +411,13 @@ async function collectHistoricalMarketHeat(
     ),
   }));
   return cutoffTimes.map((cutoffTime) =>
-    topHeat(
-      histories.map(({ sector, points }) =>
-        metricAtCutoff(sector, market, points, cutoffTime),
-      ),
+    histories.map(({ sector, points }) =>
+      metricAtCutoff(sector, market, points, cutoffTime),
     ),
   );
 }
 
-export async function collectSectorHeat(cutoffTime) {
+export async function collectSectorPerformance(cutoffTime) {
   const [currentCn, currentUs] = await Promise.all([
     fetchCurrentMarketHeat(cnSectors, "CN", cutoffTime),
     fetchCurrentMarketHeat(usSectors, "US", cutoffTime),
@@ -429,7 +427,7 @@ export async function collectSectorHeat(cutoffTime) {
       if (currentCn) return currentCn;
       const yahooCn = await fetchYahooCurrentCnHeat(cutoffTime);
       if (yahooCn) return yahooCn;
-      const [historicalCn] = await collectHistoricalMarketHeat(
+      const [historicalCn] = await collectHistoricalMarketPerformance(
         cnSectors,
         "CN",
         [cutoffTime],
@@ -438,11 +436,19 @@ export async function collectSectorHeat(cutoffTime) {
     })(),
     currentUs
       ? Promise.resolve(currentUs)
-      : collectHistoricalMarketHeat(usSectors, "US", [cutoffTime]).then(
+      : collectHistoricalMarketPerformance(usSectors, "US", [cutoffTime]).then(
           ([historicalUs]) => historicalUs,
         ),
   ]);
   return [...cn, ...us];
+}
+
+export async function collectSectorHeat(cutoffTime) {
+  const performance = await collectSectorPerformance(cutoffTime);
+  return [
+    ...topSectorHeat(performance.filter((item) => item.market === "CN")),
+    ...topSectorHeat(performance.filter((item) => item.market === "US")),
+  ];
 }
 
 export async function collectSectorHeatSeries(cutoffTimes) {
@@ -454,11 +460,11 @@ export async function collectSectorHeatSeries(cutoffTimes) {
     throw new Error("cutoffTimes must contain finite timestamps");
   }
   const [cnByCutoff, usByCutoff] = await Promise.all([
-    collectHistoricalMarketHeat(cnSectors, "CN", cutoffTimes),
-    collectHistoricalMarketHeat(usSectors, "US", cutoffTimes),
+    collectHistoricalMarketPerformance(cnSectors, "CN", cutoffTimes),
+    collectHistoricalMarketPerformance(usSectors, "US", cutoffTimes),
   ]);
   return cutoffTimes.map((_, index) => [
-    ...cnByCutoff[index],
-    ...usByCutoff[index],
+    ...topSectorHeat(cnByCutoff[index]),
+    ...topSectorHeat(usByCutoff[index]),
   ]);
 }

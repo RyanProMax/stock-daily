@@ -25,6 +25,7 @@ interface MobileMenu {
   dailyHref: string;
   weeklyHref: string;
   archiveHref: string;
+  showArchive: boolean;
   active: "daily" | "weekly";
 }
 
@@ -164,9 +165,11 @@ export default function HeaderActions({
                     >
                       {mobileMenu.weeklyLabel}
                     </Link>
-                    <Link href={mobileMenu.archiveHref} onPress={close}>
-                      {mobileMenu.archiveLabel}
-                    </Link>
+                    {mobileMenu.showArchive && (
+                      <Link href={mobileMenu.archiveHref} onPress={close}>
+                        {mobileMenu.archiveLabel}
+                      </Link>
+                    )}
                   </nav>
                   <div className="mobile-drawer-preferences">
                     <span>{mobileMenu.preferencesLabel}</span>

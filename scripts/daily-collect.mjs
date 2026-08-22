@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 import { fetchDailyMarketPack } from "./market-data.mjs";
 import { collectNews } from "./news-pipeline.mjs";
 import {
-  SECTOR_COUNT_PER_MARKET,
-  collectSectorHeat,
+  collectSectorPerformance,
+  topSectorHeat,
 } from "./sector-heat.mjs";
+import {
+  buildMarketSessions,
+  evidenceFitsSession,
+} from "./market-attribution.mjs";
 import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
@@ -37,11 +41,11 @@ export function shanghaiDate(date = new Date()) {
   }).format(date);
 }
 
-function validateMarketDates(markets, sectorHeat) {
+function validateMarketDates(markets, sectorPerformance) {
   for (const region of ["CN", "US"]) {
     const heatDates = [
       ...new Set(
-        sectorHeat
+        sectorPerformance
           .filter((sector) => sector.market === region)
           .map((sector) => sector.asOf),
       ),
@@ -70,7 +74,7 @@ function validateMarketDates(markets, sectorHeat) {
 export async function collectDailyInput({
   reportDate = shanghaiDate(),
   updateKind = "morning",
-  sectorHeatOverride,
+  sectorPerformanceOverride,
 } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
     throw new Error("reportDate 必须是 YYYY-MM-DD");
@@ -80,17 +84,37 @@ export async function collectDailyInput({
   }
   const cutoffAt = dailyCutoffAt(reportDate, updateKind);
   const cutoffTime = Date.parse(cutoffAt);
-  const [marketPack, sectorHeat, newsResult] = await Promise.all([
+  const [marketPack, sectorPerformance, newsResult] = await Promise.all([
     fetchDailyMarketPack(cutoffAt),
-    sectorHeatOverride
-      ? Promise.resolve(sectorHeatOverride)
-      : collectSectorHeat(cutoffTime),
+    sectorPerformanceOverride
+      ? Promise.resolve(sectorPerformanceOverride)
+      : collectSectorPerformance(cutoffTime),
     collectNews(cutoffTime, reportDate),
   ]);
-  validateMarketDates(marketPack.markets, sectorHeat);
+  validateMarketDates(marketPack.markets, sectorPerformance);
+  const sectorHeat = [
+    ...topSectorHeat(sectorPerformance.filter((item) => item.market === "CN")),
+    ...topSectorHeat(sectorPerformance.filter((item) => item.market === "US")),
+  ];
+  const marketSessions = buildMarketSessions(marketPack.markets);
+  const news = newsResult.news
+    .map((item) => ({
+      ...item,
+      regions: item.regions.filter((market) => {
+        const session = marketSessions.find((candidate) => candidate.market === market);
+        return session ? evidenceFitsSession(item, session) : false;
+      }),
+    }))
+    .filter((item) => item.regions.length > 0);
+  const selectedByMarket = Object.fromEntries(
+    ["CN", "US"].map((market) => [
+      market,
+      news.filter((item) => item.regions.includes(market)).length,
+    ]),
+  );
   return {
-    schemaVersion: 8,
-    contractVersion: "codex-daily-v8",
+    schemaVersion: 9,
+    contractVersion: "market-attribution-v9",
     runId: randomUUID(),
     reportDate,
     updateKind,
@@ -98,9 +122,14 @@ export async function collectDailyInput({
     collectedAt: new Date().toISOString(),
     markets: marketPack.markets,
     marketDataDiagnostics: marketPack.diagnostics,
+    marketSessions,
+    sectorPerformance,
     sectorHeat,
-    news: newsResult.news,
-    newsDiagnostics: newsResult.diagnostics,
+    news,
+    newsDiagnostics: {
+      ...newsResult.diagnostics,
+      selectedByMarket,
+    },
   };
 }
 
@@ -130,7 +159,7 @@ async function main() {
       ? args[outputIndex + 1]
       : positional ?? "work/daily-input.json",
   );
-  let sectorHeatOverride;
+  let sectorPerformanceOverride;
   if (heatInputIndex >= 0) {
     const heatInput = args[heatInputIndex + 1];
     const payload = heatInput.startsWith("https://")
@@ -144,21 +173,22 @@ async function main() {
           return response.json();
         })
       : JSON.parse(await readFile(resolve(heatInput), "utf8"));
-    sectorHeatOverride = payload.data?.sectorHeat ?? payload.sectorHeat;
+    sectorPerformanceOverride =
+      payload.data?.sectorPerformance ?? payload.sectorPerformance;
   }
   if (
     heatInputIndex >= 0 &&
-    (!Array.isArray(sectorHeatOverride) ||
-      sectorHeatOverride.length !== SECTOR_COUNT_PER_MARKET * 2)
+    (!Array.isArray(sectorPerformanceOverride) ||
+      sectorPerformanceOverride.length !== 11 * 2)
   ) {
     throw new Error(
-      `--heat-input 必须包含 ${SECTOR_COUNT_PER_MARKET * 2} 项已审计 sectorHeat`,
+      "--heat-input 必须包含 CN、US 各 11 项已审计 sectorPerformance",
     );
   }
   const input = await collectDailyInput({
     reportDate,
     updateKind,
-    sectorHeatOverride,
+    sectorPerformanceOverride,
   });
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(input, null, 2)}\n`, "utf8");
@@ -173,6 +203,7 @@ async function main() {
         marketCount: input.markets.length,
         marketDataSource: input.marketDataDiagnostics.source,
         heatCount: input.sectorHeat.length,
+        sectorPerformanceCount: input.sectorPerformance.length,
         newsCount: input.news.length,
         newsByMarket: input.newsDiagnostics.selectedByMarket,
         newsCandidates: input.newsDiagnostics.candidateCount,

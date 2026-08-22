@@ -611,6 +611,8 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
       regions: storyRegions(story),
       ai: story.ai,
     })),
+    drivers: report.drivers ?? [],
+    sectorPerformance: report.sectorPerformance ?? [],
   };
 }
 
@@ -624,12 +626,16 @@ function parseDailyRow(row: DailyRow): DailyReport {
     generatedAt: row.generatedAt,
     dataCut: row.dataCut,
     agentModel: row.agentModel,
+    contractVersion: content.contractVersion,
     updateKind: content.updateKind,
     marketAsOf: content.marketAsOf,
+    marketSessions: content.marketSessions,
     overview: content.overview ?? [],
     marketViews: content.marketViews,
     markets: content.markets ?? [],
     sectorHeat: content.sectorHeat ?? [],
+    sectorPerformance: content.sectorPerformance ?? [],
+    drivers: content.drivers ?? [],
     stories: content.stories ?? [],
     isSample: content.isSample ?? false,
     translations: content.translations,
@@ -762,39 +768,41 @@ export async function getDailyArchive(
           LIMIT 1
         ) AS usChange,
         json_extract(content, '$.markets') AS marketsJson,
-        (
+        CASE WHEN json_type(content, '$.drivers') = 'array' THEN (
+          SELECT COUNT(*) FROM json_each(daily_reports.content, '$.drivers')
+        ) ELSE (
           SELECT COUNT(*)
           FROM json_each(daily_reports.content, '$.stories') AS story
           WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
-        ) AS signalCount,
-        (
+        ) END AS signalCount,
+        CASE WHEN json_type(content, '$.drivers') = 'array' THEN (
+          SELECT COUNT(*)
+          FROM json_each(daily_reports.content, '$.drivers') AS driver
+          WHERE json_extract(driver.value, '$.market') = 'CN'
+        ) ELSE (
           SELECT COUNT(*)
           FROM json_each(daily_reports.content, '$.stories') AS story
           WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
-          AND COALESCE(
-            json_extract(story.value, '$.signal.roleByMarket.CN'),
-            'core'
-          ) != 'excluded'
+          AND COALESCE(json_extract(story.value, '$.signal.roleByMarket.CN'), 'core') != 'excluded'
           AND EXISTS (
-            SELECT 1
-            FROM json_each(story.value, '$.regions') AS region
+            SELECT 1 FROM json_each(story.value, '$.regions') AS region
             WHERE region.value = 'CN'
           )
-        ) AS cnSignalCount,
-        (
+        ) END AS cnSignalCount,
+        CASE WHEN json_type(content, '$.drivers') = 'array' THEN (
+          SELECT COUNT(*)
+          FROM json_each(daily_reports.content, '$.drivers') AS driver
+          WHERE json_extract(driver.value, '$.market') = 'US'
+        ) ELSE (
           SELECT COUNT(*)
           FROM json_each(daily_reports.content, '$.stories') AS story
           WHERE CAST(json_extract(story.value, '$.importance') AS INTEGER) >= 3
-          AND COALESCE(
-            json_extract(story.value, '$.signal.roleByMarket.US'),
-            'core'
-          ) != 'excluded'
+          AND COALESCE(json_extract(story.value, '$.signal.roleByMarket.US'), 'core') != 'excluded'
           AND EXISTS (
-            SELECT 1
-            FROM json_each(story.value, '$.regions') AS region
+            SELECT 1 FROM json_each(story.value, '$.regions') AS region
             WHERE region.value = 'US'
           )
-        ) AS usSignalCount,
+        ) END AS usSignalCount,
         generated_at AS generatedAt
       FROM daily_reports
       ORDER BY report_date DESC
