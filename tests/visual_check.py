@@ -91,6 +91,17 @@ def inspect_daily(page, market, width):
             sectorCount: document.querySelectorAll(
               '.snapshot-sector-grid-complete .snapshot-item-sector'
             ).length,
+            sectorTaxonomy: document.querySelector(
+              '.snapshot-sector-complete > .snapshot-heading span'
+            )?.textContent.trim(),
+            flatSectorCount: document.querySelectorAll(
+              '.snapshot-sector-grid-complete .snapshot-item-flat'
+            ).length,
+            flatSectorBorderTopWidth: getComputedStyle(
+              document.querySelector(
+                '.snapshot-sector-grid-complete .snapshot-item-flat'
+              ) ?? document.documentElement
+            ).borderTopWidth,
             sectorColumnCount: getComputedStyle(document.querySelector(
               '.snapshot-sector-grid-complete'
             )).gridTemplateColumns.split(' ').length,
@@ -98,6 +109,12 @@ def inspect_daily(page, market, width):
               '.snapshot-index-grid'
             )).gridTemplateColumns.split(' ').length,
             driverCount: document.querySelectorAll('.market-driver-card').length,
+            driverFooterCount: document.querySelectorAll(
+              '.market-driver-footer'
+            ).length,
+            driverMetaInHeaderCount: document.querySelectorAll(
+              '.market-driver-header .market-driver-meta'
+            ).length,
             primaryDriverCount: document.querySelectorAll(
               '.market-driver-role.role-primary'
             ).length,
@@ -255,11 +272,19 @@ for key in ("CN-1440", "US-1440", "CN-390", "US-390"):
     assert layout["activeMarket"] == market, result
     assert layout["marketCount"] == (6 if market == "CN" else 4), result
     assert layout["sectorCount"] == 11, result
+    assert ("GICS" if market == "US" else "中证") in layout[
+        "sectorTaxonomy"
+    ], result
+    if market == "US":
+        assert layout["flatSectorCount"] == 1, result
+        assert layout["flatSectorBorderTopWidth"] == "3px", result
     assert layout["sectorColumnCount"] == (2 if mobile else 6), result
     assert layout["indexColumnCount"] == (
         (3 if market == "CN" else 2) if mobile else layout["marketCount"]
     ), result
     assert layout["driverCount"] == 2, result
+    assert layout["driverFooterCount"] == 0, result
+    assert layout["driverMetaInHeaderCount"] == layout["driverCount"], result
     assert layout["primaryDriverCount"] == 1, result
     assert layout["evidenceLinkCount"] >= layout["driverCount"], result
     assert layout["driverSectorChipCount"] >= layout["driverCount"], result

@@ -4,6 +4,15 @@ import { marketAsOfFromInput } from "./daily-policy.mjs";
 
 const inputPath = resolve(process.argv[2] ?? "work/daily-input.json");
 const input = JSON.parse(await readFile(inputPath, "utf8"));
+const isAttribution = input.contractVersion === "market-attribution-v9";
+const expectedReport = isAttribution
+  ? JSON.parse(
+      await readFile(
+        resolve(process.argv[3] ?? "work/daily-report.json"),
+        "utf8",
+      ),
+    )
+  : null;
 const marketAsOf = marketAsOfFromInput(input);
 const baseUrl = "https://stock-daily-4ip.pages.dev";
 const cacheBust = Date.now();
@@ -73,6 +82,68 @@ const v8Invalid =
           signalCounts[market].supporting > 2)
       );
     }));
+const v9Invalid =
+  isAttribution &&
+  (report?.contractVersion !== "market-attribution-v9" ||
+    report?.stories?.length !== 0 ||
+    report?.sectorPerformance?.length !== input.sectorPerformance?.length ||
+    report.sectorPerformance.some(
+      (sector, index) =>
+        sector.market !== input.sectorPerformance[index]?.market ||
+        sector.symbol !== input.sectorPerformance[index]?.symbol ||
+        sector.asOf !== input.sectorPerformance[index]?.asOf ||
+        sector.change !== input.sectorPerformance[index]?.change ||
+        sector.direction !== input.sectorPerformance[index]?.direction,
+    ) ||
+    report?.drivers?.length !== expectedReport.drivers.length ||
+    report.drivers.some((driver, index) => {
+      const expected = expectedReport.drivers[index];
+      const expectedSources = [...new Set(
+        expected.evidenceIndexes.map(
+          (evidenceIndex) => input.news[evidenceIndex]?.url,
+        ),
+      )];
+      return (
+        driver.market !== expected.market ||
+        driver.role !== expected.role ||
+        driver.direction !== expected.direction ||
+        driver.title !== expected.title ||
+        driver.summary !== expected.summary ||
+        driver.mechanism !== expected.mechanism ||
+        JSON.stringify(driver.sectorSymbols) !==
+          JSON.stringify(expected.sectorSymbols) ||
+        JSON.stringify(driver.evidence.map((item) => item.source)) !==
+          JSON.stringify(expectedSources)
+      );
+    }) ||
+    ["CN", "US"].some((market) =>
+      ["headline", "summary", "driverStatus"].some(
+        (key) =>
+          report.marketViews?.[market]?.[key] !==
+          expectedReport.marketViews[market][key],
+      ),
+    ) ||
+    report.headline !== expectedReport.headline ||
+    report.summary !== expectedReport.summary ||
+    report.translations?.en?.headline !==
+      expectedReport.translations.en.headline ||
+    report.translations?.en?.summary !==
+      expectedReport.translations.en.summary ||
+    ["CN", "US"].some((market) =>
+      ["headline", "summary"].some(
+        (key) =>
+          report.translations?.en?.marketViews?.[market]?.[key] !==
+          expectedReport.translations.en.marketViews[market][key],
+      ),
+    ) ||
+    report.translations?.en?.drivers?.length !==
+      expectedReport.translations.en.drivers.length ||
+    report.translations?.en?.drivers?.some((driver, index) =>
+      ["title", "summary", "mechanism"].some(
+        (key) =>
+          driver[key] !== expectedReport.translations.en.drivers[index]?.[key],
+      ),
+    ));
 if (
   health?.database !== "connected" ||
   health?.latestIngestion?.status !== "completed" ||
@@ -103,13 +174,15 @@ if (
       sector.change !== input.sectorHeat[index]?.change ||
       sector.direction !== input.sectorHeat[index]?.direction,
   ) ||
-  report?.stories?.length !== input.news.length ||
-  report.stories.some(
-    (story, index) =>
-      JSON.stringify(story.regions) !==
-      JSON.stringify(input.news[index]?.regions),
-  ) ||
-  v8Invalid
+  (!isAttribution &&
+    (report?.stories?.length !== input.news.length ||
+      report.stories.some(
+        (story, index) =>
+          JSON.stringify(story.regions) !==
+          JSON.stringify(input.news[index]?.regions),
+      ))) ||
+  v8Invalid ||
+  v9Invalid
 ) {
   throw new Error("线上日报与本次输入或 Codex 溯源字段不一致");
 }
@@ -126,6 +199,13 @@ console.log(
       storyCount: report.stories.length,
       qualifiedSignalCount: qualifiedStories.length,
       signalCounts,
+      driverCount: report.drivers?.length ?? 0,
+      driverStatus: Object.fromEntries(
+        ["CN", "US"].map((market) => [
+          market,
+          report.marketViews?.[market]?.driverStatus,
+        ]),
+      ),
       markets: ["CN", "US"],
       agentModel: report.agentModel,
     },

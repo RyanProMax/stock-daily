@@ -439,7 +439,11 @@ function DailyPage({ data }: { data: DailyPageData }) {
           labels={{
             indices: t.currentMarkets,
             sectors: isAttribution ? t.sectorPerformance : t.sectorHeat,
-            range: isAttribution ? t.sectorPerformanceRange : t.heatRange,
+            range: isAttribution
+              ? data.market === "US"
+                ? t.sectorPerformanceRangeUS
+                : t.sectorPerformanceRangeCN
+              : t.heatRange,
             streakDays: t.heatStreakDays,
           }}
         />

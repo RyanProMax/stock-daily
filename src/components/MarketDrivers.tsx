@@ -43,11 +43,39 @@ export default function MarketDrivers({
               <span className="market-driver-number">
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <div>
+              <div className="market-driver-heading">
                 <span className={`market-driver-role role-${driver.role}`}>
                   {driver.role === "primary" ? labels.primary : labels.secondary}
                 </span>
                 <h2>{driver.title}</h2>
+                <div className="market-driver-meta">
+                  <div className="market-driver-sectors">
+                    <strong>{labels.sectors}</strong>
+                    <span>
+                      {driver.sectorSymbols.map((symbol) => {
+                        const sector = bySymbol.get(symbol);
+                        if (!sector) return null;
+                        return (
+                          <i className={`sector-chip sector-chip-${sector.direction}`} key={symbol}>
+                            {language === "en" ? sector.nameEn : sector.name}
+                            <em>{sector.change}</em>
+                          </i>
+                        );
+                      })}
+                    </span>
+                  </div>
+                  <div className="market-driver-evidence">
+                    <strong>{labels.evidence}</strong>
+                    <span>
+                      {evidence.map((item) => (
+                        <a href={item.source} target="_blank" rel="noreferrer" key={item.source}>
+                          {item.sourceLabel}
+                          <ExternalLink aria-hidden="true" />
+                        </a>
+                      ))}
+                    </span>
+                  </div>
+                </div>
               </div>
             </header>
             <div className="market-driver-body">
@@ -60,34 +88,6 @@ export default function MarketDrivers({
                 <p>{driver.mechanism}</p>
               </section>
             </div>
-            <footer className="market-driver-footer">
-              <div className="market-driver-sectors">
-                <strong>{labels.sectors}</strong>
-                <span>
-                  {driver.sectorSymbols.map((symbol) => {
-                    const sector = bySymbol.get(symbol);
-                    if (!sector) return null;
-                    return (
-                      <i className={`sector-chip sector-chip-${sector.direction}`} key={symbol}>
-                        {language === "en" ? sector.nameEn : sector.name}
-                        <em>{sector.change}</em>
-                      </i>
-                    );
-                  })}
-                </span>
-              </div>
-              <div className="market-driver-evidence">
-                <strong>{labels.evidence}</strong>
-                <span>
-                  {evidence.map((item) => (
-                    <a href={item.source} target="_blank" rel="noreferrer" key={item.source}>
-                      {item.sourceLabel}
-                      <ExternalLink aria-hidden="true" />
-                    </a>
-                  ))}
-                </span>
-              </div>
-            </footer>
           </li>
         );
       })}

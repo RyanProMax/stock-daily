@@ -136,9 +136,9 @@ function fixtureReport() {
         driverStatus: "explained",
       },
       US: {
-        headline: "商业活动与矿业股走强，美股收涨",
-        summary: "商业活动数据与矿业股上涨为风险资产提供支撑，长端收益率上行则构成反向约束。",
-        driverStatus: "explained",
+        headline: "矿业股走强，道指领涨美股",
+        summary: "矿业股上涨为风险资产提供支撑，但商业活动数据同时推高长端收益率，只能作部分归因。",
+        driverStatus: "partial",
       },
     },
     drivers: [
@@ -151,9 +151,9 @@ function fixtureReport() {
       },
       {
         market: "US", role: "primary", direction: "positive",
-        title: "商业活动与矿业股支撑美股",
-        summary: "商业活动升温且矿业股上涨，美国主要股指收高。",
-        mechanism: "增长预期与资源股收益改善支撑原材料和周期资产，并抵消长端收益率上行压力。",
+        title: "矿业股提供结构性支撑",
+        summary: "矿业股上涨，是美国主要股指收高的支撑之一。",
+        mechanism: "资源股收益改善支撑原材料，但不能单独解释指数涨幅，长端收益率上行也形成反向约束。",
         sectorSymbols: ["XLB"], evidenceIndexes: [1],
       },
     ],
@@ -167,8 +167,8 @@ function fixtureReport() {
             summary: "Precious metals, lithium and communication-equipment catalysts matched the local sector advance.",
           },
           US: {
-            headline: "Business activity and miners led as U.S. stocks rose",
-            summary: "Stronger activity and mining shares supported equities while higher long yields constrained them.",
+            headline: "Miners advanced as the Dow led U.S. stocks",
+            summary: "Mining shares supported equities while activity also lifted long yields, leaving only a partial attribution.",
           },
         },
         drivers: [
@@ -178,9 +178,9 @@ function fixtureReport() {
             mechanism: "Gold and lithium catalysts lifted materials while communication equipment supported growth shares.",
           },
           {
-            title: "Business activity and miners supported stocks",
-            summary: "Activity strengthened and mining shares advanced as major U.S. indexes closed higher.",
-            mechanism: "Growth expectations and resource earnings supported cyclicals despite pressure from long yields.",
+            title: "Miners provided structural support",
+            summary: "Mining shares advanced and were one support as major U.S. indexes closed higher.",
+            mechanism: "Resource earnings supported Materials without fully explaining the indexes, while long yields created a counterweight.",
           },
         ],
       },

@@ -3264,19 +3264,20 @@ footer {
 }
 
 .market-driver-card {
+  --driver-accent: var(--neutral);
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-top: 4px solid var(--neutral);
   border-radius: 18px;
   background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  box-shadow: inset 0 3px 0 var(--driver-accent);
 }
 
 .market-driver-positive {
-  border-top-color: var(--market-up);
+  --driver-accent: var(--market-up);
 }
 
 .market-driver-negative {
-  border-top-color: var(--market-down);
+  --driver-accent: var(--market-down);
 }
 
 .market-driver-header {
@@ -3325,6 +3326,27 @@ footer {
   line-height: 1.25;
 }
 
+.market-driver-heading {
+  min-width: 0;
+}
+
+.market-driver-meta {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: 14px;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+}
+
+.market-driver-meta > div {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
 .market-driver-body {
   display: grid;
   grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
@@ -3338,14 +3360,18 @@ footer {
 }
 
 .market-driver-body strong,
-.market-driver-footer > div > strong {
+.market-driver-meta > div > strong {
   display: block;
-  margin-bottom: 6px;
+  margin: 0;
   color: var(--muted);
   font-family: var(--sans);
   font-size: 10px;
   font-weight: 760;
   letter-spacing: 0.08em;
+}
+
+.market-driver-body strong {
+  margin-bottom: 6px;
 }
 
 .market-driver-body p {
@@ -3362,15 +3388,6 @@ footer {
 
 :root[data-theme="dark"] .market-driver-mechanism p {
   color: var(--ink);
-}
-
-.market-driver-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  padding: 14px 22px 16px 86px;
-  gap: 20px;
-  border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper-deep) 38%, transparent);
 }
 
 .market-driver-sectors > span,
@@ -3466,6 +3483,13 @@ footer {
     font-size: 22px;
   }
 
+  .market-driver-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-top: 12px;
+    gap: 10px;
+  }
+
   .page-shell[data-contract="market-attribution-v9"] .daily-focus-main h1 {
     font-size: clamp(32px, 10vw, 39px);
   }
@@ -3482,11 +3506,6 @@ footer {
     border-left: 0;
   }
 
-  .market-driver-footer {
-    grid-template-columns: minmax(0, 1fr);
-    padding: 13px 14px 15px;
-    gap: 13px;
-  }
 }
 
 /* Pricing-first daily edition */
@@ -4576,6 +4595,11 @@ footer {
 .snapshot-item-down {
   border-top: 3px solid var(--market-down);
   background: color-mix(in srgb, var(--market-down) 14%, var(--surface-solid));
+}
+
+.snapshot-item-flat {
+  border-top: 3px solid var(--neutral);
+  background: color-mix(in srgb, var(--neutral) 7%, var(--surface-solid));
 }
 
 .snapshot-item-top a,
