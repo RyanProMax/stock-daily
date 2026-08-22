@@ -256,6 +256,7 @@ export interface ReportListItem {
       summaryEn?: string;
       tone?: ImpactTone;
       trend?: MarketTrend;
+      change?: string;
     }
   >;
 }

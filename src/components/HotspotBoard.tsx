@@ -9,7 +9,6 @@ import type {
   Language,
   MarketRegion,
   PricingSignal,
-  SignalConfidence,
   SignalHorizon,
   SignalRole,
   SourceTier,
@@ -63,15 +62,12 @@ interface Labels {
   confirmIf: string;
   invalidateIf: string;
   verifyBy: string;
-  confidence: string;
+  impactWindow: string;
   coreSignal: string;
   supportingSignal: string;
   horizonIntraday: string;
   horizonShort: string;
   horizonMedium: string;
-  confidenceLow: string;
-  confidenceMedium: string;
-  confidenceHigh: string;
   sourceFirstParty: string;
   sourceWire: string;
   sourceSecondary: string;
@@ -189,6 +185,7 @@ export function sortStoriesForReading<T extends Story>(
   return stories
     .filter((story) => story.importance >= 3)
     .filter((story) => story.signal?.roleByMarket[market] !== "excluded")
+    .filter((story) => !story.signal || story.signal.confidence !== "low")
     .sort(
       (left, right) =>
         readingScore(right, market) - readingScore(left, market) ||
@@ -240,17 +237,6 @@ function horizonLabel(
     "1-5d": labels.horizonShort,
     "1-4w": labels.horizonMedium,
   }[horizon];
-}
-
-function confidenceLabel(
-  confidence: SignalConfidence,
-  labels: Labels,
-) {
-  return {
-    low: labels.confidenceLow,
-    medium: labels.confidenceMedium,
-    high: labels.confidenceHigh,
-  }[confidence];
 }
 
 function sourceTierLabel(tier: SourceTier | undefined, labels: Labels) {
@@ -459,61 +445,61 @@ function SignalAnalysis({
               ))}
             </div>
           </section>
-        </div>
-      </details>
 
-      <section className="signal-checkpoint">
-        <header>
-          <strong>{labels.checkpoint}</strong>
-          {checkpoint.status !== "pending" && (
-            <span className={`ledger-status status-${checkpoint.status}`}>
-              {statusLabel(checkpoint.status, labels)}
-            </span>
-          )}
-        </header>
-        <h5>{checkpoint.metric}</h5>
-        <dl>
-          <div>
-            <dt>{labels.confirmIf}</dt>
-            <dd>{checkpoint.confirmIf}</dd>
-          </div>
-          <div>
-            <dt>{labels.invalidateIf}</dt>
-            <dd>{checkpoint.invalidateIf}</dd>
-          </div>
-        </dl>
-        <p>
-          {labels.verifyBy}{" "}
-          <time dateTime={checkpoint.dueAt}>
-            {eventDate(checkpoint.dueAt, language)}
-          </time>
-        </p>
-        {checkpoint.observation && (
-          <div className="checkpoint-observation" data-signal-review>
-            <strong>{labels.observation}</strong>
-            <p>{checkpoint.observation}</p>
-            {(checkpoint.resultSource || checkpoint.verifiedAt) && (
+          <section className="signal-checkpoint">
+            <header>
+              <strong>{labels.checkpoint}</strong>
+              {checkpoint.status !== "pending" && (
+                <span className={`ledger-status status-${checkpoint.status}`}>
+                  {statusLabel(checkpoint.status, labels)}
+                </span>
+              )}
+            </header>
+            <h5>{checkpoint.metric}</h5>
+            <dl>
               <div>
-                {checkpoint.resultSource && (
-                  <a
-                    href={checkpoint.resultSource.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {checkpoint.resultSource.label}
-                    <ExternalLink aria-hidden="true" />
-                  </a>
-                )}
-                {checkpoint.verifiedAt && (
-                  <time dateTime={checkpoint.verifiedAt}>
-                    {eventDate(checkpoint.verifiedAt, language)}
-                  </time>
+                <dt>{labels.confirmIf}</dt>
+                <dd>{checkpoint.confirmIf}</dd>
+              </div>
+              <div>
+                <dt>{labels.invalidateIf}</dt>
+                <dd>{checkpoint.invalidateIf}</dd>
+              </div>
+            </dl>
+            <p>
+              {labels.verifyBy}{" "}
+              <time dateTime={checkpoint.dueAt}>
+                {eventDate(checkpoint.dueAt, language)}
+              </time>
+            </p>
+            {checkpoint.observation && (
+              <div className="checkpoint-observation" data-signal-review>
+                <strong>{labels.observation}</strong>
+                <p>{checkpoint.observation}</p>
+                {(checkpoint.resultSource || checkpoint.verifiedAt) && (
+                  <div>
+                    {checkpoint.resultSource && (
+                      <a
+                        href={checkpoint.resultSource.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {checkpoint.resultSource.label}
+                        <ExternalLink aria-hidden="true" />
+                      </a>
+                    )}
+                    {checkpoint.verifiedAt && (
+                      <time dateTime={checkpoint.verifiedAt}>
+                        {eventDate(checkpoint.verifiedAt, language)}
+                      </time>
+                    )}
+                  </div>
                 )}
               </div>
             )}
-          </div>
-        )}
-      </section>
+          </section>
+        </div>
+      </details>
 
       <details className="hotspot-proof">
         <summary>
@@ -576,7 +562,7 @@ export default function HotspotBoard({
               <strong>{labels.events}</strong>
             </header>
             <div className="hotspot-event-grid">
-                {timeline.events.map((event) => {
+              {timeline.events.map((event) => {
                   const localized = localizedEvent(event, language);
                   const status = safeDisplayStatus(event, language);
                   return (
@@ -692,7 +678,7 @@ export default function HotspotBoard({
                       )}
                     </article>
                   );
-                })}
+              })}
             </div>
           </section>
         )}
@@ -728,15 +714,9 @@ export default function HotspotBoard({
                           </i>
                           {story.signal ? (
                             <>
-                              <i>
+                              <i className="signal-window">
+                                {labels.impactWindow}{" "}
                                 {horizonLabel(story.signal.horizon, labels)}
-                              </i>
-                              <i>
-                                {labels.confidence}{" "}
-                                {confidenceLabel(
-                                  story.signal.confidence,
-                                  labels,
-                                )}
                               </i>
                             </>
                           ) : (

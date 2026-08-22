@@ -62,6 +62,21 @@ function resolveMarket(value: string | null): MarketRegion {
   return value?.toUpperCase() === "US" ? "US" : "CN";
 }
 
+function primaryMarketChange(
+  report: DailyPageData["report"],
+  market: MarketRegion,
+) {
+  const preferredSymbols =
+    market === "US" ? ["SPX", "DJI", "IXIC"] : ["CSI300", "SSE", "SZSE"];
+  return preferredSymbols
+    .map((symbol) =>
+      report.markets.find(
+        (metric) => metric.region === market && metric.symbol === symbol,
+      ),
+    )
+    .find((metric) => Boolean(metric))?.change;
+}
+
 async function renderPage(data: PageData) {
   const stream = await renderToReadableStream(<Document data={data} />, {
     onError(error) {
@@ -138,6 +153,26 @@ async function fetchProductionDailyPageData(
     ),
   );
   const reports = [report, ...relatedReports];
+  const reportByDate = new Map(
+    reports.map((relatedReport) => [relatedReport.reportDate, relatedReport]),
+  );
+  const enrichedArchive = archive.map((item) => {
+    const archivedReport = reportByDate.get(item.reportDate);
+    if (!archivedReport || !item.marketViews) return item;
+    return {
+      ...item,
+      marketViews: {
+        CN: {
+          ...item.marketViews.CN,
+          change: primaryMarketChange(archivedReport, "CN"),
+        },
+        US: {
+          ...item.marketViews.US,
+          change: primaryMarketChange(archivedReport, "US"),
+        },
+      },
+    };
+  });
   const marketHistory = reports
     .filter((item) => item.reportDate <= report.reportDate)
     .sort((left, right) => right.reportDate.localeCompare(left.reportDate))
@@ -168,7 +203,7 @@ async function fetchProductionDailyPageData(
     market,
     requestUrl: canonicalUrl(requestUrl, "/"),
     report,
-    archive,
+    archive: enrichedArchive,
     sectorHeat: buildSectorHeatView(report.sectorHeat, marketHistory),
     weekEvents,
     thesisLedger: deriveThesisLedger(

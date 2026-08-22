@@ -135,6 +135,33 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           heatDownColors: [...document.querySelectorAll(
             '.snapshot-item-sector.snapshot-item-down .snapshot-item-top em'
           )].map(element => getComputedStyle(element).color),
+          heatUpBackgrounds: [...document.querySelectorAll(
+            '.snapshot-item-sector.snapshot-item-up'
+          )].map(element => getComputedStyle(element).backgroundColor),
+          heatDownBackgrounds: [...document.querySelectorAll(
+            '.snapshot-item-sector.snapshot-item-down'
+          )].map(element => getComputedStyle(element).backgroundColor),
+          heatItemHeights: [...document.querySelectorAll(
+            '.snapshot-item-sector'
+          )].map(element => Math.round(element.getBoundingClientRect().height)),
+          marketNames: [...document.querySelectorAll(
+            '.snapshot-item-index .snapshot-item-top a, ' +
+            '.snapshot-item-index .snapshot-item-top span'
+          )].map(element => element.textContent.trim()),
+          favorableColors: [...document.querySelectorAll(
+            '.focus-impact-positive i'
+          )].map(element => getComputedStyle(element).color),
+          adverseColors: [...document.querySelectorAll(
+            '.focus-impact-negative i'
+          )].map(element => getComputedStyle(element).color),
+          signalWindowLabels: [...document.querySelectorAll(
+            '.signal-window'
+          )].map(element => element.textContent.trim()),
+          confidenceLabelCount: [...document.querySelectorAll(
+            '.hotspot-title i'
+          )].filter(element => /置信度|Confidence/.test(
+            element.textContent
+          )).length,
           storyCount: document.querySelectorAll('.hotspot-story').length,
           hotspotCount: document.querySelectorAll('.hotspot-group li').length,
           hotspotGroupCount: document.querySelectorAll('.hotspot-group').length,
@@ -235,6 +262,9 @@ def inspect_page(page, prefix, path, market, expected_market_count):
           archiveTrends: [...document.querySelectorAll(
             '.archive-tag[class*="archive-trend-"]'
           )].map(element => element.textContent.trim()),
+          visibleArchiveTrendCount: [...document.querySelectorAll(
+            '.archive-tag[class*="archive-trend-"]'
+          )].filter(element => element.getClientRects().length > 0).length,
           activeMarket: document.querySelector(
             '.market-switcher a[aria-current="page"]'
           )?.textContent.trim(),
@@ -444,7 +474,7 @@ with sync_playwright() as playwright:
     result["english"] = {
         "lang": english.locator("html").get_attribute("lang"),
         "hasOverview": english.get_by_text(
-            "Market Read", exact=True
+            "Bottom Line", exact=True
         ).count() > 0,
         "marketCount": english.locator(".snapshot-item-index").count(),
         "marketUpdate": english.locator(".market-freshness time").inner_text(),
@@ -573,6 +603,26 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
         assert set(audit["layout"]["heatUpColors"]).isdisjoint(
             audit["layout"]["heatDownColors"]
         ), result
+        assert set(audit["layout"]["heatUpBackgrounds"]).isdisjoint(
+            audit["layout"]["heatDownBackgrounds"]
+        ), result
+    assert all(
+        height <= (62 if is_mobile else 58)
+        for height in audit["layout"]["heatItemHeights"]
+    ), result
+    if audit["market"] == "US":
+        assert any(
+            "美国 10 年期国债收益率" in name
+            for name in audit["layout"]["marketNames"]
+        ), result
+    assert set(audit["layout"]["favorableColors"]).isdisjoint(
+        audit["layout"]["adverseColors"]
+    ), result
+    assert all(
+        "影响周期" in label or "Pricing window" in label
+        for label in audit["layout"]["signalWindowLabels"]
+    ), result
+    assert audit["layout"]["confidenceLabelCount"] == 0, result
     assert 1 <= audit["layout"]["storyCount"] <= 3, result
     assert audit["layout"]["expandedStoryCount"] == audit["layout"]["storyCount"], result
     assert audit["layout"]["hotspotOverflowCount"] == 0, result
@@ -581,7 +631,7 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert audit["layout"]["separateLedgerCount"] == 0, result
     assert audit["layout"]["todayFocusCount"] == 1, result
     assert audit["layout"]["nextCheckpointCount"] == 0, result
-    assert audit["layout"]["keySignalHeadingCount"] == 1, result
+    assert audit["layout"]["keySignalHeadingCount"] == 0, result
     assert audit["layout"]["whyImportantCount"] == audit["layout"][
         "storyCount"
     ], result
@@ -626,11 +676,16 @@ for key in ("mobileCN", "mobileUS", "desktopCN", "desktopUS"):
     assert len(audit["layout"]["archiveTrends"]) == len(
         audit["layout"]["archiveTitles"]
     ), result
+    assert audit["layout"]["visibleArchiveTrendCount"] == len(
+        audit["layout"]["archiveTitles"]
+    ), result
     assert all(
         tone.startswith("整体") for tone in audit["layout"]["archiveTones"]
     ), result
-    assert set(audit["layout"]["archiveTrends"]).issubset(
-        {"大盘上涨", "大盘下跌", "大盘分化", "大盘持平"}
+    assert all(
+        trend.startswith(("大盘上涨", "大盘下跌", "大盘分化", "大盘持平"))
+        and "%" in trend
+        for trend in audit["layout"]["archiveTrends"]
     ), result
     assert audit["layout"]["activeMarket"] == audit["market"], result
     assert audit["layout"]["legacyPendingCount"] == 0, result
@@ -695,8 +750,10 @@ assert result["english"]["activeMarket"] == "US", result
 assert all(
     tone.startswith("Overall ") for tone in result["english"]["archiveTones"]
 ), result
-assert set(result["english"]["archiveTrends"]).issubset(
-    {"Indexes up", "Indexes down", "Indexes mixed", "Indexes flat"}
+assert all(
+    trend.startswith(("Indexes up", "Indexes down", "Indexes mixed", "Indexes flat"))
+    and "%" in trend
+    for trend in result["english"]["archiveTrends"]
 ), result
 assert result["neutral"]["legacyPendingCount"] == 0, result
 assert result["neutral"]["legacyUnclearCount"] == 0, result

@@ -546,6 +546,11 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
     ...document.querySelectorAll(".hotspot-story"),
   ];
   assert.equal(renderedDetails.length, Math.min(3, marketStories.length));
+  assert.match(document.querySelector(".signal-window").textContent, /影响周期/);
+  assert.doesNotMatch(
+    document.querySelector(".hotspot-title").textContent,
+    /置信度/,
+  );
   assert.equal(
     document.querySelectorAll(".hotspot-group-core > ol > li").length,
     Math.min(3, marketStories.length),

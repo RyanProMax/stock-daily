@@ -320,6 +320,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
         item.marketSignalCounts?.[data.market] ?? item.signalCount,
       tone: marketArchive?.tone,
       trend: marketArchive?.trend,
+      change: marketArchive?.change,
     };
   });
   const otherEditions = displayArchive
@@ -433,9 +434,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
       </section>
 
       <section className="signals-section">
-        <header className="daily-section-heading">
-          <h2>{t.keySignals}</h2>
-        </header>
         <HotspotBoard
           stories={marketStories}
           timeline={data.weekEvents}
@@ -473,15 +471,12 @@ function DailyPage({ data }: { data: DailyPageData }) {
             confirmIf: t.confirmIf,
             invalidateIf: t.invalidateIf,
             verifyBy: t.verifyBy,
-            confidence: t.confidence,
+            impactWindow: t.impactWindow,
             coreSignal: t.coreSignal,
             supportingSignal: t.supportingSignal,
             horizonIntraday: t.horizonIntraday,
             horizonShort: t.horizonShort,
             horizonMedium: t.horizonMedium,
-            confidenceLow: t.confidenceLow,
-            confidenceMedium: t.confidenceMedium,
-            confidenceHigh: t.confidenceHigh,
             sourceFirstParty: t.sourceFirstParty,
             sourceWire: t.sourceWire,
             sourceSecondary: t.sourceSecondary,
@@ -536,6 +531,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
                       className={`archive-tag archive-trend-${edition.trend}`}
                     >
                       {marketTrendLabel(edition.trend, language)}
+                      {edition.change ? ` ${edition.change}` : ""}
                     </span>
                   )}
                   <i className="archive-count">

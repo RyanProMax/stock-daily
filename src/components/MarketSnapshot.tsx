@@ -16,6 +16,7 @@ interface SnapshotItemProps {
   href?: string;
   kind: "index" | "sector";
   detail?: string;
+  language: Language;
 }
 
 interface Props {
@@ -39,13 +40,20 @@ function SnapshotItem({
   href,
   kind,
   detail,
+  language,
 }: SnapshotItemProps) {
+  const changeLabel =
+    language === "zh" ? `（${change}）` : `(${change})`;
   const label = href ? (
     <a href={href} target="_blank" rel="noreferrer" title={name}>
       {name}
+      <em>{changeLabel}</em>
     </a>
   ) : (
-    <span title={name}>{name}</span>
+    <span title={name}>
+      {name}
+      <em>{changeLabel}</em>
+    </span>
   );
 
   return (
@@ -54,7 +62,6 @@ function SnapshotItem({
     >
       <div className="snapshot-item-top">
         {label}
-        <em>{change}</em>
       </div>
       {(value || detail) && (
         <div className="snapshot-item-bottom">
@@ -98,6 +105,7 @@ export default function MarketSnapshot({
               direction={item.direction}
               href={item.source}
               kind="index"
+              language={language}
             />
           ))}
         </div>
@@ -128,6 +136,7 @@ export default function MarketSnapshot({
                 direction={sector.direction}
                 href={sector.source}
                 kind="sector"
+                language={language}
                 detail={
                   streak
                     ? formatTemplate(labels.streakDays, {

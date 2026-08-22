@@ -65,6 +65,8 @@ interface DailyArchiveRow extends Omit<ReportListItem, "marketViews"> {
   usSummaryEn: string | null;
   cnTone: ImpactTone | null;
   usTone: ImpactTone | null;
+  cnChange: string | null;
+  usChange: string | null;
   marketsJson: string | null;
 }
 
@@ -735,6 +737,30 @@ export async function getDailyArchive(
         json_extract(content, '$.translations.en.marketViews.US.summary') AS usSummaryEn,
         json_extract(content, '$.marketViews.CN.overview.tone') AS cnTone,
         json_extract(content, '$.marketViews.US.overview.tone') AS usTone,
+        (
+          SELECT json_extract(market.value, '$.change')
+          FROM json_each(daily_reports.content, '$.markets') AS market
+          WHERE json_extract(market.value, '$.region') = 'CN'
+          AND json_extract(market.value, '$.symbol') IN ('CSI300', 'SSE', 'SZSE')
+          ORDER BY CASE json_extract(market.value, '$.symbol')
+            WHEN 'CSI300' THEN 1
+            WHEN 'SSE' THEN 2
+            ELSE 3
+          END
+          LIMIT 1
+        ) AS cnChange,
+        (
+          SELECT json_extract(market.value, '$.change')
+          FROM json_each(daily_reports.content, '$.markets') AS market
+          WHERE json_extract(market.value, '$.region') = 'US'
+          AND json_extract(market.value, '$.symbol') IN ('SPX', 'DJI', 'IXIC')
+          ORDER BY CASE json_extract(market.value, '$.symbol')
+            WHEN 'SPX' THEN 1
+            WHEN 'DJI' THEN 2
+            ELSE 3
+          END
+          LIMIT 1
+        ) AS usChange,
         json_extract(content, '$.markets') AS marketsJson,
         (
           SELECT COUNT(*)
@@ -791,6 +817,8 @@ export async function getDailyArchive(
       usSignalCount,
       cnTone,
       usTone,
+      cnChange,
+      usChange,
       marketsJson,
       ...item
     } = row;
@@ -815,6 +843,7 @@ export async function getDailyArchive(
                 summary: cnSummary,
                 ...(cnTone ? { tone: cnTone } : {}),
                 ...(cnTrend ? { trend: cnTrend } : {}),
+                ...(cnChange ? { change: cnChange } : {}),
                 ...(cnTitleEn ? { titleEn: cnTitleEn } : {}),
                 ...(cnSummaryEn ? { summaryEn: cnSummaryEn } : {}),
               },
@@ -823,6 +852,7 @@ export async function getDailyArchive(
                 summary: usSummary,
                 ...(usTone ? { tone: usTone } : {}),
                 ...(usTrend ? { trend: usTrend } : {}),
+                ...(usChange ? { change: usChange } : {}),
                 ...(usTitleEn ? { titleEn: usTitleEn } : {}),
                 ...(usSummaryEn ? { summaryEn: usSummaryEn } : {}),
               },
