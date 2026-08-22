@@ -31,6 +31,7 @@ async function main() {
 
   const inputPath = resolve(argumentValue(args, "--input", "work/daily-input-v9.json"));
   const reportPath = resolve(argumentValue(args, "--report", "work/daily-report-v9.json"));
+  const persistTo = argumentValue(args, "--persist-to", "");
   const input = validateInput(JSON.parse(await readFile(inputPath, "utf8")));
   const report = validateReport(JSON.parse(await readFile(reportPath, "utf8")), input);
   const marketAsOf = marketAsOfFromInput(input);
@@ -86,18 +87,20 @@ ON CONFLICT(run_id) DO UPDATE SET
     ".bin",
     process.platform === "win32" ? "wrangler.cmd" : "wrangler",
   );
+  const wranglerArgs = [
+    "d1",
+    "execute",
+    "stock-daily-db",
+    local ? "--local" : "--remote",
+    "--yes",
+    "--json",
+    "--command",
+    sql,
+  ];
+  if (local && persistTo) wranglerArgs.push("--persist-to", resolve(persistTo));
   const result = await execFileAsync(
     wranglerPath,
-    [
-      "d1",
-      "execute",
-      "stock-daily-db",
-      local ? "--local" : "--remote",
-      "--yes",
-      "--json",
-      "--command",
-      sql,
-    ],
+    wranglerArgs,
     { cwd: process.cwd(), env: process.env, maxBuffer: 8 * 1024 * 1024 },
   );
   console.log(JSON.stringify({

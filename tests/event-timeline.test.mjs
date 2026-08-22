@@ -596,26 +596,19 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   );
 });
 
-test("local SSR maps to production read APIs without bundled report fallbacks", async () => {
-  const worker = await vite.ssrLoadModule("/src/worker.tsx");
-  const target = new URL(
-    worker.productionDataUrl(
-      "http://127.0.0.1:8788/?market=us&date=2026-07-31",
-      "/api/reports?limit=1",
-    ),
-  );
-  assert.equal(worker.isLocalDevelopmentUrl("http://localhost:8788/"), true);
-  assert.equal(worker.isLocalDevelopmentUrl("https://stock-daily-4ip.pages.dev/"), false);
-  assert.equal(target.origin, "https://stock-daily-4ip.pages.dev");
-  assert.equal(target.pathname, "/api/reports");
-  assert.equal(target.searchParams.get("limit"), "1");
-  assert.equal(target.searchParams.get("market"), "us");
-  assert.equal(target.searchParams.get("date"), "2026-07-31");
-
+test("local SSR and read APIs use D1 without bundled report fallbacks", async () => {
   const [workerSource, reportSource] = await Promise.all([
     readFile("src/worker.tsx", "utf8"),
     readFile("src/server/reports.ts", "utf8"),
   ]);
+  assert.match(
+    workerSource,
+    /const data = await buildDailyPageData\(requestUrl, db\)/,
+  );
+  assert.doesNotMatch(
+    workerSource,
+    /fetchProductionDailyPageData|fetchProductionWeeklyPageData|app\.use\("\/api\/\*"/,
+  );
   assert.doesNotMatch(workerSource, /getDailyReport\(undefined\)|bundled fallback/);
   assert.doesNotMatch(
     reportSource,

@@ -1,5 +1,6 @@
 import { formatTemplate } from "../lib/i18n";
 import type {
+  AiChainMetric,
   Language,
   MarketDirection,
   MarketMetric,
@@ -14,7 +15,7 @@ interface SnapshotItemProps {
   change: string;
   direction: MarketDirection;
   href?: string;
-  kind: "index" | "sector";
+  kind: "index" | "sector" | "ai";
   detail?: string;
   language: Language;
 }
@@ -23,12 +24,15 @@ interface Props {
   markets: MarketMetric[];
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
+  aiChainPerformance?: AiChainMetric[];
   market: MarketRegion;
   language: Language;
   labels: {
     indices: string;
     sectors: string;
     range: string;
+    aiChain: string;
+    aiRange: string;
     streakDays: string;
   };
 }
@@ -82,6 +86,7 @@ export default function MarketSnapshot({
   markets,
   sectorView,
   sectorPerformance,
+  aiChainPerformance,
   market,
   language,
   labels,
@@ -94,6 +99,9 @@ export default function MarketSnapshot({
         Number.parseFloat(right.change) - Number.parseFloat(left.change),
     );
   const streaks = sectorView.streaks.filter((sector) => sector.market === market);
+  const aiChain = aiChainPerformance?.filter(
+    (metric) => metric.market === market,
+  );
 
   return (
     <div className="market-snapshot">
@@ -178,6 +186,31 @@ export default function MarketSnapshot({
             })}
           </div>
         </details>
+      )}
+
+      {aiChain && aiChain.length > 0 && (
+        <section className="snapshot-group snapshot-group-ai">
+          <header className="snapshot-heading">
+            <strong>{labels.aiChain}</strong>
+            <span>{labels.aiRange}</span>
+          </header>
+          <div className="snapshot-grid snapshot-ai-grid">
+            {aiChain.map((metric) => (
+              <SnapshotItem
+                key={`${market}:${metric.layer}`}
+                name={language === "en" ? metric.nameEn : metric.name}
+                change={metric.change}
+                direction={metric.direction}
+                href={metric.source}
+                kind="ai"
+                detail={
+                  language === "en" ? metric.benchmarkEn : metric.benchmark
+                }
+                language={language}
+              />
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );

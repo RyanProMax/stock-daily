@@ -30,6 +30,7 @@ import {
   localMarketWrapMatches,
   sectorExtremes,
 } from "./market-attribution.mjs";
+import { AI_CHAIN_LAYERS } from "./ai-chain.mjs";
 
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
@@ -538,6 +539,51 @@ function validateSectorRows(rows, expectedPerMarket, label) {
   }
 }
 
+function validateAiChainRows(rows) {
+  if (!Array.isArray(rows) || rows.length !== AI_CHAIN_LAYERS.length * 2) {
+    throw new Error("aiChainPerformance 必须分别包含 4 个 CN 与 US 环节");
+  }
+  for (const market of ["CN", "US"]) {
+    const marketRows = rows.filter((row) => row?.market === market);
+    if (
+      marketRows.length !== AI_CHAIN_LAYERS.length ||
+      new Set(marketRows.map((row) => row.layer)).size !== AI_CHAIN_LAYERS.length
+    ) {
+      throw new Error(`${market} aiChainPerformance 环节不完整`);
+    }
+    for (const layer of AI_CHAIN_LAYERS) {
+      const metric = requireObject(
+        marketRows.find((row) => row.layer === layer),
+        `aiChainPerformance.${market}.${layer}`,
+      );
+      const match = typeof metric.change === "string"
+        ? metric.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
+        : null;
+      const change = match ? Number(match[1]) : Number.NaN;
+      const direction = Math.abs(change) < 0.005
+        ? "flat"
+        : change > 0
+          ? "up"
+          : "down";
+      if (
+        typeof metric.name !== "string" || metric.name.length < 2 ||
+        typeof metric.nameEn !== "string" || metric.nameEn.length < 4 ||
+        typeof metric.benchmark !== "string" || metric.benchmark.length < 3 ||
+        typeof metric.benchmarkEn !== "string" || metric.benchmarkEn.length < 4 ||
+        !["index", "etf_proxy"].includes(metric.benchmarkKind) ||
+        (market === "CN" && metric.benchmarkKind !== "index") ||
+        (market === "US" && metric.benchmarkKind !== "etf_proxy") ||
+        typeof metric.symbol !== "string" || !/^[A-Z0-9]{2,10}$/.test(metric.symbol) ||
+        !Number.isFinite(change) || metric.direction !== direction ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(metric.asOf) ||
+        typeof metric.source !== "string" || !metric.source.startsWith("https://")
+      ) {
+        throw new Error(`aiChainPerformance.${market}.${layer} 字段无效`);
+      }
+    }
+  }
+}
+
 function validateV9Input(value) {
   const input = requireObject(value, "daily-input");
   if (
@@ -556,6 +602,7 @@ function validateV9Input(value) {
   }
   validateSectorRows(input.sectorPerformance, 11, "sectorPerformance");
   validateSectorRows(input.sectorHeat, SECTOR_COUNT_PER_MARKET, "sectorHeat");
+  validateAiChainRows(input.aiChainPerformance);
 
   const marketCounts = new Map([["CN", 0], ["US", 0]]);
   for (const value of input.markets) {
@@ -621,6 +668,12 @@ function validateV9Input(value) {
       .map((item) => item.asOf));
     if (dates.size !== 1 || !dates.has(expected.asOf)) {
       throw new Error(`${expected.market} sectorPerformance 与交易日不一致`);
+    }
+    const aiDates = new Set(input.aiChainPerformance
+      .filter((item) => item.market === expected.market)
+      .map((item) => item.asOf));
+    if (aiDates.size !== 1 || !aiDates.has(expected.asOf)) {
+      throw new Error(`${expected.market} aiChainPerformance 与交易日不一致`);
     }
   }
 
@@ -1717,6 +1770,86 @@ function validateV9Report(value, input) {
     }
   }
 
+  const aiUpdatesValue = Array.isArray(report.aiChainUpdates)
+    ? report.aiChainUpdates
+    : null;
+  if (!aiUpdatesValue) throw new Error("aiChainUpdates 必须是数组");
+  const aiUpdateCounts = { CN: 0, US: 0 };
+  const aiUpdateLayers = { CN: new Set(), US: new Set() };
+  const aiChainUpdates = aiUpdatesValue.map((value, index) => {
+    const label = `aiChainUpdates[${index}]`;
+    const update = requireObject(value, label);
+    if (!["CN", "US"].includes(update.market)) {
+      throw new Error(`${label}.market 无效`);
+    }
+    if (!AI_CHAIN_LAYERS.includes(update.layer)) {
+      throw new Error(`${label}.layer 无效`);
+    }
+    if (aiUpdateLayers[update.market].has(update.layer)) {
+      throw new Error(`${label} 与同市场已有 AI 产业链环节重复`);
+    }
+    const title = requireText(update.title, `${label}.title`, 38, 8);
+    const summary = completeSentence(update.summary, `${label}.summary`, 180, 30);
+    const implication = completeSentence(
+      update.implication,
+      `${label}.implication`,
+      180,
+      24,
+    );
+    if (
+      !Array.isArray(update.evidenceIndexes) ||
+      update.evidenceIndexes.length < 1 ||
+      update.evidenceIndexes.length > 3
+    ) {
+      throw new Error(`${label}.evidenceIndexes 必须包含 1–3 项`);
+    }
+    const evidenceIndexes = [...new Set(update.evidenceIndexes.map(Number))];
+    if (
+      evidenceIndexes.length !== update.evidenceIndexes.length ||
+      evidenceIndexes.some(
+        (sourceIndex) =>
+          !Number.isInteger(sourceIndex) ||
+          sourceIndex < 0 ||
+          sourceIndex >= input.news.length,
+      )
+    ) {
+      throw new Error(`${label}.evidenceIndexes 无效`);
+    }
+    const evidence = evidenceIndexes.map((sourceIndex) => input.news[sourceIndex]);
+    if (
+      evidence.some(
+        (item) =>
+          !item.regions.includes(update.market) ||
+          !evidenceFitsSession(item, marketSessions[update.market]),
+      )
+    ) {
+      throw new Error(`${label} 引用了其他市场或归因窗口之外的消息`);
+    }
+    const sourceFacts = evidence
+      .map((item) => `${item.title} ${item.facts}`)
+      .join(" ");
+    if (/\p{Script=Han}/u.test(sourceFacts) && !phraseIsGrounded(title, sourceFacts)) {
+      throw new Error(`${label}.title 无法回溯到已核验事实`);
+    }
+    assertNumbersBounded(sourceFacts, `${title} ${summary} ${implication}`);
+    aiUpdateCounts[update.market] += 1;
+    aiUpdateLayers[update.market].add(update.layer);
+    return {
+      id: stableId(
+        `ai:${update.market}:${update.layer}:${title}:${evidenceIndexes.join(",")}`,
+      ),
+      market: update.market,
+      layer: update.layer,
+      title,
+      summary,
+      implication,
+      evidenceIndexes,
+    };
+  });
+  if (aiUpdateCounts.CN > 4 || aiUpdateCounts.US > 4) {
+    throw new Error("每个市场最多包含 4 条 AI 产业链动态");
+  }
+
   const marketViewsValue = requireObject(report.marketViews, "marketViews");
   const marketViews = {};
   for (const market of ["CN", "US"]) {
@@ -1776,6 +1909,41 @@ function validateV9Report(value, input) {
       mechanism: completeSentence(translated.mechanism, `translations.en.drivers[${index}].mechanism`, 380, 14, "."),
     };
   });
+  const englishAiUpdatesValue = english.aiChainUpdates;
+  if (
+    !Array.isArray(englishAiUpdatesValue) ||
+    englishAiUpdatesValue.length !== aiChainUpdates.length
+  ) {
+    throw new Error("translations.en.aiChainUpdates 必须逐项对应 aiChainUpdates");
+  }
+  const translatedAiUpdates = englishAiUpdatesValue.map((value, index) => {
+    const translated = requireObject(
+      value,
+      `translations.en.aiChainUpdates[${index}]`,
+    );
+    return {
+      title: requireText(
+        translated.title,
+        `translations.en.aiChainUpdates[${index}].title`,
+        140,
+        8,
+      ),
+      summary: completeSentence(
+        translated.summary,
+        `translations.en.aiChainUpdates[${index}].summary`,
+        420,
+        18,
+        ".",
+      ),
+      implication: completeSentence(
+        translated.implication,
+        `translations.en.aiChainUpdates[${index}].implication`,
+        420,
+        18,
+        ".",
+      ),
+    };
+  });
   const englishMarketViewsValue = requireObject(english.marketViews, "translations.en.marketViews");
   const englishMarketViews = {};
   for (const market of ["CN", "US"]) {
@@ -1820,6 +1988,7 @@ function validateV9Report(value, input) {
       },
       marketViews: englishMarketViews,
       drivers: translatedDrivers,
+      aiChainUpdates: translatedAiUpdates,
       stories: [],
     },
   };
@@ -1836,6 +2005,7 @@ function validateV9Report(value, input) {
     },
     marketViews,
     drivers,
+    aiChainUpdates,
     stories: [],
     translations,
   };
@@ -1867,6 +2037,7 @@ export function buildReportContent(input, report) {
       marketSessions: input.marketSessions,
       markets: input.markets.map(({ asOf: _asOf, previousAsOf: _previousAsOf, ...market }) => market),
       sectorPerformance: input.sectorPerformance,
+      aiChainPerformance: input.aiChainPerformance,
       sectorHeat: input.sectorHeat,
       drivers: report.drivers.map((driver) => ({
         id: driver.id,
@@ -1878,6 +2049,25 @@ export function buildReportContent(input, report) {
         mechanism: driver.mechanism,
         sectorSymbols: driver.sectorSymbols,
         evidence: driver.evidenceIndexes.map((sourceIndex) => {
+          const source = input.news[sourceIndex];
+          return {
+            title: source.title,
+            facts: source.facts,
+            source: source.url,
+            sourceLabel: source.source,
+            publishedAt: source.publishedAt,
+            kind: source.kind,
+          };
+        }),
+      })),
+      aiChainUpdates: report.aiChainUpdates.map((update) => ({
+        id: update.id,
+        market: update.market,
+        layer: update.layer,
+        title: update.title,
+        summary: update.summary,
+        implication: update.implication,
+        evidence: update.evidenceIndexes.map((sourceIndex) => {
           const source = input.news[sourceIndex];
           return {
             title: source.title,

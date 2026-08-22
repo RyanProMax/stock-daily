@@ -47,6 +47,31 @@ function performanceRows() {
   }));
 }
 
+function aiChainRows() {
+  const layers = [
+    ["chips", "芯片与设备", "Chips & equipment"],
+    ["interconnect", "光互连与网络", "Optical interconnects & networks"],
+    ["infrastructure", "云与算力基础设施", "Cloud & compute infrastructure"],
+    ["applications", "软件与应用", "Software & applications"],
+  ];
+  return ["CN", "US"].flatMap((market) =>
+    layers.map(([layer, name, nameEn], index) => ({
+      market,
+      layer,
+      name,
+      nameEn,
+      benchmark: market === "CN" ? `中证AI环节${index + 1}` : `ETF${index + 1} 代理`,
+      benchmarkEn: market === "CN" ? `CSI AI layer ${index + 1}` : `ETF${index + 1} proxy`,
+      benchmarkKind: market === "CN" ? "index" : "etf_proxy",
+      symbol: market === "CN" ? `93060${index}` : ["SOXX", "IYZ", "SRVR", "SKYY"][index],
+      change: index % 2 === 0 ? "+1.00%" : "-0.50%",
+      direction: index % 2 === 0 ? "up" : "down",
+      asOf: "2026-08-21",
+      source: `https://example.com/ai/${market}/${layer}`,
+    })),
+  );
+}
+
 function fixtureInput() {
   const performance = performanceRows();
   const marketDefs = [
@@ -85,6 +110,15 @@ function fixtureInput() {
       regions: ["US"],
       kind: "market_wrap",
     },
+    {
+      title: "8月21日CPO概念股走强：半年报兑现叠加光互连技术进展",
+      facts: "CPO概念股在8月21日走强，多家公司半年报利润同比增长，技术论文同时梳理共封装光学从二维到三维堆叠的路线及带宽、时延和能耗价值。",
+      url: "https://example.com/cn-ai-cpo",
+      source: "CN AI Wire",
+      publishedAt: "2026-08-21T05:44:00.000Z",
+      regions: ["CN"],
+      kind: "event",
+    },
   ];
   return {
     schemaVersion: 9,
@@ -112,14 +146,15 @@ function fixtureInput() {
     },
     marketSessions: buildMarketSessions(markets),
     sectorPerformance: performance,
+    aiChainPerformance: aiChainRows(),
     sectorHeat: [
       ...topSectorHeat(performance.filter((item) => item.market === "CN")),
       ...topSectorHeat(performance.filter((item) => item.market === "US")),
     ],
     news,
     newsDiagnostics: {
-      mode: "audited", candidateCount: 2, hydratedCount: 2,
-      rejectedDuringHydration: 0, selectedByMarket: { CN: 1, US: 1 },
+      mode: "audited", candidateCount: 3, hydratedCount: 3,
+      rejectedDuringHydration: 0, selectedByMarket: { CN: 2, US: 1 },
       minimumPerMarket: 0, targetPerMarket: 5, sources: [],
     },
   };
@@ -157,6 +192,16 @@ function fixtureReport() {
         sectorSymbols: ["XLB"], evidenceIndexes: [1],
       },
     ],
+    aiChainUpdates: [
+      {
+        market: "CN",
+        layer: "interconnect",
+        title: "CPO业绩兑现与技术路线共振",
+        summary: "CPO概念股在8月21日走强，多家公司半年报利润增长，同时出现从二维共封装到三维堆叠的技术路线梳理。",
+        implication: "业绩兑现提供当期基本面支撑，技术路线则强化光互连缓解AI算力带宽、时延和能耗瓶颈的中期预期。",
+        evidenceIndexes: [2],
+      },
+    ],
     translations: {
       en: {
         headline: "Materials and miners led as Chinese and U.S. stocks rose",
@@ -183,6 +228,13 @@ function fixtureReport() {
             mechanism: "Resource earnings supported Materials without fully explaining the indexes, while long yields created a counterweight.",
           },
         ],
+        aiChainUpdates: [
+          {
+            title: "CPO earnings delivery met a clearer technology roadmap",
+            summary: "CPO shares rose on August 21 as several companies delivered higher first-half profits and a paper mapped the path from 2D packaging to 3D stacking.",
+            implication: "Earnings supported current fundamentals while the roadmap reinforced the case for optical links to ease AI bandwidth, latency and energy constraints.",
+          },
+        ],
       },
     },
   };
@@ -201,11 +253,13 @@ test("market sessions use each venue close and allow wraps for two hours", () =>
 test("V9 keeps all eleven sectors and accepts distinct local drivers", () => {
   const input = validateInput(fixtureInput());
   assert.equal(input.sectorPerformance.filter((item) => item.market === "CN").length, 11);
+  assert.equal(input.aiChainPerformance.filter((item) => item.market === "CN").length, 4);
   assert.equal(sectorExtremes(input.sectorPerformance, "US").leaders.length, 3);
   const report = validateReport(fixtureReport(), input);
   assert.equal(report.drivers.length, 2);
   assert.notEqual(report.drivers[0].market, report.drivers[1].market);
   assert.equal(report.marketViews.CN.driverIds.length, 1);
+  assert.equal(report.aiChainUpdates.length, 1);
 });
 
 test("V9 requires the API pack to preserve each prior trading session", () => {
@@ -233,6 +287,8 @@ test("V9 permits zero drivers but rejects generic headlines", () => {
   };
   report.headline = "原材料走强，中美股指收涨";
   report.translations.en.drivers = [];
+  report.aiChainUpdates = [];
+  report.translations.en.aiChainUpdates = [];
   report.translations.en.marketViews.CN.headline = "Materials led as Chinese stocks rose";
   report.translations.en.marketViews.US.headline = "Materials led as U.S. stocks rose";
   report.translations.en.headline = "Materials led as Chinese and U.S. stocks rose";

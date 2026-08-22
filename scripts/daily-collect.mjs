@@ -16,6 +16,7 @@ import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
 } from "./daily-policy.mjs";
+import { collectAiChainPerformance } from "./ai-chain.mjs";
 
 export {
   canonicalizeUrl,
@@ -41,7 +42,7 @@ export function shanghaiDate(date = new Date()) {
   }).format(date);
 }
 
-function validateMarketDates(markets, sectorPerformance) {
+function validateMarketDates(markets, sectorPerformance, aiChainPerformance) {
   for (const region of ["CN", "US"]) {
     const heatDates = [
       ...new Set(
@@ -68,6 +69,18 @@ function validateMarketDates(markets, sectorPerformance) {
         `${region} 指数日期 ${equityDates.join(",")} 与板块日期 ${heatDates[0]} 不一致`,
       );
     }
+    const aiDates = [
+      ...new Set(
+        aiChainPerformance
+          .filter((metric) => metric.market === region)
+          .map((metric) => metric.asOf),
+      ),
+    ];
+    if (aiDates.length !== 1 || aiDates[0] !== heatDates[0]) {
+      throw new Error(
+        `${region} AI 产业链日期 ${aiDates.join(",")} 与板块日期 ${heatDates[0]} 不一致`,
+      );
+    }
   }
 }
 
@@ -75,6 +88,7 @@ export async function collectDailyInput({
   reportDate = shanghaiDate(),
   updateKind = "morning",
   sectorPerformanceOverride,
+  aiChainPerformanceOverride,
 } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
     throw new Error("reportDate 必须是 YYYY-MM-DD");
@@ -84,14 +98,26 @@ export async function collectDailyInput({
   }
   const cutoffAt = dailyCutoffAt(reportDate, updateKind);
   const cutoffTime = Date.parse(cutoffAt);
-  const [marketPack, sectorPerformance, newsResult] = await Promise.all([
+  const [
+    marketPack,
+    sectorPerformance,
+    aiChainPerformance,
+    newsResult,
+  ] = await Promise.all([
     fetchDailyMarketPack(cutoffAt),
     sectorPerformanceOverride
       ? Promise.resolve(sectorPerformanceOverride)
       : collectSectorPerformance(cutoffTime),
+    aiChainPerformanceOverride
+      ? Promise.resolve(aiChainPerformanceOverride)
+      : collectAiChainPerformance(cutoffTime),
     collectNews(cutoffTime, reportDate),
   ]);
-  validateMarketDates(marketPack.markets, sectorPerformance);
+  validateMarketDates(
+    marketPack.markets,
+    sectorPerformance,
+    aiChainPerformance,
+  );
   const sectorHeat = [
     ...topSectorHeat(sectorPerformance.filter((item) => item.market === "CN")),
     ...topSectorHeat(sectorPerformance.filter((item) => item.market === "US")),
@@ -124,6 +150,7 @@ export async function collectDailyInput({
     marketDataDiagnostics: marketPack.diagnostics,
     marketSessions,
     sectorPerformance,
+    aiChainPerformance,
     sectorHeat,
     news,
     newsDiagnostics: {
@@ -204,6 +231,7 @@ async function main() {
         marketDataSource: input.marketDataDiagnostics.source,
         heatCount: input.sectorHeat.length,
         sectorPerformanceCount: input.sectorPerformance.length,
+        aiChainPerformanceCount: input.aiChainPerformance.length,
         newsCount: input.news.length,
         newsByMarket: input.newsDiagnostics.selectedByMarket,
         newsCandidates: input.newsDiagnostics.candidateCount,

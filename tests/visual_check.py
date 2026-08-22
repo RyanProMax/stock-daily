@@ -40,7 +40,7 @@ def inspect_daily(page, market, width):
         wait_until="networkidle",
     )
     page.evaluate("document.fonts.ready")
-    page.wait_for_selector(".market-driver-card")
+    page.wait_for_selector(".market-intelligence-panel")
     page.add_style_tag(
         content=(
             "html { scroll-behavior: auto !important; } "
@@ -65,7 +65,7 @@ def inspect_daily(page, market, width):
               text: element.textContent.trim().slice(0, 80)
             }));
           const offCanvas = [...document.querySelectorAll(
-            '.snapshot-item, .market-driver-card, .market-driver-card *'
+            '.snapshot-item, .market-intelligence-panel, .market-intelligence-panel *'
           )].filter(element => {
             const box = element.getBoundingClientRect();
             return box.left < -1 || box.right > innerWidth + 1;
@@ -108,15 +108,17 @@ def inspect_daily(page, market, width):
             indexColumnCount: getComputedStyle(document.querySelector(
               '.snapshot-index-grid'
             )).gridTemplateColumns.split(' ').length,
-            driverCount: document.querySelectorAll('.market-driver-card').length,
-            driverFooterCount: document.querySelectorAll(
-              '.market-driver-footer'
+            aiMetricCount: document.querySelectorAll('.snapshot-item-ai').length,
+            driverCount: document.querySelectorAll('.market-driver-row').length,
+            intelligencePanelCount: document.querySelectorAll(
+              '.market-intelligence-panel'
             ).length,
+            aiUpdateCount: document.querySelectorAll('.ai-update-row').length,
             driverMetaInHeaderCount: document.querySelectorAll(
               '.market-driver-header .market-driver-meta'
             ).length,
-            primaryDriverCount: document.querySelectorAll(
-              '.market-driver-role.role-primary'
+            roleLabelCount: document.querySelectorAll(
+              '.market-driver-role'
             ).length,
             evidenceLinkCount: document.querySelectorAll(
               '.market-driver-evidence a'
@@ -125,16 +127,16 @@ def inspect_daily(page, market, width):
               '.market-driver-sectors .sector-chip'
             ).length,
             driverCardWidths: [...document.querySelectorAll(
-              '.market-driver-card'
+              '.market-driver-row'
             )].map(element => Math.round(element.getBoundingClientRect().width)),
             driverCardHeights: [...document.querySelectorAll(
-              '.market-driver-card'
+              '.market-driver-row'
             )].map(element => Math.round(element.getBoundingClientRect().height)),
             sectorHeights: [...document.querySelectorAll(
               '.snapshot-sector-grid-complete .snapshot-item-sector'
             )].map(element => Math.round(element.getBoundingClientRect().height)),
             clippedContent: clipped(
-              '.market-driver-card, .market-driver-card *, .snapshot-item-sector, .snapshot-item-sector *'
+              '.market-intelligence-panel, .market-intelligence-panel *, .snapshot-item, .snapshot-item *'
             ),
             offCanvas,
             archiveCount: document.querySelectorAll('.archive-section').length,
@@ -189,7 +191,7 @@ def inspect_daily(page, market, width):
     page.locator(".market-snapshot").screenshot(
         path=str(SCREENSHOT_DIR / f"{prefix}-market.png")
     )
-    page.locator(".market-driver-list").screenshot(
+    page.locator(".market-intelligence-panel").screenshot(
         path=str(SCREENSHOT_DIR / f"{prefix}-drivers.png")
     )
 
@@ -245,7 +247,7 @@ with sync_playwright() as playwright:
     )
     result["english"] = {
         "lang": english.locator("html").get_attribute("lang"),
-        "driverCount": english.locator(".market-driver-card").count(),
+        "driverCount": english.locator(".market-driver-row").count(),
         "hasEventLabel": english.get_by_text("What happened", exact=True).count(),
         "hasMechanismLabel": english.get_by_text(
             "Market transmission", exact=True
@@ -272,6 +274,7 @@ for key in ("CN-1440", "US-1440", "CN-390", "US-390"):
     assert layout["activeMarket"] == market, result
     assert layout["marketCount"] == (6 if market == "CN" else 4), result
     assert layout["sectorCount"] == 11, result
+    assert layout["aiMetricCount"] == 4, result
     assert ("GICS" if market == "US" else "中证") in layout[
         "sectorTaxonomy"
     ], result
@@ -282,10 +285,11 @@ for key in ("CN-1440", "US-1440", "CN-390", "US-390"):
     assert layout["indexColumnCount"] == (
         (3 if market == "CN" else 2) if mobile else layout["marketCount"]
     ), result
-    assert layout["driverCount"] == 2, result
-    assert layout["driverFooterCount"] == 0, result
+    assert layout["driverCount"] == (1 if market == "CN" else 2), result
+    assert layout["intelligencePanelCount"] == 1, result
+    assert layout["aiUpdateCount"] == (1 if market == "CN" else 0), result
     assert layout["driverMetaInHeaderCount"] == layout["driverCount"], result
-    assert layout["primaryDriverCount"] == 1, result
+    assert layout["roleLabelCount"] == 0, result
     assert layout["evidenceLinkCount"] >= layout["driverCount"], result
     assert layout["driverSectorChipCount"] >= layout["driverCount"], result
     assert layout["clippedContent"] == [], result

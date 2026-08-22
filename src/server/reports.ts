@@ -613,6 +613,8 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
     })),
     drivers: report.drivers ?? [],
     sectorPerformance: report.sectorPerformance ?? [],
+    aiChainPerformance: report.aiChainPerformance ?? [],
+    aiChainUpdates: report.aiChainUpdates ?? [],
   };
 }
 
@@ -635,7 +637,9 @@ function parseDailyRow(row: DailyRow): DailyReport {
     markets: content.markets ?? [],
     sectorHeat: content.sectorHeat ?? [],
     sectorPerformance: content.sectorPerformance ?? [],
+    aiChainPerformance: content.aiChainPerformance ?? [],
     drivers: content.drivers ?? [],
+    aiChainUpdates: content.aiChainUpdates ?? [],
     stories: content.stories ?? [],
     isSample: content.isSample ?? false,
     translations: content.translations,

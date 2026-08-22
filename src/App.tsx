@@ -303,6 +303,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const marketDrivers = (report.drivers ?? []).filter(
     (driver) => driver.market === data.market,
   );
+  const marketAiUpdates = (report.aiChainUpdates ?? []).filter(
+    (update) => update.market === data.market,
+  );
   const displayArchive = data.archive.map((item) => {
     const marketArchive = item.marketViews?.[data.market];
     return {
@@ -434,6 +437,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
           markets={marketMetrics}
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
+          aiChainPerformance={report.aiChainPerformance}
           market={data.market}
           language={language}
           labels={{
@@ -444,27 +448,32 @@ function DailyPage({ data }: { data: DailyPageData }) {
                 ? t.sectorPerformanceRangeUS
                 : t.sectorPerformanceRangeCN
               : t.heatRange,
+            aiChain: t.aiChainPerformance,
+            aiRange:
+              data.market === "US" ? t.aiChainRangeUS : t.aiChainRangeCN,
             streakDays: t.heatStreakDays,
           }}
         />
       </section>
 
-      {(!isAttribution || marketDrivers.length > 0) && (
+      {(!isAttribution || marketDrivers.length > 0 || marketAiUpdates.length > 0) && (
       <section className="signals-section">
         {isAttribution ? (
           <MarketDrivers
             drivers={marketDrivers}
+            aiUpdates={marketAiUpdates}
             sectors={(report.sectorPerformance ?? []).filter(
               (sector) => sector.market === data.market,
             )}
             language={language}
             labels={{
-              primary: t.primaryDriver,
-              secondary: t.secondaryDriver,
+              attribution: t.marketAttribution,
+              aiNews: t.aiChainNews,
               happened: t.driverEvent,
               mechanism: t.driverMechanism,
               sectors: t.driverSectors,
               evidence: t.driverEvidence,
+              aiImplication: t.aiChainImplication,
             }}
           />
         ) : (

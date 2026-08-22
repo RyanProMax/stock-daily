@@ -10,9 +10,7 @@ import {
 } from "./lib/i18n";
 import type { MarketRegion } from "./types";
 import {
-  buildWeeklyEventTimeline,
   buildSectorHeatView,
-  deriveThesisLedger,
   getDailyArchive,
   getDailyHeatHistory,
   getDailyReport,
@@ -44,37 +42,8 @@ function canonicalUrl(requestUrl: string, pathname: string) {
   return `${productionOrigin}${pathname}${url.search}`;
 }
 
-export function isLocalDevelopmentUrl(requestUrl: string) {
-  const hostname = new URL(requestUrl).hostname;
-  return hostname === "localhost" || hostname === "127.0.0.1";
-}
-
-export function productionDataUrl(requestUrl: string, pathname: string) {
-  const source = new URL(requestUrl);
-  const target = new URL(pathname, productionOrigin);
-  for (const [key, value] of source.searchParams) {
-    target.searchParams.set(key, value);
-  }
-  return target.toString();
-}
-
 function resolveMarket(value: string | null): MarketRegion {
   return value?.toUpperCase() === "US" ? "US" : "CN";
-}
-
-function primaryMarketChange(
-  report: DailyPageData["report"],
-  market: MarketRegion,
-) {
-  const preferredSymbols =
-    market === "US" ? ["SPX", "DJI", "IXIC"] : ["CSI300", "SSE", "SZSE"];
-  return preferredSymbols
-    .map((symbol) =>
-      report.markets.find(
-        (metric) => metric.region === market && metric.symbol === symbol,
-      ),
-    )
-    .find((metric) => Boolean(metric))?.change;
 }
 
 async function renderPage(data: PageData) {
@@ -84,194 +53,6 @@ async function renderPage(data: PageData) {
     },
   });
   return new Response(stream, { headers: cacheHeaders });
-}
-
-async function fetchProductionApi<T>(
-  requestUrl: string,
-  pathname: string,
-): Promise<T> {
-  const response = await fetch(productionDataUrl(requestUrl, pathname), {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`Production data request failed with ${response.status}.`);
-  }
-  const payload = (await response.json()) as { data?: T };
-  if (payload.data === undefined) {
-    throw new Error("Production API response is empty.");
-  }
-  return payload.data;
-}
-
-function precedingSunday(date: string) {
-  const value = new Date(`${date}T12:00:00Z`);
-  const daysSinceMonday = (value.getUTCDay() + 6) % 7;
-  value.setUTCDate(value.getUTCDate() - daysSinceMonday - 1);
-  return value.toISOString().slice(0, 10);
-}
-
-async function fetchProductionDailyPageData(
-  requestUrl: string,
-): Promise<DailyPageData | null> {
-  const url = new URL(requestUrl);
-  const language = resolveLanguage(url.searchParams.get("lang"));
-  const market = resolveMarket(url.searchParams.get("market"));
-  const requestedDate = url.searchParams.get("date");
-  const archive = await fetchProductionApi<DailyPageData["archive"]>(
-    requestUrl,
-    "/api/reports?limit=100",
-  );
-  const selectedDate =
-    requestedDate && datePattern.test(requestedDate)
-      ? archive.find((item) => item.reportDate === requestedDate)?.reportDate
-      : archive[0]?.reportDate;
-  const reportDate = selectedDate ?? archive[0]?.reportDate;
-  if (!reportDate) return null;
-
-  const report = await fetchProductionApi<DailyPageData["report"]>(
-    requestUrl,
-    `/api/reports/${reportDate}`,
-  );
-  const relatedDates = [
-    ...new Set([
-      ...archive
-        .filter((item) => item.reportDate <= report.reportDate)
-        .slice(0, 30)
-        .map((item) => item.reportDate),
-      ...archive
-        .filter((item) => item.reportDate >= report.reportDate)
-        .slice(0, 30)
-        .map((item) => item.reportDate),
-    ]),
-  ].filter((date) => date !== report.reportDate);
-  const relatedReports = await Promise.all(
-    relatedDates.map((date) =>
-      fetchProductionApi<DailyPageData["report"]>(
-        requestUrl,
-        `/api/reports/${date}`,
-      ),
-    ),
-  );
-  const reports = [report, ...relatedReports];
-  const reportByDate = new Map(
-    reports.map((relatedReport) => [relatedReport.reportDate, relatedReport]),
-  );
-  const enrichedArchive = archive.map((item) => {
-    const archivedReport = reportByDate.get(item.reportDate);
-    if (!archivedReport || !item.marketViews) return item;
-    return {
-      ...item,
-      marketViews: {
-        CN: {
-          ...item.marketViews.CN,
-          change: primaryMarketChange(archivedReport, "CN"),
-        },
-        US: {
-          ...item.marketViews.US,
-          change: primaryMarketChange(archivedReport, "US"),
-        },
-      },
-    };
-  });
-  const marketHistory = reports
-    .filter((item) => item.reportDate <= report.reportDate)
-    .sort((left, right) => right.reportDate.localeCompare(left.reportDate))
-    .slice(0, 30)
-    .map((item) => ({
-      reportDate: item.reportDate,
-      sectors: item.sectorHeat,
-    }));
-
-  let weekEvents = null;
-  if (report.contractVersion !== "market-attribution-v9") {
-    try {
-      const weekly = await fetchProductionApi<NonNullable<WeeklyPageData["report"]>>(
-        requestUrl,
-        `/api/weekly/${precedingSunday(report.reportDate)}`,
-      );
-      weekEvents = buildWeeklyEventTimeline(
-        weekly,
-        report.reportDate,
-        reports.filter((item) => item.reportDate <= report.reportDate),
-      );
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("404")) throw error;
-    }
-  }
-
-  return {
-    kind: "daily",
-    language,
-    market,
-    requestUrl: canonicalUrl(requestUrl, "/"),
-    report,
-    archive: enrichedArchive,
-    sectorHeat: buildSectorHeatView(report.sectorHeat, marketHistory),
-    weekEvents,
-    thesisLedger: deriveThesisLedger(
-      reports,
-      archive[0]?.reportDate ?? report.reportDate,
-      market,
-      report.reportDate,
-    ),
-    thesisHistory: deriveThesisLedger(
-      reports,
-      report.reportDate,
-      market,
-      undefined,
-      45,
-    )
-      .filter((entry) => entry.reportDate < report.reportDate)
-      .sort((left, right) =>
-        right.reportDate.localeCompare(left.reportDate),
-      )
-      .slice(0, 6),
-  };
-}
-
-async function fetchProductionWeeklyPageData(
-  requestUrl: string,
-): Promise<WeeklyPageData> {
-  const url = new URL(requestUrl);
-  const language = resolveLanguage(url.searchParams.get("lang"));
-  const requestedWeek = url.searchParams.get("week");
-  const health = await fetchProductionApi<{
-    latestWeekly: { weekEnd?: string } | null;
-  }>(requestUrl, "/api/health");
-  const weekEnd =
-    requestedWeek && datePattern.test(requestedWeek)
-      ? requestedWeek
-      : health.latestWeekly?.weekEnd;
-  if (!weekEnd) {
-    return {
-      kind: "weekly",
-      language,
-      requestUrl: canonicalUrl(requestUrl, "/weekly"),
-      report: null,
-      archive: [],
-    };
-  }
-  const report = await fetchProductionApi<NonNullable<WeeklyPageData["report"]>>(
-    requestUrl,
-    `/api/weekly/${weekEnd}`,
-  );
-  return {
-    kind: "weekly",
-    language,
-    requestUrl: canonicalUrl(requestUrl, "/weekly"),
-    report,
-    archive: [
-      {
-        weekStart: report.weekStart,
-        weekEnd: report.weekEnd,
-        headline: report.headline,
-        summary: report.summary,
-        headlineEn: report.translations?.en?.headline,
-        summaryEn: report.translations?.en?.summary,
-        generatedAt: report.generatedAt,
-      },
-    ],
-  };
 }
 
 async function buildDailyPageData(
@@ -350,9 +131,7 @@ async function buildWeeklyPageData(
 
 async function dailyPage(requestUrl: string, db: D1Database) {
   try {
-    const data = isLocalDevelopmentUrl(requestUrl)
-      ? await fetchProductionDailyPageData(requestUrl)
-      : await buildDailyPageData(requestUrl, db);
+    const data = await buildDailyPageData(requestUrl, db);
     if (!data) {
       return new Response("No daily report is available.", { status: 503 });
     }
@@ -365,24 +144,13 @@ async function dailyPage(requestUrl: string, db: D1Database) {
 
 async function weeklyPage(requestUrl: string, db: D1Database) {
   try {
-    const data = isLocalDevelopmentUrl(requestUrl)
-      ? await fetchProductionWeeklyPageData(requestUrl)
-      : await buildWeeklyPageData(requestUrl, db);
+    const data = await buildWeeklyPageData(requestUrl, db);
     return renderPage(data);
   } catch (error) {
     console.error("Weekly page data read failed", error);
     return new Response("Weekly report is unavailable.", { status: 503 });
   }
 }
-
-app.use("/api/*", async (c, next) => {
-  if (!isLocalDevelopmentUrl(c.req.url)) return next();
-  const url = new URL(c.req.url);
-  return fetch(productionDataUrl(c.req.url, url.pathname), {
-    method: c.req.method,
-    headers: { Accept: c.req.header("Accept") ?? "application/json" },
-  });
-});
 
 app.get("/api/health", async (c) => {
   try {

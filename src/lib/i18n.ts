@@ -46,6 +46,9 @@ export const copy = {
     sectorPerformance: "行业表现",
     sectorPerformanceRangeCN: "中证一级行业 · 11 类全覆盖",
     sectorPerformanceRangeUS: "GICS 行业板块 · 11 类全覆盖",
+    aiChainPerformance: "AI 产业链",
+    aiChainRangeCN: "中证主题指数 · 当日表现",
+    aiChainRangeUS: "行业 ETF 代理 · 当日表现",
     heatStreak: "连续大幅波动",
     heatStreakDays: "连续 {count} 个交易日",
     noHeatStreak: "暂无连续两个交易日大幅波动的板块",
@@ -130,12 +133,13 @@ export const copy = {
     upcoming: "未来一周关键事件",
     noWeekly: "首份周报将在周日晚上生成。",
     noMarketNews: "本期暂无该市场的已核验新闻。",
-    primaryDriver: "主驱动",
-    secondaryDriver: "次驱动",
+    marketAttribution: "盘面归因",
+    aiChainNews: "AI 产业链动态",
     driverEvent: "发生了什么",
     driverMechanism: "如何影响盘面",
     driverSectors: "对应行业",
     driverEvidence: "核验来源",
+    aiChainImplication: "产业链影响",
   },
   en: {
     skip: "Skip to content",
@@ -173,6 +177,9 @@ export const copy = {
     sectorPerformance: "Sector Performance",
     sectorPerformanceRangeCN: "CSI level-one sectors · all 11",
     sectorPerformanceRangeUS: "GICS sectors · all 11",
+    aiChainPerformance: "AI Supply Chain",
+    aiChainRangeCN: "CSI thematic indexes · daily move",
+    aiChainRangeUS: "Sector ETF proxies · daily move",
     heatStreak: "Sustained Large Moves",
     heatStreakDays: "{count} trading days",
     noHeatStreak: "No sector has made a large move for two trading days.",
@@ -257,12 +264,13 @@ export const copy = {
     upcoming: "Key Events Next Week",
     noWeekly: "The first weekly report will be generated on Sunday evening.",
     noMarketNews: "No verified news is available for this market in this edition.",
-    primaryDriver: "Primary driver",
-    secondaryDriver: "Secondary driver",
+    marketAttribution: "Market Attribution",
+    aiChainNews: "AI Supply-chain Developments",
     driverEvent: "What happened",
     driverMechanism: "Market transmission",
     driverSectors: "Affected sectors",
     driverEvidence: "Verified sources",
+    aiChainImplication: "Supply-chain impact",
   },
 } as const;
 
@@ -392,6 +400,14 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       summary: translation?.drivers?.[index]?.summary ?? driver.summary,
       mechanism:
         translation?.drivers?.[index]?.mechanism ?? driver.mechanism,
+    })),
+    aiChainUpdates: report.aiChainUpdates?.map((update, index) => ({
+      ...update,
+      title: translation?.aiChainUpdates?.[index]?.title ?? update.title,
+      summary:
+        translation?.aiChainUpdates?.[index]?.summary ?? update.summary,
+      implication:
+        translation?.aiChainUpdates?.[index]?.implication ?? update.implication,
     })),
     stories: report.stories.map((story, index) => {
       const translatedStory = translation?.stories[index];

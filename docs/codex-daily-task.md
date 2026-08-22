@@ -2,8 +2,8 @@
 
 日报只解释已经完成的 CN、US 交易时段，不再生成普通新闻列表。完整流程由
 `scripts/run-codex-daily.sh` 执行：采集行情、完整一级行业表现和候选证据；Agent
-选择最多三条盘面驱动；本地质量门验证交易窗口、市场隔离、行业方向和证据；随后
-发布并回读生产接口。
+选择最多三条盘面驱动，并补充零至四条同交易时段 AI 产业链动态；本地质量门验证
+交易窗口、市场隔离、行业方向和证据；随后发布并回读生产接口。
 
 ## V9 输出契约
 
@@ -37,6 +37,16 @@
       "evidenceIndexes": [0]
     }
   ],
+  "aiChainUpdates": [
+    {
+      "market": "CN | US",
+      "layer": "chips | interconnect | infrastructure | applications",
+      "title": "当日 AI 产业链事实",
+      "summary": "技术、订单、业绩或供需事实的完整来龙去脉。",
+      "implication": "该事实影响哪个产业链环节，以及仍有哪些约束。",
+      "evidenceIndexes": [0]
+    }
+  ],
   "translations": {
     "en": {
       "headline": "Causal English headline",
@@ -47,6 +57,9 @@
       },
       "drivers": [
         { "title": "Translated driver", "summary": "Translated event.", "mechanism": "Translated mechanism." }
+      ],
+      "aiChainUpdates": [
+        { "title": "Translated update", "summary": "Translated facts.", "implication": "Translated impact." }
       ]
     }
   }
@@ -73,6 +86,12 @@
   禁止“股指普涨”“指数分化”“风险偏好改善”等无原因标题。
 - 只使用输入中的核验事实，不新增数字、公司、事件或因果。英文只翻译已经通过校验
   的中文内容。
+- `aiChainPerformance` 固定覆盖芯片与设备、光互连/网络、云与算力基础设施、软件与
+  应用四个环节。CN 使用中证主题指数；US 使用行业 ETF 代理并明确标注，不把代理
+  表现声称为指数加权贡献。
+- `aiChainUpdates` 每个市场可为零至四条、同一环节最多一条。只纳入交易窗口内且能
+  解释技术、订单、业绩或供需变化的事实；不得把旧公告包装成当日新催化，也不得用
+  “技术论文及企业激励”等无法回答来龙去脉的概括替代具体证据。
 - `newsDiagnostics`、提供商、模型、契约或流水线术语只用于本地质量门，不进入读者页面。
 
 ## 发布完成条件

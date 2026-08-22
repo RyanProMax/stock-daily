@@ -23,6 +23,11 @@ export type ThesisStatus =
   | "inconclusive";
 export type DriverStatus = "explained" | "partial" | "unattributed";
 export type DriverRole = "primary" | "secondary";
+export type AiChainLayer =
+  | "chips"
+  | "interconnect"
+  | "infrastructure"
+  | "applications";
 
 export interface MarketMetric {
   region: MarketRegion;
@@ -43,6 +48,21 @@ export interface SectorHeatMetric {
   name: string;
   nameEn: string;
   score: number;
+  change: string;
+  direction: MarketDirection;
+  asOf: string;
+  source: string;
+}
+
+export interface AiChainMetric {
+  market: MarketRegion;
+  layer: AiChainLayer;
+  name: string;
+  nameEn: string;
+  benchmark: string;
+  benchmarkEn: string;
+  benchmarkKind: "index" | "etf_proxy";
+  symbol: string;
   change: string;
   direction: MarketDirection;
   asOf: string;
@@ -209,6 +229,16 @@ export interface MarketDriver {
   evidence: DriverEvidence[];
 }
 
+export interface AiChainUpdate {
+  id: string;
+  market: MarketRegion;
+  layer: AiChainLayer;
+  title: string;
+  summary: string;
+  implication: string;
+  evidence: DriverEvidence[];
+}
+
 export interface Story {
   id: string;
   regions: MarketRegion[];
@@ -241,7 +271,9 @@ export interface DailyReport {
   markets: MarketMetric[];
   sectorHeat: SectorHeatMetric[];
   sectorPerformance?: SectorHeatMetric[];
+  aiChainPerformance?: AiChainMetric[];
   drivers?: MarketDriver[];
+  aiChainUpdates?: AiChainUpdate[];
   stories: Story[];
   agentModel: string;
   isSample: boolean;
@@ -277,6 +309,9 @@ export interface DailyReportTranslation {
     };
   }>;
   drivers?: Array<Pick<MarketDriver, "title" | "summary" | "mechanism">>;
+  aiChainUpdates?: Array<
+    Pick<AiChainUpdate, "title" | "summary" | "implication">
+  >;
 }
 
 export interface ReportListItem {

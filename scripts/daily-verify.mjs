@@ -95,6 +95,16 @@ const v9Invalid =
         sector.change !== input.sectorPerformance[index]?.change ||
         sector.direction !== input.sectorPerformance[index]?.direction,
     ) ||
+    report?.aiChainPerformance?.length !== input.aiChainPerformance?.length ||
+    report.aiChainPerformance.some(
+      (metric, index) =>
+        metric.market !== input.aiChainPerformance[index]?.market ||
+        metric.layer !== input.aiChainPerformance[index]?.layer ||
+        metric.symbol !== input.aiChainPerformance[index]?.symbol ||
+        metric.asOf !== input.aiChainPerformance[index]?.asOf ||
+        metric.change !== input.aiChainPerformance[index]?.change ||
+        metric.direction !== input.aiChainPerformance[index]?.direction,
+    ) ||
     report?.drivers?.length !== expectedReport.drivers.length ||
     report.drivers.some((driver, index) => {
       const expected = expectedReport.drivers[index];
@@ -113,6 +123,24 @@ const v9Invalid =
         JSON.stringify(driver.sectorSymbols) !==
           JSON.stringify(expected.sectorSymbols) ||
         JSON.stringify(driver.evidence.map((item) => item.source)) !==
+          JSON.stringify(expectedSources)
+      );
+    }) ||
+    report?.aiChainUpdates?.length !== expectedReport.aiChainUpdates.length ||
+    report.aiChainUpdates.some((update, index) => {
+      const expected = expectedReport.aiChainUpdates[index];
+      const expectedSources = [...new Set(
+        expected.evidenceIndexes.map(
+          (evidenceIndex) => input.news[evidenceIndex]?.url,
+        ),
+      )];
+      return (
+        update.market !== expected.market ||
+        update.layer !== expected.layer ||
+        update.title !== expected.title ||
+        update.summary !== expected.summary ||
+        update.implication !== expected.implication ||
+        JSON.stringify(update.evidence.map((item) => item.source)) !==
           JSON.stringify(expectedSources)
       );
     }) ||
@@ -142,6 +170,15 @@ const v9Invalid =
       ["title", "summary", "mechanism"].some(
         (key) =>
           driver[key] !== expectedReport.translations.en.drivers[index]?.[key],
+        ),
+    ) ||
+    report.translations?.en?.aiChainUpdates?.length !==
+      expectedReport.translations.en.aiChainUpdates.length ||
+    report.translations?.en?.aiChainUpdates?.some((update, index) =>
+      ["title", "summary", "implication"].some(
+        (key) =>
+          update[key] !==
+          expectedReport.translations.en.aiChainUpdates[index]?.[key],
       ),
     ));
 if (
