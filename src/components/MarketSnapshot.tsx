@@ -43,6 +43,10 @@ interface Props {
     aiRange: string;
     streakDays: string;
     highRelevance: string;
+    verifiedFact: string;
+    marketTransmission: string;
+    chainImpact: string;
+    sourceArticles: string;
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
@@ -125,7 +129,9 @@ function SectorSnapshotItem({
 
 interface SnapshotEvidenceItem {
   title: string;
-  summary: string;
+  facts: string;
+  impact: string;
+  impactLabel: string;
   highRelevance: boolean;
   evidence: DriverEvidence[];
 }
@@ -136,12 +142,37 @@ function sourceName(evidence: DriverEvidence) {
     : evidence.sourceLabel;
 }
 
+function sourceTitle(evidence: DriverEvidence) {
+  return evidence.platform === "x" ? evidence.facts : evidence.title;
+}
+
+function evidenceTime(
+  publishedAt: string,
+  language: Language,
+  market: MarketRegion,
+) {
+  const date = new Date(publishedAt);
+  if (Number.isNaN(date.getTime())) return publishedAt;
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
+    month: language === "zh" ? "long" : "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: language === "en",
+    timeZone: market === "CN" ? "Asia/Shanghai" : "America/New_York",
+  }).format(date);
+}
+
 function SnapshotEvidenceList({
   items,
   labels,
+  language,
+  market,
 }: {
   items: SnapshotEvidenceItem[];
   labels: Props["labels"];
+  language: Language;
+  market: MarketRegion;
 }) {
   const evidenceItems = items
     .filter((item) => item.evidence.length > 0)
@@ -158,7 +189,7 @@ function SnapshotEvidenceList({
 
   return (
     <ul className="snapshot-evidence-list">
-      {evidenceItems.map(({ evidence, title, summary, highRelevance }) => (
+      {evidenceItems.map(({ evidence, title, facts, impact, impactLabel, highRelevance }) => (
         <li
           className={highRelevance ? "snapshot-evidence-high" : undefined}
           key={`${title}:${evidence.map((item) => item.source).join(":")}`}
@@ -168,26 +199,43 @@ function SnapshotEvidenceList({
               {highRelevance && <span>{labels.highRelevance}</span>}
               <h3>{title}</h3>
             </div>
-            <p>{summary}</p>
-            <div className="snapshot-evidence-sources">
+            <dl className="snapshot-evidence-details">
+              <div>
+                <dt>{labels.verifiedFact}</dt>
+                <dd>{facts}</dd>
+              </div>
+              <div>
+                <dt>{impactLabel}</dt>
+                <dd>{impact}</dd>
+              </div>
+            </dl>
+            <ul className="snapshot-evidence-articles" aria-label={labels.sourceArticles}>
               {[...new Map(evidence.map((item) => [item.source, item])).values()].map(
                 (item) => (
-                  <a
-                    className="snapshot-evidence-source"
-                    href={item.source}
-                    target="_blank"
-                    rel="noreferrer"
-                    key={item.source}
-                  >
-                    <span>{sourceName(item)}</span>
-                    {item.platform === "x" && item.authority && (
-                      <small>{authorityLabels[item.authority]}</small>
-                    )}
-                    <ExternalLink aria-hidden="true" />
-                  </a>
+                  <li key={item.source}>
+                    <a
+                      href={item.source}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span className="snapshot-evidence-article-title">
+                        {sourceTitle(item)}
+                      </span>
+                      <span className="snapshot-evidence-article-meta">
+                        <strong>{sourceName(item)}</strong>
+                        <time dateTime={item.publishedAt}>
+                          {evidenceTime(item.publishedAt, language, market)}
+                        </time>
+                        {item.platform === "x" && item.authority && (
+                          <small>{authorityLabels[item.authority]}</small>
+                        )}
+                        <ExternalLink aria-hidden="true" />
+                      </span>
+                    </a>
+                  </li>
                 ),
               )}
-            </div>
+            </ul>
           </article>
         </li>
       ))}
@@ -265,19 +313,25 @@ export default function MarketSnapshot({
   const marketEvidence = drivers.map((driver) => ({
     evidence: driver.evidence,
     title: driver.title,
-    summary: driver.summary,
+    facts: driver.summary,
+    impact: driver.mechanism,
+    impactLabel: labels.marketTransmission,
     highRelevance: driver.role === "primary",
   }));
   const sectorEvidence = drivers.map((driver) => ({
     evidence: driver.evidence,
     title: driver.title,
-    summary: driver.mechanism,
+    facts: driver.summary,
+    impact: driver.mechanism,
+    impactLabel: labels.marketTransmission,
     highRelevance: driver.role === "primary",
   }));
   const aiEvidence = aiUpdates.map((update) => ({
     evidence: update.evidence,
     title: update.title,
-    summary: update.summary,
+    facts: update.summary,
+    impact: update.implication,
+    impactLabel: labels.chainImpact,
     highRelevance: update.evidence.some((evidence) => evidence.platform !== "x"),
   }));
 
@@ -303,7 +357,12 @@ export default function MarketSnapshot({
             />
           ))}
         </div>
-        <SnapshotEvidenceList items={marketEvidence} labels={labels} />
+        <SnapshotEvidenceList
+          items={marketEvidence}
+          labels={labels}
+          language={language}
+          market={market}
+        />
       </section>
 
       {completeSectors ? (
@@ -321,7 +380,12 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
-          <SnapshotEvidenceList items={sectorEvidence} labels={labels} />
+          <SnapshotEvidenceList
+            items={sectorEvidence}
+            labels={labels}
+            language={language}
+            market={market}
+          />
         </section>
       ) : (
         <details
@@ -379,7 +443,12 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
-          <SnapshotEvidenceList items={aiEvidence} labels={labels} />
+          <SnapshotEvidenceList
+            items={aiEvidence}
+            labels={labels}
+            language={language}
+            market={market}
+          />
         </section>
       )}
     </div>

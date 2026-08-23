@@ -28,6 +28,18 @@ const evidence = {
   kind: "market_wrap",
 };
 
+const xEvidence = {
+  title: "行业研究机构更新供给判断",
+  facts: "研究机构确认同交易时段的供给变化，并给出对应产品与行业范围。",
+  source: "https://x.com/example/status/123",
+  sourceLabel: "行业研究机构",
+  publishedAt: "2026-08-21T18:05:00.000Z",
+  kind: "event",
+  platform: "x",
+  authorHandle: "example_research",
+  authority: "specialist",
+};
+
 function constituents(prefix) {
   return Array.from({ length: 4 }, (_, index) => ({
     symbol: `${prefix}-${index}`,
@@ -90,7 +102,7 @@ function props(aiUpdates = []) {
         summary: "供给变化支撑原材料并影响大盘。",
         mechanism: "供给收紧抬升原材料价格，并传导到行业表现。",
         sectorSymbols: ["SECTOR-0"],
-        evidence: [evidence],
+        evidence: [evidence, xEvidence],
       },
     ],
     aiUpdates,
@@ -104,6 +116,10 @@ function props(aiUpdates = []) {
       aiRange: "8 层口径",
       streakDays: "连续 {count} 个交易日",
       highRelevance: "高相关",
+      verifiedFact: "核心事实",
+      marketTransmission: "影响路径",
+      chainImpact: "产业链影响",
+      sourceArticles: "核验文章",
       sourceOfficial: "官方",
       sourceSpecialist: "专业研究",
       sourceExpert: "行业专家",
@@ -123,8 +139,18 @@ test("market snapshot binds each evidence summary to its source and hides empty 
   assert.equal(document.querySelectorAll(".snapshot-evidence-high").length, 2);
   for (const item of document.querySelectorAll(".snapshot-evidence-list > li")) {
     assert.match(item.textContent, /原材料供给变化支撑市场/);
+    assert.match(item.textContent, /核心事实/);
+    assert.match(item.textContent, /影响路径/);
+    assert.match(item.textContent, /供给变化支撑原材料并影响大盘/);
+    assert.match(item.textContent, /供给收紧抬升原材料价格/);
     assert.match(item.textContent, /市场收评/);
+    assert.match(item.textContent, /X · @example_research/);
+    assert.match(item.textContent, /专业研究/);
+    assert.equal(item.querySelectorAll(".snapshot-evidence-details > div").length, 2);
+    assert.equal(item.querySelectorAll(".snapshot-evidence-articles > li").length, 2);
     assert.ok(item.querySelector('a[href="https://example.com/market-wrap"]'));
+    assert.ok(item.querySelector('a[href="https://x.com/example/status/123"]'));
+    assert.equal(item.querySelectorAll("time[datetime]").length, 2);
   }
   assert.doesNotMatch(html, /综合研判|未发现单一消息主导|表现居前|表现居后/);
   assert.equal(document.querySelectorAll(".snapshot-analysis").length, 0);
@@ -155,6 +181,12 @@ test("AI evidence renders as an article-summary-source list", async () => {
 
   assert.ok(item);
   assert.match(item.textContent, /光互连订单与技术路线得到验证/);
+  assert.match(item.textContent, /核心事实/);
+  assert.match(item.textContent, /企业订单和行业研究共同指向光互连需求/);
+  assert.match(item.textContent, /产业链影响/);
+  assert.match(item.textContent, /带宽需求支撑光互连链条/);
   assert.match(item.textContent, /市场收评/);
+  assert.equal(item.querySelectorAll(".snapshot-evidence-details > div").length, 2);
+  assert.equal(item.querySelectorAll(".snapshot-evidence-articles > li").length, 1);
   assert.ok(item.querySelector('a[href="https://example.com/ai-evidence"]'));
 });
