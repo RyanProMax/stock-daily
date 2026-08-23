@@ -155,6 +155,12 @@ test("market snapshot renders unique compact evidence rows for market and sector
 
   assert.equal(document.querySelectorAll(".snapshot-evidence-list").length, 2);
   assert.equal(document.querySelectorAll(".snapshot-group-ai .snapshot-evidence-list").length, 0);
+  assert.equal(
+    document.querySelectorAll(
+      ".snapshot-sector-complete > .snapshot-heading > span, .snapshot-group-ai > .snapshot-heading > span",
+    ).length,
+    0,
+  );
   assert.equal(document.querySelectorAll(".snapshot-evidence-high").length, 1);
   const marketItem = document.querySelector(
     ".snapshot-group-indices .snapshot-evidence-list > li",

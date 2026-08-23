@@ -361,7 +361,6 @@ export default function MarketSnapshot({
         <section className="snapshot-group snapshot-group-sectors snapshot-sector-complete">
           <header className="snapshot-heading">
             <strong>{labels.sectors}</strong>
-            <span>{labels.range}</span>
           </header>
           <div className="snapshot-grid snapshot-sector-grid snapshot-sector-grid-complete">
             {completeSectors.map((sector) => (
@@ -424,7 +423,6 @@ export default function MarketSnapshot({
         <section className="snapshot-group snapshot-group-ai">
           <header className="snapshot-heading">
             <strong>{labels.aiChain}</strong>
-            <span>{labels.aiRange}</span>
           </header>
           <div className="snapshot-grid snapshot-ai-grid">
             {aiChain.map((metric) => (

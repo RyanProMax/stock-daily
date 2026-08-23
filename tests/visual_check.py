@@ -91,9 +91,10 @@ def inspect_daily(page, market, width):
             sectorCount: document.querySelectorAll(
               '.snapshot-sector-grid-complete .snapshot-item-sector'
             ).length,
-            sectorTaxonomy: document.querySelector(
-              '.snapshot-sector-complete > .snapshot-heading span'
-            )?.textContent.trim(),
+            secondaryHeadingNoteCount: document.querySelectorAll(
+              '.snapshot-sector-complete > .snapshot-heading span, ' +
+              '.snapshot-group-ai > .snapshot-heading span'
+            ).length,
             flatSectorCount: document.querySelectorAll(
               '.snapshot-sector-grid-complete .snapshot-item-flat'
             ).length,
@@ -275,9 +276,7 @@ for key in ("CN-1440", "US-1440", "CN-390", "US-390"):
     assert layout["marketCount"] == (6 if market == "CN" else 4), result
     assert layout["sectorCount"] == 11, result
     assert layout["aiMetricCount"] == 4, result
-    assert ("GICS" if market == "US" else "中证") in layout[
-        "sectorTaxonomy"
-    ], result
+    assert layout["secondaryHeadingNoteCount"] == 0, result
     if market == "US":
         assert layout["flatSectorCount"] == 1, result
         assert layout["flatSectorBorderTopWidth"] == "3px", result
