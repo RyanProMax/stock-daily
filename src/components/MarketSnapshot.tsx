@@ -4,14 +4,12 @@ import type {
   AiChainConstituent,
   AiChainMetric,
   AiChainUpdate,
-  AiChainView,
   DriverEvidence,
   Language,
   MarketDriver,
   MarketDirection,
   MarketMetric,
   MarketRegion,
-  DailyMarketView,
   SectorConstituent,
   SectorHeatMetric,
   SectorHeatView,
@@ -33,8 +31,6 @@ interface Props {
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
   aiChainPerformance?: AiChainMetric[];
-  aiChainView?: AiChainView;
-  marketView: DailyMarketView;
   drivers: MarketDriver[];
   aiUpdates: AiChainUpdate[];
   market: MarketRegion;
@@ -46,9 +42,7 @@ interface Props {
     aiChain: string;
     aiRange: string;
     streakDays: string;
-    compositeAnalysis: string;
-    verifiedSources: string;
-    representativeBasket: string;
+    highRelevance: string;
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
@@ -129,76 +123,75 @@ function SectorSnapshotItem({
   );
 }
 
-function uniqueEvidence(evidence: DriverEvidence[]) {
-  return [...new Map(evidence.map((item) => [item.source, item])).values()];
+interface SnapshotEvidenceItem {
+  title: string;
+  summary: string;
+  highRelevance: boolean;
+  evidence: DriverEvidence[];
 }
 
-function SnapshotAnalysis({
-  headline,
-  summary,
-  signals,
-  evidence,
-  tags,
+function sourceName(evidence: DriverEvidence) {
+  return evidence.platform === "x" && evidence.authorHandle
+    ? `X · @${evidence.authorHandle}`
+    : evidence.sourceLabel;
+}
+
+function SnapshotEvidenceList({
+  items,
   labels,
 }: {
-  headline: string;
-  summary: string;
-  signals: Array<{ title: string; detail: string }>;
-  evidence: DriverEvidence[];
-  tags: Array<{ label: string; direction: MarketDirection }>;
+  items: SnapshotEvidenceItem[];
   labels: Props["labels"];
 }) {
-  const sources = uniqueEvidence(evidence);
+  const evidenceItems = items
+    .filter((item) => item.evidence.length > 0)
+    .sort(
+      (left, right) => Number(right.highRelevance) - Number(left.highRelevance),
+    );
+  if (evidenceItems.length === 0) return null;
+
   const authorityLabels = {
     first_party: labels.sourceOfficial,
     specialist: labels.sourceSpecialist,
     expert: labels.sourceExpert,
   };
+
   return (
-    <section className="snapshot-analysis">
-      <div className="snapshot-analysis-main">
-        <span className="snapshot-analysis-eyebrow">{labels.compositeAnalysis}</span>
-        <h3>{headline}</h3>
-        <p>{summary}</p>
-        {signals.length > 0 && (
-          <ul>
-            {signals.slice(0, 3).map((signal) => (
-              <li key={`${signal.title}:${signal.detail}`}>
-                <strong>{signal.title}</strong>
-                <span>{signal.detail}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <aside className="snapshot-analysis-aside">
-        <div className="snapshot-analysis-tags">
-          {tags.slice(0, 4).map((tag) => (
-            <i className={`snapshot-analysis-tag market-direction-${tag.direction}`} key={tag.label}>
-              {tag.label}
-            </i>
-          ))}
-        </div>
-        {sources.length > 0 && (
-          <div className="snapshot-analysis-sources">
-            <strong>{labels.verifiedSources}</strong>
-            <span>
-              {sources.map((item) => (
-                <a href={item.source} target="_blank" rel="noreferrer" key={item.source}>
-                  {item.platform === "x" && item.authorHandle
-                    ? `X · @${item.authorHandle}`
-                    : item.sourceLabel}
-                  {item.platform === "x" && item.authority && (
-                    <small>{authorityLabels[item.authority]}</small>
-                  )}
-                  <ExternalLink aria-hidden="true" />
-                </a>
-              ))}
-            </span>
-          </div>
-        )}
-      </aside>
-    </section>
+    <ul className="snapshot-evidence-list">
+      {evidenceItems.map(({ evidence, title, summary, highRelevance }) => (
+        <li
+          className={highRelevance ? "snapshot-evidence-high" : undefined}
+          key={`${title}:${evidence.map((item) => item.source).join(":")}`}
+        >
+          <article>
+            <div className="snapshot-evidence-heading">
+              {highRelevance && <span>{labels.highRelevance}</span>}
+              <h3>{title}</h3>
+            </div>
+            <p>{summary}</p>
+            <div className="snapshot-evidence-sources">
+              {[...new Map(evidence.map((item) => [item.source, item])).values()].map(
+                (item) => (
+                  <a
+                    className="snapshot-evidence-source"
+                    href={item.source}
+                    target="_blank"
+                    rel="noreferrer"
+                    key={item.source}
+                  >
+                    <span>{sourceName(item)}</span>
+                    {item.platform === "x" && item.authority && (
+                      <small>{authorityLabels[item.authority]}</small>
+                    )}
+                    <ExternalLink aria-hidden="true" />
+                  </a>
+                ),
+              )}
+            </div>
+          </article>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -252,8 +245,6 @@ export default function MarketSnapshot({
   sectorView,
   sectorPerformance,
   aiChainPerformance,
-  aiChainView,
-  marketView,
   drivers,
   aiUpdates,
   market,
@@ -271,17 +262,24 @@ export default function MarketSnapshot({
   const aiChain = aiChainPerformance?.filter(
     (metric) => metric.market === market,
   );
-  const sectorLeaders = completeSectors?.slice(0, 2) ?? [];
-  const sectorLaggards = completeSectors?.slice(-2).reverse() ?? [];
-  const sectorHeadline = language === "en"
-    ? `${sectorLeaders.map((item) => item.nameEn).join(" and ")} led; ${sectorLaggards.map((item) => item.nameEn).join(" and ")} lagged`
-    : `${sectorLeaders.map((item) => item.name).join("、")}表现居前，${sectorLaggards.map((item) => item.name).join("、")}表现居后`;
-  const sectorSummary = drivers.length > 0
-    ? drivers.map((driver) => driver.mechanism).join(language === "en" ? " " : "")
-    : marketView.summary;
-  const driverEvidence = drivers.flatMap((driver) => driver.evidence);
-  const aiEvidence = aiUpdates.flatMap((update) => update.evidence);
-  const aiByLayer = new Map(aiChain?.map((metric) => [metric.layer, metric]));
+  const marketEvidence = drivers.map((driver) => ({
+    evidence: driver.evidence,
+    title: driver.title,
+    summary: driver.summary,
+    highRelevance: driver.role === "primary",
+  }));
+  const sectorEvidence = drivers.map((driver) => ({
+    evidence: driver.evidence,
+    title: driver.title,
+    summary: driver.mechanism,
+    highRelevance: driver.role === "primary",
+  }));
+  const aiEvidence = aiUpdates.map((update) => ({
+    evidence: update.evidence,
+    title: update.title,
+    summary: update.summary,
+    highRelevance: update.evidence.some((evidence) => evidence.platform !== "x"),
+  }));
 
   return (
     <div className="market-snapshot">
@@ -305,14 +303,7 @@ export default function MarketSnapshot({
             />
           ))}
         </div>
-        <SnapshotAnalysis
-          headline={marketView.headline}
-          summary={marketView.summary}
-          signals={drivers.map((driver) => ({ title: driver.title, detail: driver.summary }))}
-          evidence={driverEvidence}
-          tags={markets.slice(0, 4).map((item) => ({ label: `${item.name} ${item.change}`, direction: item.direction }))}
-          labels={labels}
-        />
+        <SnapshotEvidenceList items={marketEvidence} labels={labels} />
       </section>
 
       {completeSectors ? (
@@ -330,17 +321,7 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
-          <SnapshotAnalysis
-            headline={sectorHeadline}
-            summary={sectorSummary}
-            signals={drivers.map((driver) => ({ title: driver.title, detail: driver.mechanism }))}
-            evidence={driverEvidence}
-            tags={[...sectorLeaders, ...sectorLaggards].map((item) => ({
-              label: `${localizedName(item, language)} ${item.change}`,
-              direction: item.direction,
-            }))}
-            labels={labels}
-          />
+          <SnapshotEvidenceList items={sectorEvidence} labels={labels} />
         </section>
       ) : (
         <details
@@ -398,22 +379,7 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
-          {aiChainView && (
-            <SnapshotAnalysis
-              headline={aiChainView.headline}
-              summary={aiChainView.summary}
-              signals={aiUpdates.map((update) => ({ title: update.title, detail: update.implication }))}
-              evidence={aiEvidence}
-              tags={[
-                ...aiChainView.leaderLayers.map((layer) => aiByLayer.get(layer)),
-                ...aiChainView.laggardLayers.map((layer) => aiByLayer.get(layer)),
-              ].filter((metric): metric is AiChainMetric => Boolean(metric)).map((metric) => ({
-                label: `${language === "en" ? metric.nameEn : metric.name} ${metric.change}`,
-                direction: metric.direction,
-              }))}
-              labels={labels}
-            />
-          )}
+          <SnapshotEvidenceList items={aiEvidence} labels={labels} />
         </section>
       )}
     </div>

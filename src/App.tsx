@@ -437,8 +437,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
-          aiChainView={report.aiChainViews?.[data.market]}
-          marketView={marketView}
           drivers={marketDrivers}
           aiUpdates={marketAiUpdates}
           market={data.market}
@@ -455,9 +453,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
             aiRange:
               data.market === "US" ? t.aiChainRangeUS : t.aiChainRangeCN,
             streakDays: t.heatStreakDays,
-            compositeAnalysis: t.compositeAnalysis,
-            verifiedSources: t.verifiedSources,
-            representativeBasket: t.representativeBasket,
+            highRelevance: t.highRelevance,
             sourceOfficial: t.xSourceOfficial,
             sourceSpecialist: t.xSourceSpecialist,
             sourceExpert: t.xSourceExpert,
