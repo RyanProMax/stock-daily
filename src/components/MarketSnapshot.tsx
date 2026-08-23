@@ -46,7 +46,6 @@ interface Props {
     verifiedFact: string;
     marketTransmission: string;
     chainImpact: string;
-    sourceArticles: string;
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
@@ -200,33 +199,29 @@ function SnapshotEvidenceList({
             </p>
             <div className="snapshot-evidence-meta">
               <span className="snapshot-evidence-tag">{tag}</span>
-              <span
-                className="snapshot-evidence-sources"
-                aria-label={labels.sourceArticles}
-              >
-                {[
-                  ...new Map(
-                    evidence.map((item) => [item.source, item]),
-                  ).values(),
-                ].map((item) => (
-                  <a
-                    href={item.source}
-                    key={item.source}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={sourceTitle(item)}
-                  >
-                    <strong>{sourceName(item)}</strong>
-                    <time dateTime={item.publishedAt}>
-                      {evidenceTime(item.publishedAt, language, market)}
-                    </time>
-                    {item.platform === "x" && item.authority && (
-                      <small>{authorityLabels[item.authority]}</small>
-                    )}
-                    <ExternalLink aria-hidden="true" />
-                  </a>
-                ))}
-              </span>
+              {[
+                ...new Map(
+                  evidence.map((item) => [item.source, item]),
+                ).values(),
+              ].map((item) => (
+                <a
+                  className="snapshot-evidence-source"
+                  href={item.source}
+                  key={item.source}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={sourceTitle(item)}
+                >
+                  <strong>{sourceName(item)}</strong>
+                  <time dateTime={item.publishedAt}>
+                    {evidenceTime(item.publishedAt, language, market)}
+                  </time>
+                  {item.platform === "x" && item.authority && (
+                    <small>{authorityLabels[item.authority]}</small>
+                  )}
+                  <ExternalLink aria-hidden="true" />
+                </a>
+              ))}
             </div>
           </article>
         </li>

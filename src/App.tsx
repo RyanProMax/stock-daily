@@ -477,7 +477,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
             verifiedFact: t.verifiedFact,
             marketTransmission: t.marketTransmission,
             chainImpact: t.chainImpact,
-            sourceArticles: t.sourceArticles,
             sourceOfficial: t.xSourceOfficial,
             sourceSpecialist: t.xSourceSpecialist,
             sourceExpert: t.xSourceExpert,
