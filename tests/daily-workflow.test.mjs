@@ -6,6 +6,7 @@ import {
   normalizeTextKey,
   parseBeaReleases,
   parseFeed,
+  resolveAuditedNewsDate,
   selectNews,
   shouldHydrateFacts,
   usefulFacts,
@@ -1031,6 +1032,12 @@ test("news selection removes personal-finance and stock-pick noise", () => {
       "https://example.com/treasury-yields",
     ],
   );
+});
+
+test("weekend reports reuse the latest audited session for at most two days", () => {
+  assert.equal(resolveAuditedNewsDate("2026-08-22"), "2026-08-22");
+  assert.equal(resolveAuditedNewsDate("2026-08-23"), "2026-08-22");
+  assert.equal(resolveAuditedNewsDate("2026-08-25"), null);
 });
 
 test("structured feed parsing preserves Chinese stories and strips tracking", () => {

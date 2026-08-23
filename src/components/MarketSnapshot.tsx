@@ -1,6 +1,7 @@
 import { formatTemplate } from "../lib/i18n";
 import type {
   AiChainMetric,
+  AiChainView,
   Language,
   MarketDirection,
   MarketMetric,
@@ -25,6 +26,7 @@ interface Props {
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
   aiChainPerformance?: AiChainMetric[];
+  aiChainView?: AiChainView;
   market: MarketRegion;
   language: Language;
   labels: {
@@ -35,6 +37,42 @@ interface Props {
     aiRange: string;
     streakDays: string;
   };
+}
+
+function AiSnapshotItem({
+  metric,
+  language,
+}: {
+  metric: AiChainMetric;
+  language: Language;
+}) {
+  const changeLabel = language === "zh" ? `（${metric.change}）` : `(${metric.change})`;
+  return (
+    <article
+      className={`snapshot-item snapshot-item-ai snapshot-item-${metric.direction}`}
+    >
+      <div className="snapshot-item-top">
+        <a href={metric.source} target="_blank" rel="noreferrer">
+          {language === "en" ? metric.nameEn : metric.name}
+          <em>{changeLabel}</em>
+        </a>
+      </div>
+      {metric.constituents && (
+        <ul className="ai-constituent-list">
+          {metric.constituents.map((constituent) => (
+            <li key={constituent.symbol}>
+              <a href={constituent.source} target="_blank" rel="noreferrer">
+                <span>{language === "en" ? constituent.nameEn : constituent.name}</span>
+                <em className={`market-direction-${constituent.direction}`}>
+                  {constituent.change}
+                </em>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
+  );
 }
 
 function SnapshotItem({
@@ -87,6 +125,7 @@ export default function MarketSnapshot({
   sectorView,
   sectorPerformance,
   aiChainPerformance,
+  aiChainView,
   market,
   language,
   labels,
@@ -194,18 +233,17 @@ export default function MarketSnapshot({
             <strong>{labels.aiChain}</strong>
             <span>{labels.aiRange}</span>
           </header>
+          {aiChainView && (
+            <div className="ai-chain-read">
+              <strong>{aiChainView.headline}</strong>
+              <p>{aiChainView.summary}</p>
+            </div>
+          )}
           <div className="snapshot-grid snapshot-ai-grid">
             {aiChain.map((metric) => (
-              <SnapshotItem
+              <AiSnapshotItem
                 key={`${market}:${metric.layer}`}
-                name={language === "en" ? metric.nameEn : metric.name}
-                change={metric.change}
-                direction={metric.direction}
-                href={metric.source}
-                kind="ai"
-                detail={
-                  language === "en" ? metric.benchmarkEn : metric.benchmark
-                }
+                metric={metric}
                 language={language}
               />
             ))}

@@ -1,0 +1,90 @@
+[
+  {
+    "handle": "NVIDIA",
+    "label": "NVIDIA",
+    "authority": "first_party",
+    "markets": ["CN", "US"],
+    "layers": ["chips", "servers", "applications", "robotics"],
+    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/"
+  },
+  {
+    "handle": "NVIDIANetworkng",
+    "label": "NVIDIA Networking",
+    "authority": "first_party",
+    "markets": ["CN", "US"],
+    "layers": ["interconnect", "servers", "data_center"],
+    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/"
+  },
+  {
+    "handle": "AMD",
+    "label": "AMD",
+    "authority": "first_party",
+    "markets": ["CN", "US"],
+    "layers": ["chips", "servers"],
+    "identityEvidence": "https://www.amd.com/en/corporate/events/ces.html"
+  },
+  {
+    "handle": "MicronTech",
+    "label": "Micron Technology",
+    "authority": "first_party",
+    "markets": ["CN", "US"],
+    "layers": ["memory"],
+    "identityEvidence": "https://www.micron.com/"
+  },
+  {
+    "handle": "DellTech",
+    "label": "Dell Technologies",
+    "authority": "first_party",
+    "markets": ["US"],
+    "layers": ["servers"],
+    "identityEvidence": "https://www.dell.com/en-us/lp/dt/social-media"
+  },
+  {
+    "handle": "CoreWeave",
+    "label": "CoreWeave",
+    "authority": "first_party",
+    "markets": ["US"],
+    "layers": ["cloud", "data_center"],
+    "identityEvidence": "https://investors.coreweave.com/financials/quarterly-results/default.aspx"
+  },
+  {
+    "handle": "Vertiv",
+    "label": "Vertiv",
+    "authority": "first_party",
+    "markets": ["US"],
+    "layers": ["data_center"],
+    "identityEvidence": "https://www.vertiv.com/en-us/about/news-and-insights/social-media/"
+  },
+  {
+    "handle": "figure_robot",
+    "label": "Figure",
+    "authority": "first_party",
+    "markets": ["US"],
+    "layers": ["robotics"],
+    "identityEvidence": "https://www.figure.ai/"
+  },
+  {
+    "handle": "SemiAnalysis_",
+    "label": "SemiAnalysis",
+    "authority": "specialist",
+    "markets": ["CN", "US"],
+    "layers": ["chips", "memory", "servers", "interconnect", "data_center", "cloud"],
+    "identityEvidence": "https://semianalysis.com/"
+  },
+  {
+    "handle": "trendforce",
+    "label": "TrendForce",
+    "authority": "specialist",
+    "markets": ["CN", "US"],
+    "layers": ["chips", "memory", "servers", "data_center"],
+    "identityEvidence": "https://www.trendforce.com/"
+  },
+  {
+    "handle": "xiaomustock",
+    "label": "小木",
+    "authority": "expert",
+    "markets": ["CN", "US"],
+    "layers": ["chips", "memory", "servers", "interconnect", "data_center", "cloud", "applications", "robotics"],
+    "identityEvidence": "https://x.com/xiaomustock"
+  }
+]

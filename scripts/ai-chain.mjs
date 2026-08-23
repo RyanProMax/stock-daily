@@ -3,86 +3,146 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const cnBenchmarks = [
+const layerDefinitions = [
+  { layer: "chips", name: "芯片与设备", nameEn: "Chips & equipment" },
+  { layer: "memory", name: "存储", nameEn: "Memory" },
   {
-    layer: "chips",
-    name: "芯片与设备",
-    nameEn: "Chips & equipment",
-    benchmark: "中证半导体产业指数",
-    benchmarkEn: "CSI Semiconductor Industry Index",
-    symbol: "931865",
+    layer: "servers",
+    name: "服务器与算力设备",
+    nameEn: "Servers & compute systems",
   },
   {
     layer: "interconnect",
-    name: "光互连与网络",
-    nameEn: "Optical interconnects & networks",
-    benchmark: "中证5G通信主题指数",
-    benchmarkEn: "CSI 5G Communication Theme Index",
-    symbol: "931079",
+    name: "CPO / 光互连",
+    nameEn: "CPO / optical interconnects",
   },
   {
-    layer: "infrastructure",
-    name: "云与算力基础设施",
-    nameEn: "Cloud & compute infrastructure",
-    benchmark: "中证云计算与大数据主题指数",
-    benchmarkEn: "CSI Cloud Computing & Big Data Theme Index",
-    symbol: "930851",
+    layer: "data_center",
+    name: "数据中心电力与液冷",
+    nameEn: "Data-center power & cooling",
+  },
+  {
+    layer: "cloud",
+    name: "云计算 / NeoCloud",
+    nameEn: "Cloud / NeoCloud",
   },
   {
     layer: "applications",
-    name: "软件与应用",
-    nameEn: "Software & applications",
-    benchmark: "中证软件服务指数",
-    benchmarkEn: "CSI Software Services Index",
-    symbol: "930601",
+    name: "AI 软件与应用",
+    nameEn: "AI software & applications",
   },
+  { layer: "robotics", name: "机器人", nameEn: "Robotics" },
 ];
 
-const usBenchmarks = [
-  {
-    layer: "chips",
-    name: "芯片与设备",
-    nameEn: "Chips & equipment",
-    benchmark: "SOXX ETF 代理",
-    benchmarkEn: "SOXX ETF proxy",
-    symbol: "SOXX",
+const constituentsByMarket = {
+  CN: {
+    chips: [
+      ["688981.SS", "中芯国际", "SMIC"],
+      ["002371.SZ", "北方华创", "NAURA Technology"],
+      ["688041.SS", "海光信息", "Hygon Information"],
+      ["688256.SS", "寒武纪", "Cambricon"],
+    ],
+    memory: [
+      ["603986.SS", "兆易创新", "GigaDevice"],
+      ["301308.SZ", "江波龙", "Longsys"],
+      ["300223.SZ", "北京君正", "Ingenic Semiconductor"],
+      ["688110.SS", "东芯股份", "Dosilicon"],
+    ],
+    servers: [
+      ["000977.SZ", "浪潮信息", "Inspur Electronic Information"],
+      ["603019.SS", "中科曙光", "Sugon"],
+      ["601138.SS", "工业富联", "FII"],
+      ["000938.SZ", "紫光股份", "Unisplendour"],
+    ],
+    interconnect: [
+      ["300308.SZ", "中际旭创", "InnoLight"],
+      ["300502.SZ", "新易盛", "Eoptolink"],
+      ["300394.SZ", "天孚通信", "TFC Optical Communication"],
+      ["002281.SZ", "光迅科技", "Accelink"],
+    ],
+    data_center: [
+      ["002335.SZ", "科华数据", "Kehua Data"],
+      ["300442.SZ", "润泽科技", "Range Technology"],
+      ["002837.SZ", "英维克", "Envicool"],
+      ["300738.SZ", "奥飞数据", "Aofei Data"],
+    ],
+    cloud: [
+      ["300846.SZ", "首都在线", "Capitalonline Data Service"],
+      ["688158.SS", "优刻得", "UCloud"],
+      ["600602.SS", "云赛智联", "INESA Intelligent Tech"],
+      ["002929.SZ", "润建股份", "Runjian"],
+    ],
+    applications: [
+      ["002230.SZ", "科大讯飞", "iFlytek"],
+      ["688111.SS", "金山办公", "Kingsoft Office"],
+      ["600588.SS", "用友网络", "Yonyou"],
+      ["601360.SS", "三六零", "360 Security Technology"],
+    ],
+    robotics: [
+      ["300124.SZ", "汇川技术", "Inovance"],
+      ["688017.SS", "绿的谐波", "Leader Harmonious Drive"],
+      ["002747.SZ", "埃斯顿", "Estun Automation"],
+      ["002472.SZ", "双环传动", "Shuanghuan Driveline"],
+    ],
   },
-  {
-    layer: "interconnect",
-    name: "网络与连接",
-    nameEn: "Networks & connectivity",
-    benchmark: "IYZ ETF 代理",
-    benchmarkEn: "IYZ ETF proxy",
-    symbol: "IYZ",
+  US: {
+    chips: [
+      ["NVDA", "英伟达", "NVIDIA"],
+      ["AMD", "AMD", "AMD"],
+      ["AVGO", "博通", "Broadcom"],
+      ["TSM", "台积电 ADR", "TSMC ADR"],
+    ],
+    memory: [
+      ["MU", "美光", "Micron"],
+      ["WDC", "西部数据", "Western Digital"],
+      ["STX", "希捷", "Seagate"],
+      ["SNDK", "闪迪", "Sandisk"],
+    ],
+    servers: [
+      ["SMCI", "超微电脑", "Super Micro Computer"],
+      ["DELL", "戴尔科技", "Dell Technologies"],
+      ["HPE", "慧与", "Hewlett Packard Enterprise"],
+      ["VRT", "维谛技术", "Vertiv"],
+    ],
+    interconnect: [
+      ["ANET", "Arista Networks", "Arista Networks"],
+      ["AVGO", "博通", "Broadcom"],
+      ["LITE", "Lumentum", "Lumentum"],
+      ["COHR", "Coherent", "Coherent"],
+    ],
+    data_center: [
+      ["VRT", "维谛技术", "Vertiv"],
+      ["ETN", "伊顿", "Eaton"],
+      ["GEV", "GE Vernova", "GE Vernova"],
+      ["PWR", "Quanta Services", "Quanta Services"],
+    ],
+    cloud: [
+      ["CRWV", "CoreWeave", "CoreWeave"],
+      ["NBIS", "Nebius", "Nebius"],
+      ["IREN", "IREN", "IREN"],
+      ["CORZ", "Core Scientific", "Core Scientific"],
+    ],
+    applications: [
+      ["PLTR", "Palantir", "Palantir"],
+      ["APP", "AppLovin", "AppLovin"],
+      ["SNOW", "Snowflake", "Snowflake"],
+      ["CRM", "Salesforce", "Salesforce"],
+    ],
+    robotics: [
+      ["TSLA", "特斯拉", "Tesla"],
+      ["ISRG", "直觉外科", "Intuitive Surgical"],
+      ["SYM", "Symbotic", "Symbotic"],
+      ["TER", "泰瑞达", "Teradyne"],
+    ],
   },
-  {
-    layer: "infrastructure",
-    name: "数据中心基础设施",
-    nameEn: "Data-center infrastructure",
-    benchmark: "SRVR ETF 代理",
-    benchmarkEn: "SRVR ETF proxy",
-    symbol: "SRVR",
-  },
-  {
-    layer: "applications",
-    name: "云与软件",
-    nameEn: "Cloud & software",
-    benchmark: "SKYY ETF 代理",
-    benchmarkEn: "SKYY ETF proxy",
-    symbol: "SKYY",
-  },
-];
+};
 
 function directionForChange(change) {
   if (Math.abs(change) < 0.005) return "flat";
   return change > 0 ? "up" : "down";
 }
 
-function compactDate(timestamp) {
-  return new Date(timestamp).toISOString().slice(0, 10).replaceAll("-", "");
-}
-
-async function fetchJson(url, referer) {
+async function fetchJson(url) {
   const result = await execFileAsync(
     "curl",
     [
@@ -100,7 +160,7 @@ async function fetchJson(url, referer) {
       "--header",
       "Accept: application/json, text/plain, */*",
       "--header",
-      `Referer: ${referer}`,
+      "Referer: https://finance.yahoo.com/",
       "--user-agent",
       "Mozilla/5.0 StockDaily/1.0",
       url.toString(),
@@ -110,70 +170,20 @@ async function fetchJson(url, referer) {
   return JSON.parse(result.stdout);
 }
 
-function formatMetric(benchmark, market, change, asOf, source) {
-  return {
-    market,
-    ...benchmark,
-    benchmarkKind: market === "CN" ? "index" : "etf_proxy",
-    change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
-    direction: directionForChange(change),
-    asOf,
-    source,
-  };
-}
-
-async function fetchCnMetric(benchmark, cutoffTime) {
-  const url = new URL("https://www.csindex.com.cn/csindex-home/perf/index-perf");
-  url.search = new URLSearchParams({
-    indexCode: benchmark.symbol,
-    startDate: compactDate(cutoffTime - 10 * 24 * 60 * 60 * 1_000),
-    endDate: compactDate(cutoffTime),
-  });
-  const payload = await fetchJson(url, "https://www.csindex.com.cn/");
-  const latest = Array.isArray(payload.data)
-    ? payload.data
-        .map((row) => ({
-          date: String(row.tradeDate).replace(
-            /^(\d{4})(\d{2})(\d{2})$/,
-            "$1-$2-$3",
-          ),
-          change: Number(row.changePct),
-        }))
-        .filter(
-          (point) =>
-            /^\d{4}-\d{2}-\d{2}$/.test(point.date) &&
-            Number.isFinite(point.change) &&
-            Date.parse(`${point.date}T23:59:59Z`) <= cutoffTime,
-        )
-        .sort((left, right) => left.date.localeCompare(right.date))
-        .at(-1)
-    : null;
-  if (payload.code !== "200" || !latest) {
-    throw new Error(`${benchmark.symbol}: CSI AI-chain history unavailable`);
-  }
-  return formatMetric(
-    benchmark,
-    "CN",
-    latest.change,
-    latest.date,
-    `https://www.csindex.com.cn/#/indices/family/detail?indexCode=${benchmark.symbol}`,
-  );
-}
-
-async function fetchUsMetric(benchmark, cutoffTime) {
+async function fetchConstituent([symbol, name, nameEn], cutoffTime) {
   let lastError = "request failed";
   for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     const url = new URL(
-      `https://${host}/v8/finance/chart/${encodeURIComponent(benchmark.symbol)}`,
+      `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`,
     );
     url.searchParams.set(
       "period1",
-      String(Math.floor((cutoffTime - 10 * 24 * 60 * 60 * 1_000) / 1_000)),
+      String(Math.floor((cutoffTime - 14 * 24 * 60 * 60 * 1_000) / 1_000)),
     );
     url.searchParams.set("period2", String(Math.floor(cutoffTime / 1_000)));
     url.searchParams.set("interval", "1d");
     try {
-      const payload = await fetchJson(url, "https://finance.yahoo.com/");
+      const payload = await fetchJson(url);
       const result = payload?.chart?.result?.[0];
       const timestamps = result?.timestamp ?? [];
       const closes = result?.indicators?.quote?.[0]?.close ?? [];
@@ -194,34 +204,96 @@ async function fetchUsMetric(benchmark, cutoffTime) {
       const previous = points.at(-2);
       const latest = points.at(-1);
       const change = ((latest.close - previous.close) / previous.close) * 100;
-      return formatMetric(
-        benchmark,
-        "US",
-        change,
-        new Date(latest.timestamp).toISOString().slice(0, 10),
-        `https://finance.yahoo.com/quote/${benchmark.symbol}/history`,
-      );
+      return {
+        symbol,
+        name,
+        nameEn,
+        change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
+        changeValue: change,
+        direction: directionForChange(change),
+        asOf: new Date(latest.timestamp).toISOString().slice(0, 10),
+        source: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/history`,
+      };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "request failed";
     }
   }
-  throw new Error(`${benchmark.symbol}: ${lastError}`);
+  throw new Error(`${symbol}: ${lastError}`);
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await mapper(items[index], index);
+      }
+    }),
+  );
+  return results;
+}
+
+function formatMetric(definition, market, constituents) {
+  const dates = [...new Set(constituents.map((item) => item.asOf))];
+  if (constituents.length !== 4 || dates.length !== 1) {
+    throw new Error(
+      `${market} ${definition.layer}: 代表篮子必须有 4 个同交易日成分`,
+    );
+  }
+  const change =
+    constituents.reduce((sum, item) => sum + item.changeValue, 0) /
+    constituents.length;
+  return {
+    market,
+    ...definition,
+    benchmark: "4只代表标的等权篮子",
+    benchmarkEn: "Equal-weight basket of 4 representative stocks",
+    benchmarkKind: "equal_weight_basket",
+    symbol: `AI-${market}-${definition.layer}`,
+    change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
+    direction: directionForChange(change),
+    asOf: dates[0],
+    source: "https://finance.yahoo.com/markets/stocks/",
+    constituents: constituents.map(({ changeValue: _changeValue, ...item }) => item),
+  };
 }
 
 export async function collectAiChainPerformance(cutoffTime) {
   if (!Number.isFinite(cutoffTime)) {
     throw new Error("cutoffTime must be a finite timestamp");
   }
-  const [cn, us] = await Promise.all([
-    Promise.all(cnBenchmarks.map((benchmark) => fetchCnMetric(benchmark, cutoffTime))),
-    Promise.all(usBenchmarks.map((benchmark) => fetchUsMetric(benchmark, cutoffTime))),
-  ]);
-  return [...cn, ...us];
+  const requests = ["CN", "US"].flatMap((market) =>
+    layerDefinitions.flatMap((definition) =>
+      constituentsByMarket[market][definition.layer].map((constituent) => ({
+        market,
+        layer: definition.layer,
+        constituent,
+      })),
+    ),
+  );
+  const quoted = await mapWithConcurrency(requests, 8, async (request) => ({
+    ...request,
+    quote: await fetchConstituent(request.constituent, cutoffTime),
+  }));
+  return ["CN", "US"].flatMap((market) =>
+    layerDefinitions.map((definition) =>
+      formatMetric(
+        definition,
+        market,
+        quoted
+          .filter(
+            (item) =>
+              item.market === market && item.layer === definition.layer,
+          )
+          .map((item) => item.quote),
+      ),
+    ),
+  );
 }
 
-export const AI_CHAIN_LAYERS = [
-  "chips",
-  "interconnect",
-  "infrastructure",
-  "applications",
-];
+export const AI_CHAIN_LAYERS = layerDefinitions.map(({ layer }) => layer);
+export const AI_CHAIN_LAYER_DEFINITIONS = layerDefinitions;
+export const AI_CHAIN_CONSTITUENTS = constituentsByMarket;

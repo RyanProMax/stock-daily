@@ -103,7 +103,9 @@ const v9Invalid =
         metric.symbol !== input.aiChainPerformance[index]?.symbol ||
         metric.asOf !== input.aiChainPerformance[index]?.asOf ||
         metric.change !== input.aiChainPerformance[index]?.change ||
-        metric.direction !== input.aiChainPerformance[index]?.direction,
+        metric.direction !== input.aiChainPerformance[index]?.direction ||
+        JSON.stringify(metric.constituents) !==
+          JSON.stringify(input.aiChainPerformance[index]?.constituents),
     ) ||
     report?.drivers?.length !== expectedReport.drivers.length ||
     report.drivers.some((driver, index) => {
@@ -151,6 +153,13 @@ const v9Invalid =
           expectedReport.marketViews[market][key],
       ),
     ) ||
+    ["CN", "US"].some((market) =>
+      ["headline", "summary", "driverStatus"].some(
+        (key) =>
+          report.aiChainViews?.[market]?.[key] !==
+          expectedReport.aiChainViews[market][key],
+      ),
+    ) ||
     report.headline !== expectedReport.headline ||
     report.summary !== expectedReport.summary ||
     report.translations?.en?.headline !==
@@ -162,6 +171,13 @@ const v9Invalid =
         (key) =>
           report.translations?.en?.marketViews?.[market]?.[key] !==
           expectedReport.translations.en.marketViews[market][key],
+      ),
+    ) ||
+    ["CN", "US"].some((market) =>
+      ["headline", "summary"].some(
+        (key) =>
+          report.translations?.en?.aiChainViews?.[market]?.[key] !==
+          expectedReport.translations.en.aiChainViews[market][key],
       ),
     ) ||
     report.translations?.en?.drivers?.length !==

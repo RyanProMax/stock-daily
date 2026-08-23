@@ -46,9 +46,9 @@ export const copy = {
     sectorPerformance: "行业表现",
     sectorPerformanceRangeCN: "中证一级行业 · 11 类全覆盖",
     sectorPerformanceRangeUS: "GICS 行业板块 · 11 类全覆盖",
-    aiChainPerformance: "AI 产业链",
-    aiChainRangeCN: "中证主题指数 · 当日表现",
-    aiChainRangeUS: "行业 ETF 代理 · 当日表现",
+    aiChainPerformance: "AI Alpha · 产业链表现",
+    aiChainRangeCN: "统一 8 层口径 · 4 只代表标的等权篮子",
+    aiChainRangeUS: "统一 8 层口径 · 4 只代表标的等权篮子",
     heatStreak: "连续大幅波动",
     heatStreakDays: "连续 {count} 个交易日",
     noHeatStreak: "暂无连续两个交易日大幅波动的板块",
@@ -134,12 +134,15 @@ export const copy = {
     noWeekly: "首份周报将在周日晚上生成。",
     noMarketNews: "本期暂无该市场的已核验新闻。",
     marketAttribution: "盘面归因",
-    aiChainNews: "AI 产业链动态",
+    aiChainNews: "AI Alpha 归因",
     driverEvent: "发生了什么",
     driverMechanism: "如何影响盘面",
     driverSectors: "对应行业",
     driverEvidence: "核验来源",
     aiChainImplication: "产业链影响",
+    xSourceOfficial: "官方",
+    xSourceSpecialist: "专业研究",
+    xSourceExpert: "行业专家",
   },
   en: {
     skip: "Skip to content",
@@ -177,9 +180,9 @@ export const copy = {
     sectorPerformance: "Sector Performance",
     sectorPerformanceRangeCN: "CSI level-one sectors · all 11",
     sectorPerformanceRangeUS: "GICS sectors · all 11",
-    aiChainPerformance: "AI Supply Chain",
-    aiChainRangeCN: "CSI thematic indexes · daily move",
-    aiChainRangeUS: "Sector ETF proxies · daily move",
+    aiChainPerformance: "AI Alpha · Supply-chain Performance",
+    aiChainRangeCN: "Unified 8-layer taxonomy · equal-weight basket of 4 stocks",
+    aiChainRangeUS: "Unified 8-layer taxonomy · equal-weight basket of 4 stocks",
     heatStreak: "Sustained Large Moves",
     heatStreakDays: "{count} trading days",
     noHeatStreak: "No sector has made a large move for two trading days.",
@@ -265,12 +268,15 @@ export const copy = {
     noWeekly: "The first weekly report will be generated on Sunday evening.",
     noMarketNews: "No verified news is available for this market in this edition.",
     marketAttribution: "Market Attribution",
-    aiChainNews: "AI Supply-chain Developments",
+    aiChainNews: "AI Alpha Attribution",
     driverEvent: "What happened",
     driverMechanism: "Market transmission",
     driverSectors: "Affected sectors",
     driverEvidence: "Verified sources",
     aiChainImplication: "Supply-chain impact",
+    xSourceOfficial: "Official",
+    xSourceSpecialist: "Specialist research",
+    xSourceExpert: "Industry expert",
   },
 } as const;
 
@@ -377,6 +383,24 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       ];
     }),
   ) as DailyReport["marketViews"];
+  const aiChainViews = report.aiChainViews
+    ? (Object.fromEntries(
+        (["CN", "US"] as MarketRegion[]).map((market) => {
+          const view = report.aiChainViews?.[market];
+          const translatedView = translation?.aiChainViews?.[market];
+          return [
+            market,
+            view
+              ? {
+                  ...view,
+                  headline: translatedView?.headline ?? view.headline,
+                  summary: translatedView?.summary ?? view.summary,
+                }
+              : view,
+          ];
+        }),
+      ) as DailyReport["aiChainViews"])
+    : undefined;
 
   return {
     ...report,
@@ -390,6 +414,7 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       negative: translation?.overview.negative ?? overview.negative,
     },
     marketViews,
+    aiChainViews,
     markets: report.markets.map((market) => ({
       ...market,
       name: marketNames[market.symbol ?? ""]?.[language] ?? market.name,

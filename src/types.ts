@@ -25,9 +25,13 @@ export type DriverStatus = "explained" | "partial" | "unattributed";
 export type DriverRole = "primary" | "secondary";
 export type AiChainLayer =
   | "chips"
+  | "memory"
+  | "servers"
   | "interconnect"
-  | "infrastructure"
-  | "applications";
+  | "data_center"
+  | "cloud"
+  | "applications"
+  | "robotics";
 
 export interface MarketMetric {
   region: MarketRegion;
@@ -61,12 +65,32 @@ export interface AiChainMetric {
   nameEn: string;
   benchmark: string;
   benchmarkEn: string;
-  benchmarkKind: "index" | "etf_proxy";
+  benchmarkKind: "index" | "etf_proxy" | "equal_weight_basket";
   symbol: string;
   change: string;
   direction: MarketDirection;
   asOf: string;
   source: string;
+  constituents?: AiChainConstituent[];
+}
+
+export interface AiChainConstituent {
+  symbol: string;
+  name: string;
+  nameEn: string;
+  change: string;
+  direction: MarketDirection;
+  asOf: string;
+  source: string;
+}
+
+export interface AiChainView {
+  headline: string;
+  summary: string;
+  driverStatus: DriverStatus;
+  leaderLayers: AiChainLayer[];
+  laggardLayers: AiChainLayer[];
+  driverIds: string[];
 }
 
 export interface SectorHeatDay {
@@ -215,6 +239,9 @@ export interface DriverEvidence {
   sourceLabel: string;
   publishedAt: string;
   kind: "event" | "market_wrap";
+  platform?: "web" | "x";
+  authority?: "first_party" | "specialist" | "expert";
+  authorHandle?: string;
 }
 
 export interface MarketDriver {
@@ -268,6 +295,7 @@ export interface DailyReport {
   summary: string;
   overview: MarketOverview | string[];
   marketViews: Record<MarketRegion, DailyMarketView>;
+  aiChainViews?: Record<MarketRegion, AiChainView>;
   markets: MarketMetric[];
   sectorHeat: SectorHeatMetric[];
   sectorPerformance?: SectorHeatMetric[];
@@ -292,6 +320,7 @@ export interface DailyReportTranslation {
       overview: Omit<MarketOverview, "tone">;
     }
   >;
+  aiChainViews?: Record<MarketRegion, Pick<AiChainView, "headline" | "summary">>;
   stories: Array<{
     title: string;
     summary: string;

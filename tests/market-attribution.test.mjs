@@ -50,9 +50,13 @@ function performanceRows() {
 function aiChainRows() {
   const layers = [
     ["chips", "芯片与设备", "Chips & equipment"],
-    ["interconnect", "光互连与网络", "Optical interconnects & networks"],
-    ["infrastructure", "云与算力基础设施", "Cloud & compute infrastructure"],
-    ["applications", "软件与应用", "Software & applications"],
+    ["memory", "存储", "Memory"],
+    ["servers", "服务器与算力设备", "Servers & compute systems"],
+    ["interconnect", "CPO / 光互连", "CPO / optical interconnects"],
+    ["data_center", "数据中心电力与液冷", "Data-center power & cooling"],
+    ["cloud", "云计算 / NeoCloud", "Cloud / NeoCloud"],
+    ["applications", "AI 软件与应用", "AI software & applications"],
+    ["robotics", "机器人", "Robotics"],
   ];
   return ["CN", "US"].flatMap((market) =>
     layers.map(([layer, name, nameEn], index) => ({
@@ -60,14 +64,23 @@ function aiChainRows() {
       layer,
       name,
       nameEn,
-      benchmark: market === "CN" ? `中证AI环节${index + 1}` : `ETF${index + 1} 代理`,
-      benchmarkEn: market === "CN" ? `CSI AI layer ${index + 1}` : `ETF${index + 1} proxy`,
-      benchmarkKind: market === "CN" ? "index" : "etf_proxy",
-      symbol: market === "CN" ? `93060${index}` : ["SOXX", "IYZ", "SRVR", "SKYY"][index],
+      benchmark: "4只代表标的等权篮子",
+      benchmarkEn: "Equal-weight basket of 4 representative stocks",
+      benchmarkKind: "equal_weight_basket",
+      symbol: `AI-${market}-${layer}`,
       change: index % 2 === 0 ? "+1.00%" : "-0.50%",
       direction: index % 2 === 0 ? "up" : "down",
       asOf: "2026-08-21",
       source: `https://example.com/ai/${market}/${layer}`,
+      constituents: Array.from({ length: 4 }, (_, constituentIndex) => ({
+        symbol: `${market}${index}${constituentIndex}`,
+        name: `标的${index}${constituentIndex}`,
+        nameEn: `Stock ${index}${constituentIndex}`,
+        change: constituentIndex % 2 === 0 ? "+1.00%" : "-0.50%",
+        direction: constituentIndex % 2 === 0 ? "up" : "down",
+        asOf: "2026-08-21",
+        source: `https://example.com/ai/${market}/${layer}/${constituentIndex}`,
+      })),
     })),
   );
 }
@@ -176,6 +189,18 @@ function fixtureReport() {
         driverStatus: "partial",
       },
     },
+    aiChainViews: {
+      CN: {
+        headline: "CPO / 光互连走强，AI链上行",
+        summary: "CPO业绩兑现与技术路线进展对应光互连代表篮子走强，但其他环节表现仍有分化。",
+        driverStatus: "explained",
+      },
+      US: {
+        headline: "AI 软件与应用走强，云计算 / NeoCloud走弱",
+        summary: "美国AI代表篮子涨跌分化，未发现单一消息主导各产业层的当日表现。",
+        driverStatus: "unattributed",
+      },
+    },
     drivers: [
       {
         market: "CN", role: "primary", direction: "positive",
@@ -216,6 +241,16 @@ function fixtureReport() {
             summary: "Mining shares supported equities while activity also lifted long yields, leaving only a partial attribution.",
           },
         },
+        aiChainViews: {
+          CN: {
+            headline: "CPO / optical interconnects rose as China's AI basket advanced",
+            summary: "CPO earnings delivery and a clearer technology roadmap matched strength in the optical-interconnect basket.",
+          },
+          US: {
+            headline: "AI software rose while Cloud / NeoCloud lagged",
+            summary: "U.S. AI baskets diverged and no single verified catalyst dominated the day across layers.",
+          },
+        },
         drivers: [
           {
             title: "Precious metals and lithium advanced",
@@ -253,7 +288,7 @@ test("market sessions use each venue close and allow wraps for two hours", () =>
 test("V9 keeps all eleven sectors and accepts distinct local drivers", () => {
   const input = validateInput(fixtureInput());
   assert.equal(input.sectorPerformance.filter((item) => item.market === "CN").length, 11);
-  assert.equal(input.aiChainPerformance.filter((item) => item.market === "CN").length, 4);
+  assert.equal(input.aiChainPerformance.filter((item) => item.market === "CN").length, 8);
   assert.equal(sectorExtremes(input.sectorPerformance, "US").leaders.length, 3);
   const report = validateReport(fixtureReport(), input);
   assert.equal(report.drivers.length, 2);
@@ -289,6 +324,15 @@ test("V9 permits zero drivers but rejects generic headlines", () => {
   report.translations.en.drivers = [];
   report.aiChainUpdates = [];
   report.translations.en.aiChainUpdates = [];
+  report.aiChainViews.CN = {
+    headline: "CPO / 光互连走强，AI链上行",
+    summary: "AI代表篮子涨跌分化，未发现单一消息主导各产业层的当日表现。",
+    driverStatus: "unattributed",
+  };
+  report.translations.en.aiChainViews.CN = {
+    headline: "CPO / optical interconnects rose as China's AI basket advanced",
+    summary: "AI baskets diverged and no single verified catalyst dominated the day across layers.",
+  };
   report.translations.en.marketViews.CN.headline = "Materials led as Chinese stocks rose";
   report.translations.en.marketViews.US.headline = "Materials led as U.S. stocks rose";
   report.translations.en.headline = "Materials led as Chinese and U.S. stocks rose";
@@ -307,4 +351,32 @@ test("V9 rejects a pure US item as a CN driver and rejects opposite sector direc
   opposite.drivers[0].direction = "negative";
   opposite.drivers[0].sectorSymbols = ["932078"];
   assert.throws(() => validateReport(opposite, input), /行业涨跌方向不一致/);
+});
+
+test("AI attribution requires a non-X source whenever an X post is cited", () => {
+  const rawInput = fixtureInput();
+  rawInput.news.push({
+    title: "@NVIDIANetworkng：CPO optical interconnect roadmap update",
+    facts: "NVIDIA Networking published a detailed CPO optical interconnect roadmap update covering bandwidth, latency, thermal management and manufacturing constraints for AI systems.",
+    url: "https://x.com/NVIDIANetworkng/status/1234567890",
+    source: "NVIDIA Networking",
+    publishedAt: "2026-08-21T05:30:00.000Z",
+    regions: ["CN"],
+    kind: "event",
+    platform: "x",
+    authority: "first_party",
+    authorHandle: "NVIDIANetworkng",
+  });
+  rawInput.newsDiagnostics.selectedByMarket.CN = 3;
+  const input = validateInput(rawInput);
+  const xOnly = fixtureReport();
+  xOnly.aiChainUpdates[0].evidenceIndexes = [3];
+  assert.throws(
+    () => validateReport(xOnly, input),
+    /必须包含非 X 交叉验证来源/,
+  );
+
+  const corroborated = fixtureReport();
+  corroborated.aiChainUpdates[0].evidenceIndexes = [2, 3];
+  assert.equal(validateReport(corroborated, input).aiChainUpdates.length, 1);
 });

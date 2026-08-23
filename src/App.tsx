@@ -438,6 +438,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
+          aiChainView={report.aiChainViews?.[data.market]}
           market={data.market}
           language={language}
           labels={{
@@ -462,6 +463,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
           <MarketDrivers
             drivers={marketDrivers}
             aiUpdates={marketAiUpdates}
+            aiMetrics={(report.aiChainPerformance ?? []).filter(
+              (metric) => metric.market === data.market,
+            )}
             sectors={(report.sectorPerformance ?? []).filter(
               (sector) => sector.market === data.market,
             )}
@@ -474,6 +478,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
               sectors: t.driverSectors,
               evidence: t.driverEvidence,
               aiImplication: t.aiChainImplication,
+              sourceOfficial: t.xSourceOfficial,
+              sourceSpecialist: t.xSourceSpecialist,
+              sourceExpert: t.xSourceExpert,
             }}
           />
         ) : (

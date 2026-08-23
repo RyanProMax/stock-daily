@@ -541,7 +541,7 @@ function validateSectorRows(rows, expectedPerMarket, label) {
 
 function validateAiChainRows(rows) {
   if (!Array.isArray(rows) || rows.length !== AI_CHAIN_LAYERS.length * 2) {
-    throw new Error("aiChainPerformance 必须分别包含 4 个 CN 与 US 环节");
+    throw new Error("aiChainPerformance 必须分别包含 8 个 CN 与 US 环节");
   }
   for (const market of ["CN", "US"]) {
     const marketRows = rows.filter((row) => row?.market === market);
@@ -570,15 +570,42 @@ function validateAiChainRows(rows) {
         typeof metric.nameEn !== "string" || metric.nameEn.length < 4 ||
         typeof metric.benchmark !== "string" || metric.benchmark.length < 3 ||
         typeof metric.benchmarkEn !== "string" || metric.benchmarkEn.length < 4 ||
-        !["index", "etf_proxy"].includes(metric.benchmarkKind) ||
-        (market === "CN" && metric.benchmarkKind !== "index") ||
-        (market === "US" && metric.benchmarkKind !== "etf_proxy") ||
-        typeof metric.symbol !== "string" || !/^[A-Z0-9]{2,10}$/.test(metric.symbol) ||
+        metric.benchmarkKind !== "equal_weight_basket" ||
+        typeof metric.symbol !== "string" || !/^AI-(?:CN|US)-[a-z_]+$/.test(metric.symbol) ||
         !Number.isFinite(change) || metric.direction !== direction ||
         !/^\d{4}-\d{2}-\d{2}$/.test(metric.asOf) ||
-        typeof metric.source !== "string" || !metric.source.startsWith("https://")
+        typeof metric.source !== "string" || !metric.source.startsWith("https://") ||
+        !Array.isArray(metric.constituents) || metric.constituents.length !== 4
       ) {
         throw new Error(`aiChainPerformance.${market}.${layer} 字段无效`);
+      }
+      const constituentSymbols = new Set();
+      for (const constituent of metric.constituents) {
+        const constituentChange = typeof constituent?.change === "string"
+          ? constituent.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
+          : null;
+        const constituentValue = constituentChange
+          ? Number(constituentChange[1])
+          : Number.NaN;
+        const constituentDirection = Math.abs(constituentValue) < 0.005
+          ? "flat"
+          : constituentValue > 0
+            ? "up"
+            : "down";
+        if (
+          typeof constituent?.symbol !== "string" ||
+          constituentSymbols.has(constituent.symbol) ||
+          typeof constituent.name !== "string" || constituent.name.length < 2 ||
+          typeof constituent.nameEn !== "string" || constituent.nameEn.length < 2 ||
+          !Number.isFinite(constituentValue) ||
+          constituent.direction !== constituentDirection ||
+          constituent.asOf !== metric.asOf ||
+          typeof constituent.source !== "string" ||
+          !constituent.source.startsWith("https://")
+        ) {
+          throw new Error(`aiChainPerformance.${market}.${layer}.constituents 字段无效`);
+        }
+        constituentSymbols.add(constituent.symbol);
       }
     }
   }
@@ -689,7 +716,14 @@ function validateV9Input(value) {
       !Number.isFinite(publishedAt) || publishedAt > cutoffTime ||
       !["event", "market_wrap"].includes(news.kind) ||
       !Array.isArray(news.regions) || news.regions.length === 0 ||
-      news.regions.some((region) => !Object.hasOwn(newsCounts, region))
+      news.regions.some((region) => !Object.hasOwn(newsCounts, region)) ||
+      (news.platform !== undefined && !["web", "x"].includes(news.platform)) ||
+      (news.authority !== undefined &&
+        !["first_party", "specialist", "expert"].includes(news.authority)) ||
+      (news.platform === "x" &&
+        (!/^https:\/\/x\.com\/[^/]+\/status\/\d+/.test(news.url) ||
+          typeof news.authorHandle !== "string" ||
+          !news.authorHandle.trim()))
     ) {
       throw new Error("新闻事实字段无效");
     }
@@ -1739,6 +1773,12 @@ function validateV9Report(value, input) {
     if (evidence.some((item) => !evidenceFitsSession(item, marketSessions[driver.market]))) {
       throw new Error(`${label} 引用了归因窗口之外的消息`);
     }
+    if (
+      evidence.some((item) => item.platform === "x") &&
+      !evidence.some((item) => item.platform !== "x")
+    ) {
+      throw new Error(`${label} 引用 X 时必须包含非 X 交叉验证来源`);
+    }
     if (!evidence.some((item) => localMarketWrapMatches(item, driver.market, performance))) {
       throw new Error(`${label} 缺少本地收盘归因证据`);
     }
@@ -1825,6 +1865,12 @@ function validateV9Report(value, input) {
     ) {
       throw new Error(`${label} 引用了其他市场或归因窗口之外的消息`);
     }
+    if (
+      evidence.some((item) => item.platform === "x") &&
+      !evidence.some((item) => item.platform !== "x")
+    ) {
+      throw new Error(`${label} 引用 X 时必须包含非 X 交叉验证来源`);
+    }
     const sourceFacts = evidence
       .map((item) => `${item.title} ${item.facts}`)
       .join(" ");
@@ -1848,6 +1894,44 @@ function validateV9Report(value, input) {
   });
   if (aiUpdateCounts.CN > 4 || aiUpdateCounts.US > 4) {
     throw new Error("每个市场最多包含 4 条 AI 产业链动态");
+  }
+
+  const aiChainViewsValue = requireObject(report.aiChainViews, "aiChainViews");
+  const aiChainViews = {};
+  for (const market of ["CN", "US"]) {
+    const label = `aiChainViews.${market}`;
+    const value = requireObject(aiChainViewsValue[market], label);
+    const status = value.driverStatus;
+    if (!["explained", "partial", "unattributed"].includes(status)) {
+      throw new Error(`${label}.driverStatus 无效`);
+    }
+    if ((aiUpdateCounts[market] === 0) !== (status === "unattributed")) {
+      throw new Error(`${label}.driverStatus 与 AI 驱动数量不一致`);
+    }
+    const marketMetrics = input.aiChainPerformance
+      .filter((item) => item.market === market)
+      .map((item) => ({
+        ...item,
+        changeValue: Number(item.change.replace("%", "")),
+      }))
+      .sort((left, right) => right.changeValue - left.changeValue);
+    const marketUpdates = aiChainUpdates.filter((item) => item.market === market);
+    const summary = completeSentence(value.summary, `${label}.summary`, 150, 24);
+    if (status === "unattributed" && !/未发现单一消息主导/.test(summary)) {
+      throw new Error(`${label}.summary 必须明确未发现单一消息主导`);
+    }
+    aiChainViews[market] = {
+      headline: causalHeadline(value.headline, `${label}.headline`, {
+        sectorNames: marketMetrics.map((item) => item.name),
+        driverTitles: marketUpdates.map((item) => item.title),
+        unattributed: status === "unattributed",
+      }),
+      summary,
+      driverStatus: status,
+      leaderLayers: marketMetrics.slice(0, 2).map((item) => item.layer),
+      laggardLayers: marketMetrics.slice(-2).reverse().map((item) => item.layer),
+      driverIds: marketUpdates.map((item) => item.id),
+    };
   }
 
   const marketViewsValue = requireObject(report.marketViews, "marketViews");
@@ -1966,6 +2050,29 @@ function validateV9Report(value, input) {
       },
     };
   }
+  const englishAiChainViewsValue = requireObject(
+    english.aiChainViews,
+    "translations.en.aiChainViews",
+  );
+  const englishAiChainViews = {};
+  for (const market of ["CN", "US"]) {
+    const label = `translations.en.aiChainViews.${market}`;
+    const value = requireObject(englishAiChainViewsValue[market], label);
+    const translatedMarketUpdates = translatedAiUpdates.filter(
+      (_, index) => aiChainUpdates[index].market === market,
+    );
+    englishAiChainViews[market] = {
+      headline: causalHeadline(value.headline, `${label}.headline`, {
+        sectorNames: input.aiChainPerformance
+          .filter((item) => item.market === market)
+          .map((item) => item.nameEn),
+        driverTitles: translatedMarketUpdates.map((item) => item.title),
+        unattributed: aiChainViews[market].driverStatus === "unattributed",
+        english: true,
+      }),
+      summary: completeSentence(value.summary, `${label}.summary`, 380, 20, "."),
+    };
+  }
   const allExtremes = ["CN", "US"].flatMap((market) => {
     const extremes = sectorExtremes(input.sectorPerformance, market);
     return [...extremes.leaders, ...extremes.laggards];
@@ -1987,6 +2094,7 @@ function validateV9Report(value, input) {
         negative: negative.map((item) => input.sectorPerformance.find((sector) => sector.name === item)?.nameEn ?? item),
       },
       marketViews: englishMarketViews,
+      aiChainViews: englishAiChainViews,
       drivers: translatedDrivers,
       aiChainUpdates: translatedAiUpdates,
       stories: [],
@@ -2004,6 +2112,7 @@ function validateV9Report(value, input) {
       negative,
     },
     marketViews,
+    aiChainViews,
     drivers,
     aiChainUpdates,
     stories: [],
@@ -2032,6 +2141,7 @@ export function buildReportContent(input, report) {
       contractVersion: input.contractVersion,
       overview: report.overview,
       marketViews: report.marketViews,
+      aiChainViews: report.aiChainViews,
       updateKind: input.updateKind,
       marketAsOf,
       marketSessions: input.marketSessions,
@@ -2057,6 +2167,9 @@ export function buildReportContent(input, report) {
             sourceLabel: source.source,
             publishedAt: source.publishedAt,
             kind: source.kind,
+            ...(source.platform ? { platform: source.platform } : {}),
+            ...(source.authority ? { authority: source.authority } : {}),
+            ...(source.authorHandle ? { authorHandle: source.authorHandle } : {}),
           };
         }),
       })),
@@ -2076,6 +2189,9 @@ export function buildReportContent(input, report) {
             sourceLabel: source.source,
             publishedAt: source.publishedAt,
             kind: source.kind,
+            ...(source.platform ? { platform: source.platform } : {}),
+            ...(source.authority ? { authority: source.authority } : {}),
+            ...(source.authorHandle ? { authorHandle: source.authorHandle } : {}),
           };
         }),
       })),
@@ -2218,7 +2334,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 `;
 }
 
-async function executeRemoteSql(sql) {
+async function executeSql(sql, { local = false } = {}) {
   const wranglerPath = resolve(
     "node_modules",
     ".bin",
@@ -2230,7 +2346,7 @@ async function executeRemoteSql(sql) {
       "d1",
       "execute",
       "stock-daily-db",
-      "--remote",
+      local ? "--local" : "--remote",
       "--yes",
       "--json",
       "--command",
@@ -2247,7 +2363,10 @@ async function executeRemoteSql(sql) {
 
 async function main() {
   const checkOnly = process.argv.includes("--check");
-  const paths = process.argv.slice(2).filter((argument) => argument !== "--check");
+  const local = process.argv.includes("--local");
+  const paths = process.argv
+    .slice(2)
+    .filter((argument) => !["--check", "--local"].includes(argument));
   const inputPath = resolve(paths[0] ?? "work/daily-input.json");
   const reportPath = resolve(paths[1] ?? "work/daily-report.json");
   const input = validateInput(JSON.parse(await readFile(inputPath, "utf8")));
@@ -2274,7 +2393,7 @@ async function main() {
       return;
     }
 
-    const output = await executeRemoteSql(completedSql(input, report));
+    const output = await executeSql(completedSql(input, report), { local });
     console.log(
       JSON.stringify(
         {
@@ -2283,7 +2402,7 @@ async function main() {
           marketCount: input.markets.length,
           storyCount: report.stories.length,
           driverCount: report.drivers?.length ?? 0,
-          database: "stock-daily-db",
+          database: local ? "stock-daily-db (local)" : "stock-daily-db",
           wrangler: output,
         },
         null,
@@ -2293,7 +2412,7 @@ async function main() {
   } catch (error) {
     if (!checkOnly) {
       try {
-        await executeRemoteSql(failedSql(input, error));
+        await executeSql(failedSql(input, error), { local });
       } catch {
         // The primary error is more useful than a secondary audit failure.
       }

@@ -17,6 +17,7 @@ import {
   dailyCutoffAt,
 } from "./daily-policy.mjs";
 import { collectAiChainPerformance } from "./ai-chain.mjs";
+import { collectXIntelligence } from "./x-intelligence.mjs";
 
 export {
   canonicalizeUrl,
@@ -28,6 +29,7 @@ export {
   parseBeaReleases,
   parseFeed,
   relevanceScore,
+  resolveAuditedNewsDate,
   selectNews,
   shouldHydrateFacts,
   usefulFacts,
@@ -98,10 +100,12 @@ export async function collectDailyInput({
   }
   const cutoffAt = dailyCutoffAt(reportDate, updateKind);
   const cutoffTime = Date.parse(cutoffAt);
+  const xIntelligencePromise = collectXIntelligence(cutoffTime);
   const [
     marketPack,
     sectorPerformance,
     aiChainPerformance,
+    xIntelligence,
     newsResult,
   ] = await Promise.all([
     fetchDailyMarketPack(cutoffAt),
@@ -111,7 +115,12 @@ export async function collectDailyInput({
     aiChainPerformanceOverride
       ? Promise.resolve(aiChainPerformanceOverride)
       : collectAiChainPerformance(cutoffTime),
-    collectNews(cutoffTime, reportDate),
+    xIntelligencePromise,
+    collectNews(cutoffTime, reportDate, {
+      supplementalCandidatesPromise: xIntelligencePromise.then(
+        (result) => result.candidates,
+      ),
+    }),
   ]);
   validateMarketDates(
     marketPack.markets,
@@ -157,6 +166,7 @@ export async function collectDailyInput({
       ...newsResult.diagnostics,
       selectedByMarket,
     },
+    xIntelligenceDiagnostics: xIntelligence.diagnostics,
   };
 }
 
@@ -238,6 +248,9 @@ async function main() {
         failedNewsSources: input.newsDiagnostics.sources.filter(
           (source) => source.status === "error",
         ).length,
+        xIntelligence: input.xIntelligenceDiagnostics.status,
+        xCandidateCount:
+          input.xIntelligenceDiagnostics.candidateCount ?? 0,
       },
       null,
       2,

@@ -1189,6 +1189,7 @@ export function extractArticleFacts(html, title, url) {
 }
 
 export function shouldHydrateFacts(item, existingFacts) {
+  if (item?.platform === "x" && existingFacts) return false;
   if (!existingFacts) return true;
   if (item?._tier === "official") return true;
   if (/(?:\.{3}|…)\s*$/u.test(existingFacts)) return true;
@@ -1253,8 +1254,26 @@ async function mapSettledWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
+export function resolveAuditedNewsDate(reportDate) {
+  if (Array.isArray(auditedNews[reportDate])) return reportDate;
+  const reportTime = Date.parse(`${reportDate}T00:00:00.000Z`);
+  if (!Number.isFinite(reportTime)) return null;
+  const maximumCarryMs = 2 * 24 * 60 * 60 * 1_000;
+  return Object.keys(auditedNews)
+    .filter((date) => Array.isArray(auditedNews[date]))
+    .map((date) => ({ date, time: Date.parse(`${date}T00:00:00.000Z`) }))
+    .filter(
+      ({ time }) =>
+        Number.isFinite(time) &&
+        time <= reportTime &&
+        reportTime - time <= maximumCarryMs,
+    )
+    .sort((left, right) => right.time - left.time)[0]?.date ?? null;
+}
+
 function validateAuditedNews(reportDate, referenceTime) {
-  const entries = auditedNews[reportDate];
+  const auditedDate = resolveAuditedNewsDate(reportDate);
+  const entries = auditedDate ? auditedNews[auditedDate] : undefined;
   if (!Array.isArray(entries)) return [];
   return entries.map((entry) => {
     const publishedAt = Date.parse(entry.publishedAt);
@@ -1269,7 +1288,7 @@ function validateAuditedNews(reportDate, referenceTime) {
       entry.regions.length === 0 ||
       entry.regions.some((region) => region !== "CN" && region !== "US")
     ) {
-      throw new Error(`${reportDate} 的审计新闻清单存在无效字段或时间穿越`);
+      throw new Error(`${auditedDate} 的审计新闻清单存在无效字段或时间穿越`);
     }
     return {
       ...entry,
@@ -1289,19 +1308,33 @@ function marketCounts(items) {
   );
 }
 
-export async function collectNews(referenceTime = Date.now(), reportDate) {
+export async function collectNews(
+  referenceTime = Date.now(),
+  reportDate,
+  { supplementalCandidates = [], supplementalCandidatesPromise } = {},
+) {
   const budget = { ...getNewsBudget(reportDate), minimumPerMarket: 0 };
   const audited = validateAuditedNews(reportDate, referenceTime);
   const useLiveSources =
     audited.length === 0 ||
     Math.abs(Date.now() - referenceTime) <= LIVE_AUDIT_WINDOW_MS;
 
-  const discovery = useLiveSources
-    ? await discoverNewsCandidates(referenceTime)
-    : { candidates: [], sources: [] };
+  const [discovery, promisedSupplemental] = await Promise.all([
+    useLiveSources
+      ? discoverNewsCandidates(referenceTime)
+      : Promise.resolve({ candidates: [], sources: [] }),
+    supplementalCandidatesPromise
+      ? supplementalCandidatesPromise.catch(() => [])
+      : Promise.resolve([]),
+  ]);
   const sourceResults = discovery.sources;
   const discovered = discovery.candidates;
-  const candidates = deduplicateNews([...audited, ...discovered]);
+  const candidates = deduplicateNews([
+    ...audited,
+    ...discovered,
+    ...supplementalCandidates,
+    ...promisedSupplemental,
+  ]);
   const hydrationQueue = selectNews(candidates, {
     perMarket: MAX_HYDRATION_PER_MARKET,
     sourceLimit: 5,

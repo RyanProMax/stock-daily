@@ -25,6 +25,18 @@
       "driverStatus": "explained | partial | unattributed"
     }
   },
+  "aiChainViews": {
+    "CN": {
+      "headline": "CN 具体 AI 层级 + 当日表现",
+      "summary": "CN AI Alpha 归因结论。",
+      "driverStatus": "explained | partial | unattributed"
+    },
+    "US": {
+      "headline": "US 具体 AI 层级 + 当日表现",
+      "summary": "US AI Alpha 归因结论。",
+      "driverStatus": "explained | partial | unattributed"
+    }
+  },
   "drivers": [
     {
       "market": "CN | US",
@@ -40,7 +52,7 @@
   "aiChainUpdates": [
     {
       "market": "CN | US",
-      "layer": "chips | interconnect | infrastructure | applications",
+      "layer": "chips | memory | servers | interconnect | data_center | cloud | applications | robotics",
       "title": "当日 AI 产业链事实",
       "summary": "技术、订单、业绩或供需事实的完整来龙去脉。",
       "implication": "该事实影响哪个产业链环节，以及仍有哪些约束。",
@@ -54,6 +66,10 @@
       "marketViews": {
         "CN": { "headline": "CN causal headline", "summary": "CN conclusion." },
         "US": { "headline": "US causal headline", "summary": "US conclusion." }
+      },
+      "aiChainViews": {
+        "CN": { "headline": "CN AI causal headline", "summary": "CN AI conclusion." },
+        "US": { "headline": "US AI causal headline", "summary": "US AI conclusion." }
       },
       "drivers": [
         { "title": "Translated driver", "summary": "Translated event.", "mechanism": "Translated mechanism." }
@@ -86,12 +102,19 @@
   禁止“股指普涨”“指数分化”“风险偏好改善”等无原因标题。
 - 只使用输入中的核验事实，不新增数字、公司、事件或因果。英文只翻译已经通过校验
   的中文内容。
-- `aiChainPerformance` 固定覆盖芯片与设备、光互连/网络、云与算力基础设施、软件与
-  应用四个环节。CN 使用中证主题指数；US 使用行业 ETF 代理并明确标注，不把代理
-  表现声称为指数加权贡献。
+- `aiChainPerformance` 在 CN、US 使用完全一致的八层口径：芯片与设备、存储、服务器
+  与算力设备、CPO / 光互连、数据中心电力与液冷、云计算 / NeoCloud、AI 软件与
+  应用、机器人。两市均使用四只本地代表标的的等权篮子；不得声称是官方指数、完整
+  行业分类或指数加权贡献。
+- `aiChainViews` 每个市场独立判断 AI Alpha 的领涨、领跌和原因。无可靠原因时使用
+  `unattributed`，摘要必须明确“未发现单一消息主导”，不得把普通 AI 新闻包装成
+  当日涨跌原因。
 - `aiChainUpdates` 每个市场可为零至四条、同一环节最多一条。只纳入交易窗口内且能
   解释技术、订单、业绩或供需变化的事实；不得把旧公告包装成当日新催化，也不得用
   “技术论文及企业激励”等无法回答来龙去脉的概括替代具体证据。
+- X 只采纳白名单公开账号的原帖。公司官方账号用于确认一手事实，专业研究用于补充
+  技术或供需背景，行业专家只作为线索。任何引用 X 的驱动都必须同时引用至少一个
+  非 X 来源交叉验证；页面链接必须指向原帖，不引用搬运或截图。
 - `newsDiagnostics`、提供商、模型、契约或流水线术语只用于本地质量门，不进入读者页面。
 
 ## 发布完成条件
