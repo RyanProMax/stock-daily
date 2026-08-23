@@ -170,7 +170,15 @@ export default function MarketDrivers({
           <div className="ai-update-list">
             {aiUpdates.map((update) => (
               <article className="ai-update-row" key={update.id}>
-                <header>
+                <div className="ai-update-main">
+                  <h2>{update.title}</h2>
+                  <p>{update.summary}</p>
+                  <p className="ai-update-implication">
+                    <strong>{labels.aiImplication}</strong>
+                    {update.implication}
+                  </p>
+                </div>
+                <aside className="ai-update-meta">
                   <div className="ai-update-layer-row">
                     <span className="ai-update-layer">{layerNames[update.layer]}</span>
                     {aiByLayer.get(update.layer) && (
@@ -181,20 +189,12 @@ export default function MarketDrivers({
                       </em>
                     )}
                   </div>
-                  <h2>{update.title}</h2>
                   <EvidenceLinks
                     evidence={update.evidence}
                     label={labels.evidence}
                     authorityLabels={authorityLabels}
                   />
-                </header>
-                <div className="ai-update-copy">
-                  <p>{update.summary}</p>
-                  <p>
-                    <strong>{labels.aiImplication}</strong>
-                    {update.implication}
-                  </p>
-                </div>
+                </aside>
               </article>
             ))}
           </div>

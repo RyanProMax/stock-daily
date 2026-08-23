@@ -236,7 +236,6 @@ export default function MarketSnapshot({
           {aiChainView && (
             <div className="ai-chain-read">
               <strong>{aiChainView.headline}</strong>
-              <p>{aiChainView.summary}</p>
             </div>
           )}
           <div className="snapshot-grid snapshot-ai-grid">

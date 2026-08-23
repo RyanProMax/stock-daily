@@ -3374,14 +3374,21 @@ footer {
 
 .ai-update-row {
   display: grid;
-  grid-template-columns: minmax(250px, 0.75fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.38fr);
+  align-items: start;
   padding: 20px 22px;
-  gap: 28px;
+  gap: 30px;
   background: color-mix(in srgb, var(--brand) 3%, var(--surface-solid));
 }
 
-.ai-update-row > header {
+.ai-update-main,
+.ai-update-meta {
   min-width: 0;
+}
+
+.ai-update-meta {
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
 }
 
 .ai-update-layer {
@@ -3403,24 +3410,21 @@ footer {
   line-height: 1.28;
 }
 
-.ai-update-copy {
-  padding-left: 28px;
-  border-left: 1px solid var(--line);
-}
-
-.ai-update-copy p {
+.ai-update-main p {
   margin: 0;
   font-size: 15px;
   line-height: 1.72;
 }
 
-.ai-update-copy p + p {
-  margin-top: 11px;
+.ai-update-main .ai-update-implication {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
   color: var(--brand);
   font-weight: 550;
 }
 
-.ai-update-copy strong {
+.ai-update-main strong {
   display: block;
   margin-bottom: 3px;
   color: var(--muted);
@@ -3604,7 +3608,7 @@ footer {
     gap: 15px;
   }
 
-  .ai-update-copy {
+  .ai-update-meta {
     padding: 14px 0 0;
     border-top: 1px solid var(--line);
     border-left: 0;
@@ -5044,26 +5048,19 @@ footer {
 }
 
 .ai-chain-read {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.62fr) minmax(0, 1.38fr);
-  padding: 14px 16px;
-  gap: 18px;
+  display: block;
+  padding: 12px 16px;
   border-top: 1px solid var(--line-strong);
   background: color-mix(in srgb, var(--brand) 6%, var(--surface-solid));
 }
 
 .ai-chain-read strong {
+  display: block;
   font-family: var(--display);
-  font-size: 18px;
+  font-size: clamp(14px, 1.55vw, 18px);
   font-weight: 620;
   line-height: 1.35;
-}
-
-.ai-chain-read p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.65;
+  white-space: nowrap;
 }
 
 .snapshot-ai-grid {
@@ -5130,6 +5127,7 @@ footer {
 .ai-update-layer-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 7px;
   gap: 9px;
 }
@@ -5145,6 +5143,10 @@ footer {
   border-radius: 999px;
   font-family: var(--sans);
   font-size: 10px;
+}
+
+.ai-update-meta .market-driver-evidence {
+  margin-top: 16px;
 }
 
 .market-driver-evidence a small {
@@ -5167,13 +5169,12 @@ footer {
   }
 
   .ai-chain-read {
-    grid-template-columns: minmax(0, 1fr);
     padding: 12px;
-    gap: 5px;
   }
 
   .ai-chain-read strong {
     font-size: 16px;
+    white-space: normal;
   }
 
   .snapshot-ai-grid {

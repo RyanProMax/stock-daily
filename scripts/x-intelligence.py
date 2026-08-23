@@ -7,12 +7,21 @@ import argparse
 import asyncio
 from contextlib import aclosing
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
 import sqlite3
 import sys
 from typing import Any
+
+
+MINIMUM_TWSCRAPE_VERSION = (0, 20, 0)
+
+
+def version_tuple(value: str) -> tuple[int, int, int]:
+    parts = value.split(".")
+    return tuple(int(part) if part.isdigit() else 0 for part in (parts + ["0", "0"])[:3])
 
 
 def utc_datetime(value: Any) -> datetime | None:
@@ -66,6 +75,16 @@ def search_queue_available(db_path: Path) -> bool:
 
 async def collect(args: argparse.Namespace) -> dict[str, Any]:
     try:
+        installed_version = version("twscrape")
+    except PackageNotFoundError:
+        installed_version = "0.0.0"
+    if version_tuple(installed_version) < MINIMUM_TWSCRAPE_VERSION:
+        return {
+            "status": "unavailable",
+            "reason": f"twscrape 0.20.0+ required; found {installed_version}",
+            "items": [],
+        }
+    try:
         from twscrape import API
     except Exception as exc:
         return {"status": "unavailable", "reason": f"twscrape unavailable: {exc}", "items": []}
@@ -99,7 +118,12 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
         f"until:{(reference_time + timedelta(days=1)).date().isoformat()} "
         "-filter:replies -filter:retweets"
     )
-    api = API(str(db_path), proxy=os.environ.get("TWSCRAPE_PROXY") or None)
+    api = API(
+        str(db_path),
+        proxy=os.environ.get("TWSCRAPE_PROXY") or None,
+        wait_timeout=20,
+        wait_interval=1,
+    )
     items: list[dict[str, Any]] = []
     try:
         async with aclosing(api.search(query, limit=max(1, args.limit))) as tweets:

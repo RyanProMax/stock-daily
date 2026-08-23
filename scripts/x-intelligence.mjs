@@ -34,7 +34,11 @@ export async function collectXIntelligence(referenceTime) {
       {
         timeout: 45_000,
         maxBuffer: 8 * 1024 * 1024,
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: "1",
+          TWS_HTTP_BACKEND: process.env.TWS_HTTP_BACKEND || "curl",
+        },
       },
     );
     const payload = JSON.parse(result.stdout);
