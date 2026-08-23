@@ -76,7 +76,7 @@
     "label": "TrendForce",
     "authority": "specialist",
     "markets": ["CN", "US"],
-    "layers": ["chips", "memory", "servers", "data_center"],
+    "layers": ["chips", "memory", "servers", "interconnect", "data_center", "robotics"],
     "identityEvidence": "https://www.trendforce.com/"
   },
   {

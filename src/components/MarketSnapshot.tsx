@@ -128,10 +128,9 @@ function SectorSnapshotItem({
 }
 
 interface SnapshotEvidenceItem {
+  tag: string;
   title: string;
-  facts: string;
-  impact: string;
-  impactLabel: string;
+  summary: string;
   highRelevance: boolean;
   evidence: DriverEvidence[];
 }
@@ -189,53 +188,42 @@ function SnapshotEvidenceList({
 
   return (
     <ul className="snapshot-evidence-list">
-      {evidenceItems.map(({ evidence, title, facts, impact, impactLabel, highRelevance }) => (
+      {evidenceItems.map(({ evidence, tag, title, summary, highRelevance }) => (
         <li
           className={highRelevance ? "snapshot-evidence-high" : undefined}
           key={`${title}:${evidence.map((item) => item.source).join(":")}`}
         >
-          <article>
-            <div className="snapshot-evidence-heading">
-              {highRelevance && <span>{labels.highRelevance}</span>}
-              <h3>{title}</h3>
-            </div>
-            <dl className="snapshot-evidence-details">
-              <div>
-                <dt>{labels.verifiedFact}</dt>
-                <dd>{facts}</dd>
-              </div>
-              <div>
-                <dt>{impactLabel}</dt>
-                <dd>{impact}</dd>
-              </div>
-            </dl>
-            <ul className="snapshot-evidence-articles" aria-label={labels.sourceArticles}>
+          <article className="snapshot-evidence-row">
+            <span className="snapshot-evidence-tag">{tag}</span>
+            <p>
+              <strong>{title}</strong>
+              <span>：{summary}</span>
+            </p>
+            <span
+              className="snapshot-evidence-sources"
+              aria-label={labels.sourceArticles}
+            >
               {[...new Map(evidence.map((item) => [item.source, item])).values()].map(
                 (item) => (
-                  <li key={item.source}>
-                    <a
-                      href={item.source}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <span className="snapshot-evidence-article-title">
-                        {sourceTitle(item)}
-                      </span>
-                      <span className="snapshot-evidence-article-meta">
-                        <strong>{sourceName(item)}</strong>
-                        <time dateTime={item.publishedAt}>
-                          {evidenceTime(item.publishedAt, language, market)}
-                        </time>
-                        {item.platform === "x" && item.authority && (
-                          <small>{authorityLabels[item.authority]}</small>
-                        )}
-                        <ExternalLink aria-hidden="true" />
-                      </span>
-                    </a>
-                  </li>
+                  <a
+                    href={item.source}
+                    key={item.source}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={sourceTitle(item)}
+                  >
+                    <strong>{sourceName(item)}</strong>
+                    <time dateTime={item.publishedAt}>
+                      {evidenceTime(item.publishedAt, language, market)}
+                    </time>
+                    {item.platform === "x" && item.authority && (
+                      <small>{authorityLabels[item.authority]}</small>
+                    )}
+                    <ExternalLink aria-hidden="true" />
+                  </a>
                 ),
               )}
-            </ul>
+            </span>
           </article>
         </li>
       ))}
@@ -310,28 +298,28 @@ export default function MarketSnapshot({
   const aiChain = aiChainPerformance?.filter(
     (metric) => metric.market === market,
   );
-  const marketEvidence = drivers.map((driver) => ({
+  const marketEvidence = drivers.filter((driver) => driver.role === "primary").map((driver) => ({
     evidence: driver.evidence,
+    tag: language === "zh" ? "大盘" : "Market",
     title: driver.title,
-    facts: driver.summary,
-    impact: driver.mechanism,
-    impactLabel: labels.marketTransmission,
-    highRelevance: driver.role === "primary",
+    summary: driver.summary,
+    highRelevance: true,
   }));
-  const sectorEvidence = drivers.map((driver) => ({
+  const sectorEvidence = drivers.filter((driver) => driver.role === "secondary").map((driver) => ({
     evidence: driver.evidence,
+    tag: language === "zh" ? "行业" : "Sector",
     title: driver.title,
-    facts: driver.summary,
-    impact: driver.mechanism,
-    impactLabel: labels.marketTransmission,
-    highRelevance: driver.role === "primary",
+    summary: driver.summary,
+    highRelevance: false,
   }));
   const aiEvidence = aiUpdates.map((update) => ({
     evidence: update.evidence,
+    tag:
+      aiChain?.find((metric) => metric.layer === update.layer)?.[
+        language === "en" ? "nameEn" : "name"
+      ] ?? (language === "zh" ? "AI" : "AI"),
     title: update.title,
-    facts: update.summary,
-    impact: update.implication,
-    impactLabel: labels.chainImpact,
+    summary: update.summary,
     highRelevance: update.evidence.some((evidence) => evidence.platform !== "x"),
   }));
 

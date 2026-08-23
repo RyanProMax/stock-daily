@@ -181,7 +181,7 @@ function fixtureInput() {
     newsDiagnostics: {
       mode: "audited", candidateCount: 3, hydratedCount: 3,
       rejectedDuringHydration: 0, selectedByMarket: { CN: 2, US: 1 },
-      minimumPerMarket: 0, targetPerMarket: 5, sources: [],
+      minimumPerMarket: 0, targetPerMarket: 8, sources: [],
     },
   };
 }

@@ -347,87 +347,107 @@ function DailyPage({ data }: { data: DailyPageData }) {
         language,
       )
     : "";
-  const overviewBreak = marketView.overview.interpretation.search(/[；;]/u);
-  const overviewLead =
-    overviewBreak >= 0
-      ? marketView.overview.interpretation.slice(0, overviewBreak + 1)
-      : "";
-  const overviewDetail = overviewLead
-    ? marketView.overview.interpretation.slice(overviewLead.length)
-    : marketView.overview.interpretation;
   return (
     <div
       className="page-shell"
       data-render="ssr"
       data-contract={report.contractVersion}
     >
-      <header className="hero hero-daily">
+      <header
+        className={`hero hero-daily${isAttribution ? " hero-daily-compact" : ""}`}
+      >
         <div className="hero-copy">
-          <div className="hero-meta-row">
-            <div className="focus-kicker">
-              <span className="eyebrow">{t.todayFocus}</span>
-              <span
-                className={`impact-badge impact-badge-${marketView.overview.tone}`}
-              >
-                {toneLabel(marketView.overview.tone, language)}
-              </span>
-              {report.isSample && <span className="sample-badge">{t.sample}</span>}
-            </div>
-            {displayArchive.length > 1 && (
-              <div className="hero-date-nav" aria-label={t.selectDate}>
-                <DateNavigator
-                  archive={displayArchive}
-                  selectedDate={report.reportDate}
-                  language={language}
-                  selectLabel={t.selectDate}
-                  newerLabel={t.newer}
-                  olderLabel={t.older}
-                />
-              </div>
-            )}
-          </div>
-          <div className="daily-focus-main">
-            <h1>{marketView.headline}</h1>
-            <p
-              className={`focus-summary focus-summary-${marketView.overview.tone}`}
-            >
-              {overviewLead && <strong>{overviewLead}</strong>}
-              <span>{overviewDetail}</span>
-            </p>
-            {(marketView.overview.positive.length > 0 ||
-              marketView.overview.negative.length > 0) && (
-              <div className="focus-impact">
-                {marketView.overview.positive.length > 0 && (
-                  <div className="focus-impact-positive">
-                    <strong>{t.favorable}</strong>
-                    <span>
-                      {marketView.overview.positive.map((item) => (
-                        <i key={item}>{item}</i>
-                      ))}
-                    </span>
-                  </div>
-                )}
-                {marketView.overview.negative.length > 0 && (
-                  <div className="focus-impact-negative">
-                    <strong>{t.adverse}</strong>
-                    <span>
-                      {marketView.overview.negative.map((item) => (
-                        <i key={item}>{item}</i>
-                      ))}
-                    </span>
-                  </div>
+          {isAttribution ? (
+            <div className="hero-meta-row hero-meta-row-compact">
+              <div className="market-freshness">
+                <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
+                {marketAsOf && (
+                  <span data-market-as-of={marketAsOf}>{marketAsOfLabel}</span>
                 )}
               </div>
-            )}
-          </div>
-          <div className="publish-row">
-            <div className="market-freshness">
-              <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
-              {marketAsOf && (
-                <span data-market-as-of={marketAsOf}>{marketAsOfLabel}</span>
+              {displayArchive.length > 1 && (
+                <div className="hero-date-nav" aria-label={t.selectDate}>
+                  <DateNavigator
+                    archive={displayArchive}
+                    selectedDate={report.reportDate}
+                    language={language}
+                    selectLabel={t.selectDate}
+                    newerLabel={t.newer}
+                    olderLabel={t.older}
+                  />
+                </div>
               )}
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="hero-meta-row">
+                <div className="focus-kicker">
+                  <span className="eyebrow">{t.todayFocus}</span>
+                  <span
+                    className={`impact-badge impact-badge-${marketView.overview.tone}`}
+                  >
+                    {toneLabel(marketView.overview.tone, language)}
+                  </span>
+                  {report.isSample && (
+                    <span className="sample-badge">{t.sample}</span>
+                  )}
+                </div>
+                {displayArchive.length > 1 && (
+                  <div className="hero-date-nav" aria-label={t.selectDate}>
+                    <DateNavigator
+                      archive={displayArchive}
+                      selectedDate={report.reportDate}
+                      language={language}
+                      selectLabel={t.selectDate}
+                      newerLabel={t.newer}
+                      olderLabel={t.older}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="daily-focus-main">
+                <h1>{marketView.headline}</h1>
+                <p
+                  className={`focus-summary focus-summary-${marketView.overview.tone}`}
+                >
+                  {marketView.overview.interpretation}
+                </p>
+                {(marketView.overview.positive.length > 0 ||
+                  marketView.overview.negative.length > 0) && (
+                  <div className="focus-impact">
+                    {marketView.overview.positive.length > 0 && (
+                      <div className="focus-impact-positive">
+                        <strong>{t.favorable}</strong>
+                        <span>
+                          {marketView.overview.positive.map((item) => (
+                            <i key={item}>{item}</i>
+                          ))}
+                        </span>
+                      </div>
+                    )}
+                    {marketView.overview.negative.length > 0 && (
+                      <div className="focus-impact-negative">
+                        <strong>{t.adverse}</strong>
+                        <span>
+                          {marketView.overview.negative.map((item) => (
+                            <i key={item}>{item}</i>
+                          ))}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="publish-row">
+                <div className="market-freshness">
+                  <time dateTime={report.generatedAt}>{marketUpdatedLabel}</time>
+                  {marketAsOf && (
+                    <span data-market-as-of={marketAsOf}>{marketAsOfLabel}</span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </header>
 

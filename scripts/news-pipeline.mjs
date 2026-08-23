@@ -80,8 +80,8 @@ const TRACKING_PARAMETERS = new Set([
   "spm",
 ]);
 
-export const NEWS_TARGET_PER_MARKET = 5;
-export const NEWS_MAX_PER_MARKET = 6;
+export const NEWS_TARGET_PER_MARKET = 8;
+export const NEWS_MAX_PER_MARKET = 9;
 
 export function getNewsBudget(reportDate) {
   const weekday = new Date(`${reportDate}T12:00:00Z`).getUTCDay();
@@ -762,7 +762,7 @@ function sourceScore(item) {
   if (item._tier === "audited") return 16;
   if (item.platform === "x") {
     if (item.authority === "specialist") return 6;
-    if (item.authority === "first_party") return 4;
+    if (item.authority === "first_party") return 8;
     return -8;
   }
   if (item._tier === "official") return 8;
@@ -1335,13 +1335,14 @@ export async function collectNews(
     audited.length === 0 ||
     Math.abs(Date.now() - referenceTime) <= LIVE_AUDIT_WINDOW_MS;
 
-  const [discovery, promisedSupplemental] = await Promise.all([
+  const [discovery, promisedSupplemental, marketSessions] = await Promise.all([
     useLiveSources
       ? discoverNewsCandidates(referenceTime)
       : Promise.resolve({ candidates: [], sources: [] }),
     supplementalCandidatesPromise
       ? supplementalCandidatesPromise.catch(() => [])
       : Promise.resolve([]),
+    marketSessionsPromise ?? Promise.resolve(null),
   ]);
   const sourceResults = discovery.sources;
   const discovered = discovery.candidates;
@@ -1351,7 +1352,10 @@ export async function collectNews(
     ...supplementalCandidates,
     ...promisedSupplemental,
   ]);
-  const hydrationQueue = selectNews(candidates, {
+  const sessionCandidates = marketSessions
+    ? filterNewsToMarketSessions(candidates, marketSessions)
+    : candidates;
+  const hydrationQueue = selectNews(sessionCandidates, {
     perMarket: MAX_HYDRATION_PER_MARKET,
     sourceLimit: 5,
     topicLimit: 5,
@@ -1365,9 +1369,6 @@ export async function collectNews(
   const hydrated = hydrationResults
     .filter((result) => result.status === "fulfilled")
     .map((result) => result.value);
-  const marketSessions = marketSessionsPromise
-    ? await marketSessionsPromise
-    : null;
   const eligibleHydrated = marketSessions
     ? filterNewsToMarketSessions(hydrated, marketSessions)
     : hydrated;

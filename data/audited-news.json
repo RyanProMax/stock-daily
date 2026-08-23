@@ -603,6 +603,70 @@
       "regions": [
         "US"
       ]
+    },
+    {
+      "title": "US equity open: materials, energy and financials lead while utilities lag",
+      "facts": "At the U.S. open, gains were broad and Materials, Energy and Financials led while Utilities was the only sector in negative territory. S&P Global's flash Services PMI exceeded expectations; Ross Stores beat quarterly earnings and revenue expectations and raised full-year profit guidance. Newsquawk also reported that a Broadcom-backed vehicle was seeking about $70 billion of debt for AI infrastructure buildout.",
+      "url": "https://www.newsquawk.com/headlines/us-equity-open-stocks-open-higher-with-yields-little-changed-and-crude-off-highs",
+      "source": "Newsquawk",
+      "publishedAt": "2026-08-21T13:57:15.000Z",
+      "regions": [
+        "US"
+      ],
+      "kind": "event"
+    },
+    {
+      "title": "Stocks rose as materials paced a broad rebound: Friday recap",
+      "facts": "The closing sector recap recorded Materials up 2.14%, Health Care up 1.29%, Consumer Discretionary up 1.15% and Financials up 0.93%. Utilities fell 2.28% and Energy slipped 0.17%, while Information Technology was nearly flat at plus 0.11%.",
+      "url": "https://bellwize.com/markets/2026-08-21-market-recap/",
+      "source": "Bellwize（美股收评）",
+      "publishedAt": "2026-08-21T21:22:00.000Z",
+      "regions": [
+        "US"
+      ],
+      "kind": "market_wrap"
+    },
+    {
+      "title": "Ross Stores reports strong second-quarter sales and earnings",
+      "facts": "Ross Stores reported second-quarter sales growth of 13% and comparable-store sales growth of 10%, driven by broad-based traffic gains. The company raised its full-year outlook after reporting earnings per share of $2.66, including a tariff-refund benefit.",
+      "url": "https://www.prnewswire.com/news-releases/ross-stores-reports-strong-second-quarter-sales-and-earnings-results-302856807.html",
+      "source": "Ross Stores（公司公告）",
+      "publishedAt": "2026-08-20T20:01:00.000Z",
+      "regions": [
+        "US"
+      ],
+      "kind": "event"
+    },
+    {
+      "title": "Samsung foundry pricing shifts as 4nm capacity tightens",
+      "facts": "TrendForce's same-day semiconductor review cited reported price increases of 10% to 15% for Samsung's SF4 customers in China and the United States. It linked pricing power to tighter leading-edge capacity, full utilization for 4nm production and demand from HBM4 base dies and major technology customers, while noting that 2nm yields remain a constraint.",
+      "url": "https://www.trendforce.com/news/2026/08/21/news-from-pricing-war-to-pricing-power-behind-samsung-foundrys-reported-up-to-15-price-hikes/",
+      "source": "TrendForce（半导体产业追踪）",
+      "publishedAt": "2026-08-21T09:25:19.000Z",
+      "regions": [
+        "CN",
+        "US"
+      ],
+      "kind": "event"
+    },
+    {
+      "title": "@trendforce: Samsung SF4 is running at full capacity",
+      "facts": "Samsung's SF4 process is running at full capacity, and customers are reportedly accepting price increases of as much as 15%.",
+      "url": "https://x.com/trendforce/status/2090629044215906478",
+      "source": "TrendForce",
+      "sourceLabel": "TrendForce",
+      "publishedAt": "2026-08-21T02:36:20.000Z",
+      "regions": [
+        "CN",
+        "US"
+      ],
+      "platform": "x",
+      "authority": "specialist",
+      "authorHandle": "trendforce",
+      "aiLayers": [
+        "chips"
+      ],
+      "kind": "event"
     }
   ]
 }

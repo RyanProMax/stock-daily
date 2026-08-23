@@ -397,7 +397,7 @@ const input = {
     rejectedDuringHydration: 2,
     selectedByMarket: { CN: 3, US: 3 },
     minimumPerMarket: 3,
-    targetPerMarket: 5,
+    targetPerMarket: 8,
     sources: [],
   },
 };
@@ -911,7 +911,7 @@ test("daily contract rejects the old two-stories-per-market floor", () => {
 
   assert.throws(
     () => validateInput(thinInput),
-    /每个市场必须包含 3–6 条事实/,
+    /每个市场必须包含 3–9 条事实/,
   );
 });
 

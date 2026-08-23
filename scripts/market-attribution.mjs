@@ -141,5 +141,12 @@ export function localMarketWrapMatches(item, market, sectors = []) {
     market === "CN"
       ? /A股|上证|深证|创业板|沪指|中国股市|China stocks?/i
       : /美股|标普|纳斯达克|道琼斯|Wall Street|S&P|Nasdaq|Dow/i;
-  return localPattern.test(text) || sectors.some((sector) => text.includes(sector.name));
+  return (
+    localPattern.test(text) ||
+    sectors.some(
+      (sector) =>
+        text.includes(sector.name) ||
+        (sector.nameEn && text.toLocaleLowerCase().includes(sector.nameEn.toLocaleLowerCase())),
+    )
+  );
 }
