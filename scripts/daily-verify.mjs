@@ -93,7 +93,9 @@ const v9Invalid =
         sector.symbol !== input.sectorPerformance[index]?.symbol ||
         sector.asOf !== input.sectorPerformance[index]?.asOf ||
         sector.change !== input.sectorPerformance[index]?.change ||
-        sector.direction !== input.sectorPerformance[index]?.direction,
+        sector.direction !== input.sectorPerformance[index]?.direction ||
+        JSON.stringify(sector.constituents) !==
+          JSON.stringify(input.sectorPerformance[index]?.constituents),
     ) ||
     report?.aiChainPerformance?.length !== input.aiChainPerformance?.length ||
     report.aiChainPerformance.some(

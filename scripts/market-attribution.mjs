@@ -95,6 +95,22 @@ export function evidenceFitsSession(item, session) {
   return publishedAt > start && publishedAt <= end;
 }
 
+export function filterNewsToMarketSessions(items, sessions) {
+  return items
+    .map((item) => {
+      const kind = item.kind ?? classifyNewsKind(item);
+      return {
+        ...item,
+        kind,
+        regions: (item.regions ?? []).filter((market) => {
+          const session = sessions.find((candidate) => candidate.market === market);
+          return session ? evidenceFitsSession({ ...item, kind }, session) : false;
+        }),
+      };
+    })
+    .filter((item) => item.regions.length > 0);
+}
+
 export function sectorExtremes(performance, market, limit = 3) {
   const rows = performance.filter((item) => item.market === market);
   const leaders = rows

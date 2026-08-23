@@ -10,7 +10,7 @@ import {
 } from "./sector-heat.mjs";
 import {
   buildMarketSessions,
-  evidenceFitsSession,
+  filterNewsToMarketSessions,
 } from "./market-attribution.mjs";
 import {
   DAILY_UPDATE_KINDS,
@@ -101,6 +101,10 @@ export async function collectDailyInput({
   const cutoffAt = dailyCutoffAt(reportDate, updateKind);
   const cutoffTime = Date.parse(cutoffAt);
   const xIntelligencePromise = collectXIntelligence(cutoffTime);
+  const marketPackPromise = fetchDailyMarketPack(cutoffAt);
+  const marketSessionsPromise = marketPackPromise.then((pack) =>
+    buildMarketSessions(pack.markets),
+  );
   const [
     marketPack,
     sectorPerformance,
@@ -108,7 +112,7 @@ export async function collectDailyInput({
     xIntelligence,
     newsResult,
   ] = await Promise.all([
-    fetchDailyMarketPack(cutoffAt),
+    marketPackPromise,
     sectorPerformanceOverride
       ? Promise.resolve(sectorPerformanceOverride)
       : collectSectorPerformance(cutoffTime),
@@ -120,6 +124,7 @@ export async function collectDailyInput({
       supplementalCandidatesPromise: xIntelligencePromise.then(
         (result) => result.candidates,
       ),
+      marketSessionsPromise,
     }),
   ]);
   validateMarketDates(
@@ -132,15 +137,7 @@ export async function collectDailyInput({
     ...topSectorHeat(sectorPerformance.filter((item) => item.market === "US")),
   ];
   const marketSessions = buildMarketSessions(marketPack.markets);
-  const news = newsResult.news
-    .map((item) => ({
-      ...item,
-      regions: item.regions.filter((market) => {
-        const session = marketSessions.find((candidate) => candidate.market === market);
-        return session ? evidenceFitsSession(item, session) : false;
-      }),
-    }))
-    .filter((item) => item.regions.length > 0);
+  const news = filterNewsToMarketSessions(newsResult.news, marketSessions);
   const selectedByMarket = Object.fromEntries(
     ["CN", "US"].map((market) => [
       market,

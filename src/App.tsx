@@ -2,7 +2,6 @@ import { ExternalLink } from "lucide-react";
 import DateNavigator from "./components/DateNavigator";
 import HeaderActions from "./components/HeaderActions";
 import HotspotBoard from "./components/HotspotBoard";
-import MarketDrivers from "./components/MarketDrivers";
 import MarketSnapshot from "./components/MarketSnapshot";
 import {
   copy,
@@ -439,6 +438,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
           aiChainView={report.aiChainViews?.[data.market]}
+          marketView={marketView}
+          drivers={marketDrivers}
+          aiUpdates={marketAiUpdates}
           market={data.market}
           language={language}
           labels={{
@@ -453,37 +455,18 @@ function DailyPage({ data }: { data: DailyPageData }) {
             aiRange:
               data.market === "US" ? t.aiChainRangeUS : t.aiChainRangeCN,
             streakDays: t.heatStreakDays,
+            compositeAnalysis: t.compositeAnalysis,
+            verifiedSources: t.verifiedSources,
+            representativeBasket: t.representativeBasket,
+            sourceOfficial: t.xSourceOfficial,
+            sourceSpecialist: t.xSourceSpecialist,
+            sourceExpert: t.xSourceExpert,
           }}
         />
       </section>
 
-      {(!isAttribution || marketDrivers.length > 0 || marketAiUpdates.length > 0) && (
+      {!isAttribution && (
       <section className="signals-section">
-        {isAttribution ? (
-          <MarketDrivers
-            drivers={marketDrivers}
-            aiUpdates={marketAiUpdates}
-            aiMetrics={(report.aiChainPerformance ?? []).filter(
-              (metric) => metric.market === data.market,
-            )}
-            sectors={(report.sectorPerformance ?? []).filter(
-              (sector) => sector.market === data.market,
-            )}
-            language={language}
-            labels={{
-              attribution: t.marketAttribution,
-              aiNews: t.aiChainNews,
-              happened: t.driverEvent,
-              mechanism: t.driverMechanism,
-              sectors: t.driverSectors,
-              evidence: t.driverEvidence,
-              aiImplication: t.aiChainImplication,
-              sourceOfficial: t.xSourceOfficial,
-              sourceSpecialist: t.xSourceSpecialist,
-              sourceExpert: t.xSourceExpert,
-            }}
-          />
-        ) : (
           <HotspotBoard
             stories={marketStories}
             timeline={data.weekEvents}
@@ -539,8 +522,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
               whyImportant: t.whyImportant,
             }}
           />
-        )}
-        {!isAttribution && marketStories.length === 0 && (
+        {marketStories.length === 0 && (
           <p className="empty-market-news">{t.noMarketNews}</p>
         )}
       </section>

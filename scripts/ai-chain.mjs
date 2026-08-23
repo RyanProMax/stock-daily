@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const quoteCache = new Map();
 
 const layerDefinitions = [
   { layer: "chips", name: "芯片与设备", nameEn: "Chips & equipment" },
@@ -170,7 +171,7 @@ async function fetchJson(url) {
   return JSON.parse(result.stdout);
 }
 
-async function fetchConstituent([symbol, name, nameEn], cutoffTime) {
+async function fetchConstituentUncached([symbol, name, nameEn], cutoffTime) {
   let lastError = "request failed";
   for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     const url = new URL(
@@ -208,6 +209,7 @@ async function fetchConstituent([symbol, name, nameEn], cutoffTime) {
         symbol,
         name,
         nameEn,
+        value: latest.close.toFixed(2),
         change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
         changeValue: change,
         direction: directionForChange(change),
@@ -219,6 +221,20 @@ async function fetchConstituent([symbol, name, nameEn], cutoffTime) {
     }
   }
   throw new Error(`${symbol}: ${lastError}`);
+}
+
+export function fetchEquityConstituent(constituent, cutoffTime) {
+  const key = `${constituent[0]}:${cutoffTime}`;
+  if (!quoteCache.has(key)) {
+    quoteCache.set(
+      key,
+      fetchConstituentUncached(constituent, cutoffTime).catch((error) => {
+        quoteCache.delete(key);
+        throw error;
+      }),
+    );
+  }
+  return quoteCache.get(key);
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -276,7 +292,7 @@ export async function collectAiChainPerformance(cutoffTime) {
   );
   const quoted = await mapWithConcurrency(requests, 8, async (request) => ({
     ...request,
-    quote: await fetchConstituent(request.constituent, cutoffTime),
+    quote: await fetchEquityConstituent(request.constituent, cutoffTime),
   }));
   return ["CN", "US"].flatMap((market) =>
     layerDefinitions.map((definition) =>

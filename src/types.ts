@@ -56,6 +56,18 @@ export interface SectorHeatMetric {
   direction: MarketDirection;
   asOf: string;
   source: string;
+  constituents?: SectorConstituent[];
+}
+
+export interface SectorConstituent {
+  symbol: string;
+  name: string;
+  nameEn: string;
+  value?: string;
+  change: string;
+  direction: MarketDirection;
+  asOf: string;
+  source: string;
 }
 
 export interface AiChainMetric {
@@ -78,6 +90,7 @@ export interface AiChainConstituent {
   symbol: string;
   name: string;
   nameEn: string;
+  value?: string;
   change: string;
   direction: MarketDirection;
   asOf: string;

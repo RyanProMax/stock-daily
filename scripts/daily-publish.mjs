@@ -527,11 +527,43 @@ function validateSectorRows(rows, expectedPerMarket, label) {
       !/^\d{4}-\d{2}-\d{2}$/.test(sector.asOf) ||
       typeof sector.source !== "string" ||
       !sector.source.startsWith("https://") ||
+      !Array.isArray(sector.constituents) ||
+      sector.constituents.length !== 4 ||
       keys.has(key)
     ) {
       throw new Error(`${label} 字段无效`);
     }
     keys.add(key);
+    const constituentSymbols = new Set();
+    for (const constituent of sector.constituents) {
+      const constituentChange = typeof constituent?.change === "string"
+        ? constituent.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
+        : null;
+      const constituentValue = constituentChange
+        ? Number(constituentChange[1])
+        : Number.NaN;
+      const close = Number(String(constituent?.value ?? "").replaceAll(",", ""));
+      const constituentDirection = Math.abs(constituentValue) < 0.005
+        ? "flat"
+        : constituentValue > 0
+          ? "up"
+          : "down";
+      if (
+        typeof constituent?.symbol !== "string" ||
+        constituentSymbols.has(constituent.symbol) ||
+        typeof constituent.name !== "string" || constituent.name.length < 2 ||
+        typeof constituent.nameEn !== "string" || constituent.nameEn.length < 2 ||
+        !Number.isFinite(close) || close <= 0 ||
+        !Number.isFinite(constituentValue) ||
+        constituent.direction !== constituentDirection ||
+        constituent.asOf !== sector.asOf ||
+        typeof constituent.source !== "string" ||
+        !constituent.source.startsWith("https://")
+      ) {
+        throw new Error(`${label}.${sector.market}.${sector.symbol}.constituents 字段无效`);
+      }
+      constituentSymbols.add(constituent.symbol);
+    }
     counts.set(sector.market, counts.get(sector.market) + 1);
   }
   if (counts.get("CN") !== expectedPerMarket || counts.get("US") !== expectedPerMarket) {
@@ -592,11 +624,13 @@ function validateAiChainRows(rows) {
           : constituentValue > 0
             ? "up"
             : "down";
+        const close = Number(String(constituent?.value ?? "").replaceAll(",", ""));
         if (
           typeof constituent?.symbol !== "string" ||
           constituentSymbols.has(constituent.symbol) ||
           typeof constituent.name !== "string" || constituent.name.length < 2 ||
           typeof constituent.nameEn !== "string" || constituent.nameEn.length < 2 ||
+          !Number.isFinite(close) || close <= 0 ||
           !Number.isFinite(constituentValue) ||
           constituent.direction !== constituentDirection ||
           constituent.asOf !== metric.asOf ||

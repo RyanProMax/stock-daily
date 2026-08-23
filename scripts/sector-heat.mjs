@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fetchEquityConstituent } from "./ai-chain.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,6 +38,123 @@ const usSectors = [
   name,
   nameEn,
 }));
+
+export const SECTOR_REPRESENTATIVES = {
+  CN: {
+    "932077": [
+      ["600938.SS", "中国海油", "CNOOC"],
+      ["601857.SS", "中国石油", "PetroChina"],
+      ["600028.SS", "中国石化", "Sinopec"],
+      ["601088.SS", "中国神华", "China Shenhua Energy"],
+    ],
+    "932078": [
+      ["601899.SS", "紫金矿业", "Zijin Mining"],
+      ["600547.SS", "山东黄金", "Shandong Gold"],
+      ["002466.SZ", "天齐锂业", "Tianqi Lithium"],
+      ["603799.SS", "华友钴业", "Huayou Cobalt"],
+    ],
+    "932079": [
+      ["600031.SS", "三一重工", "Sany Heavy Industry"],
+      ["601766.SS", "中国中车", "CRRC"],
+      ["002352.SZ", "顺丰控股", "S.F. Holding"],
+      ["601668.SS", "中国建筑", "China State Construction"],
+    ],
+    "932080": [
+      ["002594.SZ", "比亚迪", "BYD"],
+      ["000333.SZ", "美的集团", "Midea Group"],
+      ["000651.SZ", "格力电器", "Gree Electric"],
+      ["600104.SS", "上汽集团", "SAIC Motor"],
+    ],
+    "932081": [
+      ["600519.SS", "贵州茅台", "Kweichow Moutai"],
+      ["000858.SZ", "五粮液", "Wuliangye Yibin"],
+      ["600887.SS", "伊利股份", "Inner Mongolia Yili"],
+      ["603288.SS", "海天味业", "Foshan Haitian"],
+    ],
+    "932082": [
+      ["600276.SS", "恒瑞医药", "Jiangsu Hengrui"],
+      ["300760.SZ", "迈瑞医疗", "Mindray"],
+      ["603259.SS", "药明康德", "WuXi AppTec"],
+      ["300015.SZ", "爱尔眼科", "Aier Eye Hospital"],
+    ],
+    "932083": [
+      ["601398.SS", "工商银行", "ICBC"],
+      ["600036.SS", "招商银行", "China Merchants Bank"],
+      ["601318.SS", "中国平安", "Ping An"],
+      ["600030.SS", "中信证券", "CITIC Securities"],
+    ],
+    "931775": [
+      ["600048.SS", "保利发展", "Poly Developments"],
+      ["001979.SZ", "招商蛇口", "China Merchants Shekou"],
+      ["000002.SZ", "万科A", "China Vanke"],
+      ["600383.SS", "金地集团", "Gemdale"],
+    ],
+    "932084": [
+      ["688981.SS", "中芯国际", "SMIC"],
+      ["002371.SZ", "北方华创", "NAURA Technology"],
+      ["688041.SS", "海光信息", "Hygon Information"],
+      ["688256.SS", "寒武纪", "Cambricon"],
+    ],
+    "932085": [
+      ["600941.SS", "中国移动", "China Mobile"],
+      ["601728.SS", "中国电信", "China Telecom"],
+      ["600050.SS", "中国联通", "China Unicom"],
+      ["002027.SZ", "分众传媒", "Focus Media"],
+    ],
+    "932086": [
+      ["600900.SS", "长江电力", "China Yangtze Power"],
+      ["600025.SS", "华能水电", "Huaneng Lancang River"],
+      ["600886.SS", "国投电力", "SDIC Power"],
+      ["003816.SZ", "中国广核", "CGN Power"],
+    ],
+  },
+  US: {
+    XLC: [
+      ["META", "Meta", "Meta"], ["GOOGL", "Alphabet", "Alphabet"],
+      ["NFLX", "奈飞", "Netflix"], ["TMUS", "T-Mobile", "T-Mobile US"],
+    ],
+    XLY: [
+      ["AMZN", "亚马逊", "Amazon"], ["TSLA", "特斯拉", "Tesla"],
+      ["HD", "家得宝", "Home Depot"], ["MCD", "麦当劳", "McDonald's"],
+    ],
+    XLP: [
+      ["WMT", "沃尔玛", "Walmart"], ["COST", "好市多", "Costco"],
+      ["PG", "宝洁", "Procter & Gamble"], ["KO", "可口可乐", "Coca-Cola"],
+    ],
+    XLE: [
+      ["XOM", "埃克森美孚", "Exxon Mobil"], ["CVX", "雪佛龙", "Chevron"],
+      ["COP", "康菲石油", "ConocoPhillips"], ["SLB", "斯伦贝谢", "SLB"],
+    ],
+    XLF: [
+      ["BRK-B", "伯克希尔B", "Berkshire Hathaway B"], ["JPM", "摩根大通", "JPMorgan Chase"],
+      ["V", "Visa", "Visa"], ["MA", "万事达", "Mastercard"],
+    ],
+    XLV: [
+      ["LLY", "礼来", "Eli Lilly"], ["UNH", "联合健康", "UnitedHealth"],
+      ["JNJ", "强生", "Johnson & Johnson"], ["ABBV", "艾伯维", "AbbVie"],
+    ],
+    XLI: [
+      ["GE", "GE航空航天", "GE Aerospace"], ["CAT", "卡特彼勒", "Caterpillar"],
+      ["RTX", "RTX", "RTX"], ["HON", "霍尼韦尔", "Honeywell"],
+    ],
+    XLB: [
+      ["LIN", "林德", "Linde"], ["SHW", "宣伟", "Sherwin-Williams"],
+      ["FCX", "自由港麦克莫兰", "Freeport-McMoRan"], ["NEM", "纽蒙特", "Newmont"],
+    ],
+    XLRE: [
+      ["PLD", "普洛斯", "Prologis"], ["AMT", "美国电塔", "American Tower"],
+      ["EQIX", "Equinix", "Equinix"], ["WELL", "Welltower", "Welltower"],
+    ],
+    XLK: [
+      ["NVDA", "英伟达", "NVIDIA"], ["MSFT", "微软", "Microsoft"],
+      ["AAPL", "苹果", "Apple"], ["AVGO", "博通", "Broadcom"],
+    ],
+    XLU: [
+      ["NEE", "新纪元能源", "NextEra Energy"], ["SO", "南方电力", "Southern Company"],
+      ["DUK", "杜克能源", "Duke Energy"], ["CEG", "星座能源", "Constellation Energy"],
+    ],
+  },
+};
 
 function directionForChange(changeValue) {
   if (Math.abs(changeValue) < 0.005) return "flat";
@@ -417,6 +535,36 @@ async function collectHistoricalMarketPerformance(
   );
 }
 
+async function attachSectorRepresentatives(metrics, cutoffTime) {
+  const requests = metrics.flatMap((metric) =>
+    (SECTOR_REPRESENTATIVES[metric.market]?.[metric.symbol] ?? []).map(
+      (constituent) => ({ metric, constituent }),
+    ),
+  );
+  const quoted = await mapWithConcurrency(requests, 10, async (request) => ({
+    market: request.metric.market,
+    sectorSymbol: request.metric.symbol,
+    quote: await fetchEquityConstituent(request.constituent, cutoffTime),
+  }));
+  return metrics.map((metric) => {
+    const constituents = quoted
+      .filter(
+        (item) =>
+          item.market === metric.market && item.sectorSymbol === metric.symbol,
+      )
+      .map((item) => item.quote);
+    if (
+      constituents.length !== 4 ||
+      constituents.some((item) => item.asOf !== metric.asOf)
+    ) {
+      throw new Error(
+        `${metric.market} ${metric.symbol}: 行业代表标的必须有 4 个同交易日行情`,
+      );
+    }
+    return { ...metric, constituents };
+  });
+}
+
 export async function collectSectorPerformance(cutoffTime) {
   const [currentCn, currentUs] = await Promise.all([
     fetchCurrentMarketHeat(cnSectors, "CN", cutoffTime),
@@ -440,7 +588,7 @@ export async function collectSectorPerformance(cutoffTime) {
           ([historicalUs]) => historicalUs,
         ),
   ]);
-  return [...cn, ...us];
+  return attachSectorRepresentatives([...cn, ...us], cutoffTime);
 }
 
 export async function collectSectorHeat(cutoffTime) {

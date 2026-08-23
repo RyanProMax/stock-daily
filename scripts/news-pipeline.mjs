@@ -5,7 +5,10 @@ import { promisify } from "node:util";
 import { Readability } from "@mozilla/readability";
 import { XMLParser } from "fast-xml-parser";
 import { JSDOM } from "jsdom";
-import { classifyNewsKind } from "./market-attribution.mjs";
+import {
+  classifyNewsKind,
+  filterNewsToMarketSessions,
+} from "./market-attribution.mjs";
 
 const execFileAsync = promisify(execFile);
 const auditedNews = JSON.parse(
@@ -757,6 +760,11 @@ export async function discoverNewsCandidates(referenceTime = Date.now()) {
 
 function sourceScore(item) {
   if (item._tier === "audited") return 16;
+  if (item.platform === "x") {
+    if (item.authority === "specialist") return 6;
+    if (item.authority === "first_party") return 4;
+    return -8;
+  }
   if (item._tier === "official") return 8;
   if (item._tier === "publisher") return 2;
   return -3;
@@ -839,6 +847,10 @@ export function relevanceScore(item) {
     ],
     [
       /\bquietest\b|\bhuge bullish signal\b|\bsecret\b|\bgiant\b|\breality check\b|重磅|突发/u,
+      -6,
+    ],
+    [
+      /\bregister\b|\bjoin (?:us|the)\b|\bwatch (?:now|the)\b|\bread (?:more|the blog)\b|\bconference\b|\bwebinar\b/u,
       -6,
     ],
     [
@@ -1311,7 +1323,11 @@ function marketCounts(items) {
 export async function collectNews(
   referenceTime = Date.now(),
   reportDate,
-  { supplementalCandidates = [], supplementalCandidatesPromise } = {},
+  {
+    supplementalCandidates = [],
+    supplementalCandidatesPromise,
+    marketSessionsPromise,
+  } = {},
 ) {
   const budget = { ...getNewsBudget(reportDate), minimumPerMarket: 0 };
   const audited = validateAuditedNews(reportDate, referenceTime);
@@ -1349,7 +1365,13 @@ export async function collectNews(
   const hydrated = hydrationResults
     .filter((result) => result.status === "fulfilled")
     .map((result) => result.value);
-  const selected = selectNews(hydrated, {
+  const marketSessions = marketSessionsPromise
+    ? await marketSessionsPromise
+    : null;
+  const eligibleHydrated = marketSessions
+    ? filterNewsToMarketSessions(hydrated, marketSessions)
+    : hydrated;
+  const selected = selectNews(eligibleHydrated, {
     perMarket: budget.targetPerMarket,
     minimumScore: 8,
     includeInternal: true,

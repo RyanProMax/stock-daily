@@ -4,9 +4,11 @@ import {
   buildMarketSessions,
   classifyNewsKind,
   evidenceFitsSession,
+  filterNewsToMarketSessions,
   sectorExtremes,
   zonedDateTimeIso,
 } from "../scripts/market-attribution.mjs";
+import { selectNews } from "../scripts/news-pipeline.mjs";
 import { validateInput, validateReport } from "../scripts/daily-publish.mjs";
 import { sectorHeatScore, topSectorHeat } from "../scripts/sector-heat.mjs";
 
@@ -43,6 +45,16 @@ function performanceRows() {
       direction: change > 0 ? "up" : "down",
       asOf: "2026-08-21",
       source: `https://example.com/${market}/${symbol}`,
+      constituents: Array.from({ length: 4 }, (_, constituentIndex) => ({
+        symbol: `${market}-${symbol}-${constituentIndex}`,
+        name: `代表标的${constituentIndex + 1}`,
+        nameEn: `Representative ${constituentIndex + 1}`,
+        value: `${100 + constituentIndex}.00`,
+        change: constituentIndex % 2 === 0 ? "+1.00%" : "-0.50%",
+        direction: constituentIndex % 2 === 0 ? "up" : "down",
+        asOf: "2026-08-21",
+        source: `https://example.com/${market}/${symbol}/${constituentIndex}`,
+      })),
     };
   }));
 }
@@ -76,6 +88,7 @@ function aiChainRows() {
         symbol: `${market}${index}${constituentIndex}`,
         name: `标的${index}${constituentIndex}`,
         nameEn: `Stock ${index}${constituentIndex}`,
+        value: `${100 + constituentIndex}.00`,
         change: constituentIndex % 2 === 0 ? "+1.00%" : "-0.50%",
         direction: constituentIndex % 2 === 0 ? "up" : "down",
         asOf: "2026-08-21",
@@ -285,16 +298,94 @@ test("market sessions use each venue close and allow wraps for two hours", () =>
   assert.equal(evidenceFitsSession(late, input.marketSessions[1]), false);
 });
 
+test("session filtering happens before ranking so an in-window X source is retained", () => {
+  const sessions = fixtureInput().marketSessions;
+  const candidates = [
+    {
+      title: "@NVIDIA：AI infrastructure update after the attribution window",
+      facts: "NVIDIA published an AI infrastructure update covering chips, servers and networking after the local market attribution window closed.",
+      url: "https://x.com/NVIDIA/status/2000000000000000001",
+      source: "NVIDIA",
+      publishedAt: "2026-08-22T02:00:00.000Z",
+      regions: ["CN"],
+      platform: "x",
+      authority: "first_party",
+      _tier: "official",
+    },
+    {
+      title: "@trendforce：CPO and silicon photonics for AI infrastructure",
+      facts: "TrendForce reported that memory suppliers were expanding CPO and silicon-photonics work for next-generation AI infrastructure.",
+      url: "https://x.com/trendforce/status/2000000000000000002",
+      source: "TrendForce",
+      publishedAt: "2026-08-20T07:14:47.000Z",
+      regions: ["CN", "US"],
+      platform: "x",
+      authority: "specialist",
+      _tier: "publisher",
+    },
+  ];
+  const eligible = filterNewsToMarketSessions(candidates, sessions);
+  const selected = selectNews(eligible, {
+    perMarket: 1,
+    minimumScore: 0,
+    includeInternal: true,
+  });
+  assert.deepEqual(selected.map((item) => item.url), [candidates[1].url]);
+  assert.deepEqual(selected[0].regions, ["CN"]);
+});
+
+test("verified specialist X reporting outranks uncorroborated expert commentary", () => {
+  const specialist = {
+    title: "@trendforce：CPO silicon photonics capacity expands for AI infrastructure",
+    facts: "TrendForce reported a concrete CPO and silicon-photonics capacity expansion by named memory suppliers for next-generation AI infrastructure.",
+    url: "https://x.com/trendforce/status/2000000000000000003",
+    source: "TrendForce",
+    publishedAt: "2026-08-20T07:14:47.000Z",
+    regions: ["CN"],
+    platform: "x",
+    authority: "specialist",
+    _tier: "publisher",
+  };
+  const expert = {
+    ...specialist,
+    title: "@commentator：AI infrastructure will change the market",
+    facts: "A commentator predicted that AI infrastructure would eventually change the market and offered a personal view about future returns.",
+    url: "https://x.com/commentator/status/2000000000000000004",
+    source: "Commentator",
+    authority: "expert",
+    _tier: "expert",
+  };
+  const selected = selectNews([expert, specialist], {
+    perMarket: 1,
+    minimumScore: 0,
+    includeInternal: true,
+  });
+  assert.equal(selected[0].url, specialist.url);
+});
+
 test("V9 keeps all eleven sectors and accepts distinct local drivers", () => {
   const input = validateInput(fixtureInput());
   assert.equal(input.sectorPerformance.filter((item) => item.market === "CN").length, 11);
+  assert.equal(input.sectorPerformance[0].constituents.length, 4);
+  assert.equal(input.sectorPerformance[0].constituents[0].value, "100.00");
   assert.equal(input.aiChainPerformance.filter((item) => item.market === "CN").length, 8);
+  assert.equal(input.aiChainPerformance[0].constituents[0].value, "100.00");
   assert.equal(sectorExtremes(input.sectorPerformance, "US").leaders.length, 3);
   const report = validateReport(fixtureReport(), input);
   assert.equal(report.drivers.length, 2);
   assert.notEqual(report.drivers[0].market, report.drivers[1].market);
   assert.equal(report.marketViews.CN.driverIds.length, 1);
   assert.equal(report.aiChainUpdates.length, 1);
+});
+
+test("V9 rejects representative baskets without a verified close price", () => {
+  const input = fixtureInput();
+  delete input.sectorPerformance[0].constituents[0].value;
+  assert.throws(() => validateInput(input), /constituents 字段无效/);
+
+  const aiInput = fixtureInput();
+  delete aiInput.aiChainPerformance[0].constituents[0].value;
+  assert.throws(() => validateInput(aiInput), /constituents 字段无效/);
 });
 
 test("V9 requires the API pack to preserve each prior trading session", () => {
