@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +12,7 @@ const defaultPython = resolve(
   homedir(),
   "projects/stock-kol-intel/.venv/bin/python",
 );
+export const X_COLLECTOR_TIMEOUT_MS = 110_000;
 
 function safeReason(error) {
   return (error instanceof Error ? error.message : String(error))
@@ -20,6 +23,7 @@ function safeReason(error) {
 export async function collectXIntelligence(referenceTime) {
   const python = process.env.STOCK_DAILY_X_PYTHON || defaultPython;
   try {
+    await access(python, fsConstants.X_OK);
     const result = await execFileAsync(
       python,
       [
@@ -32,7 +36,7 @@ export async function collectXIntelligence(referenceTime) {
         "72",
       ],
       {
-        timeout: 45_000,
+        timeout: X_COLLECTOR_TIMEOUT_MS,
         maxBuffer: 8 * 1024 * 1024,
         env: {
           ...process.env,
@@ -45,16 +49,29 @@ export async function collectXIntelligence(referenceTime) {
     return {
       candidates: Array.isArray(payload.items) ? payload.items : [],
       diagnostics: {
-        status: payload.status === "ok" ? "ok" : "unavailable",
+        status:
+          typeof payload.status === "string" && payload.status
+            ? payload.status
+            : "search_error",
         sourceCount: Number(payload.sourceCount ?? 0),
         candidateCount: Number(payload.candidateCount ?? 0),
+        ...(payload.recoveredFromCooldown === true
+          ? { recoveredFromCooldown: true }
+          : {}),
         ...(payload.reason ? { reason: String(payload.reason).slice(0, 200) } : {}),
       },
     };
   } catch (error) {
+    const code = error && typeof error === "object" ? error.code : undefined;
     return {
       candidates: [],
-      diagnostics: { status: "unavailable", reason: safeReason(error) },
+      diagnostics: {
+        status:
+          code === "ENOENT" || code === "EACCES"
+            ? "dependency_missing"
+            : "search_error",
+        reason: safeReason(error),
+      },
     };
   }
 }

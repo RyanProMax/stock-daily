@@ -1063,13 +1063,9 @@ export function deduplicateNews(candidates) {
 }
 
 function stripInternalFields(item) {
-  const {
-    _score,
-    _sourceId,
-    _tier,
-    ...published
-  } = item;
-  return published;
+  return Object.fromEntries(
+    Object.entries(item).filter(([key]) => !key.startsWith("_")),
+  );
 }
 
 export function selectNews(
@@ -1200,6 +1196,82 @@ export function extractArticleFacts(html, title, url) {
   return factsCandidates(html, title, url)[0]?.facts ?? "";
 }
 
+export function extractArticleTitle(html, fallback = "") {
+  const document = new JSDOM(html).window.document;
+  const title =
+    document.querySelector('meta[property="og:title"]')?.getAttribute("content") ||
+    document.querySelector('meta[name="twitter:title"]')?.getAttribute("content") ||
+    document.querySelector("title")?.textContent ||
+    fallback;
+  return cleanTitle(title).slice(0, 240);
+}
+
+export function xOutboundUrls(item) {
+  const structured = Array.isArray(item?._outboundUrls)
+    ? item._outboundUrls
+    : [];
+  const inline = plainText(item?.facts ?? "").match(/https?:\/\/[^\s)\]}>,]+/gu) ?? [];
+  return [...new Set([...structured, ...inline])]
+    .map((value) => value.replace(/[.,;:!?]+$/u, ""))
+    .filter((value) => value.startsWith("https://"))
+    .slice(0, 4);
+}
+
+export function canonicalDomainAllowed(value, domains = []) {
+  try {
+    const hostname = new URL(value).hostname.toLocaleLowerCase();
+    return domains.some((domain) => {
+      const normalized = String(domain).trim().toLocaleLowerCase();
+      return normalized && (hostname === normalized || hostname.endsWith(`.${normalized}`));
+    });
+  } catch {
+    return false;
+  }
+}
+
+function evidenceTokens(value) {
+  return new Set(
+    [...WORD_SEGMENTER.segment(plainText(value).toLocaleLowerCase())]
+      .filter((segment) => segment.isWordLike)
+      .map((segment) => normalizeTextKey(segment.segment))
+      .filter(
+        (token) =>
+          token.length >= 3 &&
+          !TITLE_STOP_WORDS.has(token) &&
+          !/^\d+$/u.test(token),
+      ),
+  );
+}
+
+export function evidenceDescribesSameEvent(left, right) {
+  const leftText = `${left.title ?? ""} ${left.facts ?? ""}`;
+  const rightText = `${right.title ?? ""} ${right.facts ?? ""}`;
+  const leftTokens = evidenceTokens(leftText);
+  const rightTokens = evidenceTokens(rightText);
+  const tokenOverlap = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const leftNumbers = new Set(leftText.match(/\d+(?:\.\d+)?%?/gu) ?? []);
+  const rightNumbers = new Set(rightText.match(/\d+(?:\.\d+)?%?/gu) ?? []);
+  const numberOverlap = [...leftNumbers].some((number) => rightNumbers.has(number));
+  return tokenOverlap >= 3 || (tokenOverlap >= 1 && numberOverlap);
+}
+
+export function pairCorroboratingXEvidence(candidates) {
+  const paired = candidates.map((item) => ({ ...item }));
+  for (const xItem of paired.filter((item) => item.platform === "x")) {
+    if (xItem._canonicalUrl || !Array.isArray(xItem._canonicalDomains)) continue;
+    const article = paired.find(
+      (candidate) =>
+        candidate.platform !== "x" &&
+        canonicalDomainAllowed(candidate.url, xItem._canonicalDomains) &&
+        evidenceDescribesSameEvent(xItem, candidate),
+    );
+    if (!article) continue;
+    xItem._canonicalUrl = article.url;
+    article._xSourceUrl = xItem.url;
+  }
+  return paired;
+}
+
 export function shouldHydrateFacts(item, existingFacts) {
   if (item?.platform === "x" && existingFacts) return false;
   if (!existingFacts) return true;
@@ -1239,6 +1311,99 @@ async function hydrateNewsFacts(item) {
     }
     throw error;
   }
+}
+
+async function hydrateXCanonicalSource(item, fetcher = fetchText) {
+  if (
+    item?.platform !== "x" ||
+    item.authority === "expert" ||
+    !Array.isArray(item._canonicalDomains) ||
+    item._canonicalDomains.length === 0
+  ) {
+    return [item];
+  }
+
+  for (const outboundUrl of xOutboundUrls(item)) {
+    const outboundHost = (() => {
+      try {
+        return new URL(outboundUrl).hostname.toLocaleLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    if (
+      outboundHost !== "t.co" &&
+      !canonicalDomainAllowed(outboundUrl, item._canonicalDomains)
+    ) {
+      continue;
+    }
+    try {
+      const response = await fetcher(outboundUrl, {
+        headers: { Accept: "text/html,application/xhtml+xml" },
+        source: item.source,
+      });
+      const canonicalUrl = canonicalizeUrl(response.finalUrl || outboundUrl);
+      if (!canonicalDomainAllowed(canonicalUrl, item._canonicalDomains)) {
+        continue;
+      }
+      const title = extractArticleTitle(response.body, item.title);
+      const facts = extractArticleFacts(response.body, title, canonicalUrl);
+      if (title.length < 8 || !facts) continue;
+      return [
+        { ...item, _canonicalUrl: canonicalUrl },
+        {
+          title,
+          facts,
+          url: canonicalUrl,
+          source: item.source,
+          sourceLabel: item.source,
+          publishedAt: item.publishedAt,
+          regions: [...item.regions],
+          aiLayers: Array.isArray(item.aiLayers) ? [...item.aiLayers] : [],
+          platform: "web",
+          _sourceId: `x-canonical:${item.authorHandle}`,
+          _tier: item.authority === "first_party" ? "official" : "publisher",
+          _xSourceUrl: item.url,
+        },
+      ];
+    } catch {
+      // The X post remains a discovery candidate when its canonical page is unavailable.
+    }
+  }
+  return [item];
+}
+
+export async function hydrateNewsEvidence(item, fetcher = fetchText) {
+  const hydrated = await hydrateNewsFacts(item);
+  return hydrateXCanonicalSource(hydrated, fetcher);
+}
+
+export function includeCanonicalPairs(
+  selected,
+  candidates,
+  maximumPerMarket = NEWS_MAX_PER_MARKET,
+) {
+  const result = [...selected];
+  const selectedUrls = new Set(result.map((item) => item.url));
+  const candidateByUrl = new Map(candidates.map((item) => [item.url, item]));
+  const marketCount = (market) =>
+    result.filter((item) => item.regions.includes(market)).length;
+
+  for (const item of [...result]) {
+    const counterpartUrl = item._canonicalUrl || item._xSourceUrl;
+    const counterpart = counterpartUrl ? candidateByUrl.get(counterpartUrl) : null;
+    if (!counterpart || selectedUrls.has(counterpart.url)) continue;
+    if (
+      counterpart.regions.some(
+        (market) => marketCount(market) >= maximumPerMarket,
+      )
+    ) {
+      continue;
+    }
+    result.push(counterpart);
+    selectedUrls.add(counterpart.url);
+  }
+  return result;
 }
 
 async function mapSettledWithConcurrency(items, concurrency, worker) {
@@ -1346,37 +1511,46 @@ export async function collectNews(
   ]);
   const sourceResults = discovery.sources;
   const discovered = discovery.candidates;
-  const candidates = deduplicateNews([
-    ...audited,
-    ...discovered,
-    ...supplementalCandidates,
-    ...promisedSupplemental,
-  ]);
+  const candidates = pairCorroboratingXEvidence(
+    deduplicateNews([
+      ...audited,
+      ...discovered,
+      ...supplementalCandidates,
+      ...promisedSupplemental,
+    ]),
+  );
   const sessionCandidates = marketSessions
     ? filterNewsToMarketSessions(candidates, marketSessions)
     : candidates;
-  const hydrationQueue = selectNews(sessionCandidates, {
-    perMarket: MAX_HYDRATION_PER_MARKET,
-    sourceLimit: 5,
-    topicLimit: 5,
-    includeInternal: true,
-  });
+  const hydrationQueue = includeCanonicalPairs(
+    selectNews(sessionCandidates, {
+      perMarket: MAX_HYDRATION_PER_MARKET,
+      sourceLimit: 5,
+      topicLimit: 5,
+      includeInternal: true,
+    }),
+    sessionCandidates,
+    MAX_HYDRATION_PER_MARKET + 2,
+  );
   const hydrationResults = await mapSettledWithConcurrency(
     hydrationQueue,
     4,
-    hydrateNewsFacts,
+    hydrateNewsEvidence,
   );
   const hydrated = hydrationResults
     .filter((result) => result.status === "fulfilled")
-    .map((result) => result.value);
+    .flatMap((result) => result.value);
   const eligibleHydrated = marketSessions
     ? filterNewsToMarketSessions(hydrated, marketSessions)
     : hydrated;
-  const selected = selectNews(eligibleHydrated, {
-    perMarket: budget.targetPerMarket,
-    minimumScore: 8,
-    includeInternal: true,
-  });
+  const selected = includeCanonicalPairs(
+    selectNews(eligibleHydrated, {
+      perMarket: budget.targetPerMarket,
+      minimumScore: 8,
+      includeInternal: true,
+    }),
+    eligibleHydrated,
+  );
   const counts = marketCounts(selected);
   return {
     news: selected.map((item) =>

@@ -5,7 +5,8 @@
     "authority": "first_party",
     "markets": ["CN", "US"],
     "layers": ["chips", "servers", "applications", "robotics"],
-    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/"
+    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/",
+    "canonicalDomains": ["nvidia.com"]
   },
   {
     "handle": "NVIDIANetworkng",
@@ -13,7 +14,8 @@
     "authority": "first_party",
     "markets": ["CN", "US"],
     "layers": ["interconnect", "servers", "data_center"],
-    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/"
+    "identityEvidence": "https://www.nvidia.com/en-us/contact/social/",
+    "canonicalDomains": ["nvidia.com"]
   },
   {
     "handle": "AMD",
@@ -21,7 +23,8 @@
     "authority": "first_party",
     "markets": ["CN", "US"],
     "layers": ["chips", "servers"],
-    "identityEvidence": "https://www.amd.com/en/corporate/events/ces.html"
+    "identityEvidence": "https://www.amd.com/en/corporate/events/ces.html",
+    "canonicalDomains": ["amd.com"]
   },
   {
     "handle": "MicronTech",
@@ -29,7 +32,8 @@
     "authority": "first_party",
     "markets": ["CN", "US"],
     "layers": ["memory"],
-    "identityEvidence": "https://www.micron.com/"
+    "identityEvidence": "https://www.micron.com/",
+    "canonicalDomains": ["micron.com"]
   },
   {
     "handle": "DellTech",
@@ -37,7 +41,8 @@
     "authority": "first_party",
     "markets": ["US"],
     "layers": ["servers"],
-    "identityEvidence": "https://www.dell.com/en-us/lp/dt/social-media"
+    "identityEvidence": "https://www.dell.com/en-us/lp/dt/social-media",
+    "canonicalDomains": ["dell.com"]
   },
   {
     "handle": "CoreWeave",
@@ -45,7 +50,8 @@
     "authority": "first_party",
     "markets": ["US"],
     "layers": ["cloud", "data_center"],
-    "identityEvidence": "https://investors.coreweave.com/financials/quarterly-results/default.aspx"
+    "identityEvidence": "https://investors.coreweave.com/financials/quarterly-results/default.aspx",
+    "canonicalDomains": ["coreweave.com"]
   },
   {
     "handle": "Vertiv",
@@ -53,7 +59,8 @@
     "authority": "first_party",
     "markets": ["US"],
     "layers": ["data_center"],
-    "identityEvidence": "https://www.vertiv.com/en-us/about/news-and-insights/social-media/"
+    "identityEvidence": "https://www.vertiv.com/en-us/about/news-and-insights/social-media/",
+    "canonicalDomains": ["vertiv.com"]
   },
   {
     "handle": "figure_robot",
@@ -61,7 +68,8 @@
     "authority": "first_party",
     "markets": ["US"],
     "layers": ["robotics"],
-    "identityEvidence": "https://www.figure.ai/"
+    "identityEvidence": "https://www.figure.ai/",
+    "canonicalDomains": ["figure.ai"]
   },
   {
     "handle": "SemiAnalysis_",
@@ -69,7 +77,8 @@
     "authority": "specialist",
     "markets": ["CN", "US"],
     "layers": ["chips", "memory", "servers", "interconnect", "data_center", "cloud"],
-    "identityEvidence": "https://semianalysis.com/"
+    "identityEvidence": "https://semianalysis.com/",
+    "canonicalDomains": ["semianalysis.com"]
   },
   {
     "handle": "trendforce",
@@ -77,7 +86,8 @@
     "authority": "specialist",
     "markets": ["CN", "US"],
     "layers": ["chips", "memory", "servers", "interconnect", "data_center", "robotics"],
-    "identityEvidence": "https://www.trendforce.com/"
+    "identityEvidence": "https://www.trendforce.com/",
+    "canonicalDomains": ["trendforce.com"]
   },
   {
     "handle": "xiaomustock",
@@ -85,6 +95,7 @@
     "authority": "expert",
     "markets": ["CN", "US"],
     "layers": ["chips", "memory", "servers", "interconnect", "data_center", "cloud", "applications", "robotics"],
-    "identityEvidence": "https://x.com/xiaomustock"
+    "identityEvidence": "https://x.com/xiaomustock",
+    "canonicalDomains": []
   }
 ]
