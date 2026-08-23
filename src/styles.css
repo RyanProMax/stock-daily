@@ -5348,9 +5348,16 @@ footer {
 .snapshot-evidence-row {
   display: grid;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+}
+
+.snapshot-evidence-meta {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .snapshot-evidence-tag {
@@ -5389,7 +5396,6 @@ footer {
   display: flex;
   min-width: 0;
   align-items: center;
-  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 5px;
 }
@@ -5479,9 +5485,7 @@ footer {
   }
 
   .snapshot-evidence-row {
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: flex-start;
-    gap: 6px;
+    gap: 8px;
   }
 
   .snapshot-evidence-row p,
@@ -5490,8 +5494,7 @@ footer {
     line-height: 1.55;
   }
 
-  .snapshot-evidence-sources {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+  .snapshot-evidence-meta {
+    align-items: flex-start;
   }
 }

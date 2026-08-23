@@ -194,17 +194,21 @@ function SnapshotEvidenceList({
           key={`${title}:${evidence.map((item) => item.source).join(":")}`}
         >
           <article className="snapshot-evidence-row">
-            <span className="snapshot-evidence-tag">{tag}</span>
             <p>
               <strong>{title}</strong>
               <span>：{summary}</span>
             </p>
-            <span
-              className="snapshot-evidence-sources"
-              aria-label={labels.sourceArticles}
-            >
-              {[...new Map(evidence.map((item) => [item.source, item])).values()].map(
-                (item) => (
+            <div className="snapshot-evidence-meta">
+              <span className="snapshot-evidence-tag">{tag}</span>
+              <span
+                className="snapshot-evidence-sources"
+                aria-label={labels.sourceArticles}
+              >
+                {[
+                  ...new Map(
+                    evidence.map((item) => [item.source, item]),
+                  ).values(),
+                ].map((item) => (
                   <a
                     href={item.source}
                     key={item.source}
@@ -221,9 +225,9 @@ function SnapshotEvidenceList({
                     )}
                     <ExternalLink aria-hidden="true" />
                   </a>
-                ),
-              )}
-            </span>
+                ))}
+              </span>
+            </div>
           </article>
         </li>
       ))}

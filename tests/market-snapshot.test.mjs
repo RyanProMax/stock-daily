@@ -168,6 +168,12 @@ test("market snapshot renders unique compact evidence rows for market and sector
   assert.match(marketItem.textContent, /市场收评/);
   assert.match(marketItem.textContent, /X · @example_research/);
   assert.match(marketItem.textContent, /专业研究/);
+  assert.ok(marketItem.querySelector(".snapshot-evidence-row > p"));
+  assert.ok(
+    marketItem.querySelector(
+      ".snapshot-evidence-row > .snapshot-evidence-meta > .snapshot-evidence-tag",
+    ),
+  );
   assert.equal(marketItem.querySelectorAll(".snapshot-evidence-sources a").length, 2);
   assert.ok(marketItem.querySelector('a[href="https://example.com/market-wrap"]'));
   assert.ok(marketItem.querySelector('a[href="https://x.com/example/status/123"]'));
