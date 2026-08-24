@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assessDailyFreshness } from "./daily-policy.mjs";
 
-const DEFAULT_BASE_URL = "https://stock-daily-4ip.pages.dev";
+const DEFAULT_BASE_URL = "https://stock-daily-8k4.pages.dev";
 
 async function fetchJson(url) {
   const response = await fetch(url, {

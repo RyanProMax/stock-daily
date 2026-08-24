@@ -5,7 +5,7 @@ const projectRoot = new URL("../", import.meta.url);
 const reportsPath = new URL("data/reports.json", projectRoot);
 const baseUrl = (
   process.argv.find((argument) => argument.startsWith("--base-url="))?.slice(11) ??
-  "https://stock-daily-4ip.pages.dev"
+  "https://stock-daily-8k4.pages.dev"
 ).replace(/\/$/, "");
 
 async function fetchJson(path) {

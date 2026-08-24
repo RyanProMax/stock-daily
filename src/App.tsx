@@ -775,7 +775,7 @@ export default function Document({ data }: { data: PageData }) {
         <meta property="og:url" content={canonical} />
         <meta
           property="og:image"
-          content="https://stock-daily-4ip.pages.dev/og.png"
+          content="https://stock-daily-8k4.pages.dev/og.png"
         />
         <link rel="canonical" href={canonical} />
         <meta name="twitter:card" content="summary_large_image" />

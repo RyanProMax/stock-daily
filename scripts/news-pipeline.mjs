@@ -15,7 +15,7 @@ const auditedNews = JSON.parse(
   await readFile(new URL("../data/audited-news.json", import.meta.url), "utf8"),
 );
 
-const USER_AGENT = "StockDaily/1.0 (+https://stock-daily-4ip.pages.dev)";
+const USER_AGENT = "StockDaily/1.0 (+https://stock-daily-8k4.pages.dev)";
 const DISCOVERY_WINDOW_MS = 96 * 60 * 60 * 1000;
 const LIVE_AUDIT_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 const SOURCE_TIMEOUT_MS = 20_000;

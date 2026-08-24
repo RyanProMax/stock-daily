@@ -14,7 +14,7 @@ const expectedReport = isAttribution
     )
   : null;
 const marketAsOf = marketAsOfFromInput(input);
-const baseUrl = "https://stock-daily-4ip.pages.dev";
+const baseUrl = "https://stock-daily-8k4.pages.dev";
 const cacheBust = Date.now();
 
 const [healthResponse, reportResponse] = await Promise.all([

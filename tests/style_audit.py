@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 
 BASE_URL = os.environ.get(
-    "STOCK_DAILY_URL", "https://stock-daily-4ip.pages.dev"
+    "STOCK_DAILY_URL", "https://stock-daily-8k4.pages.dev"
 ).rstrip("/")
 CHROME_PATH = os.environ.get(
     "CHROME_PATH",

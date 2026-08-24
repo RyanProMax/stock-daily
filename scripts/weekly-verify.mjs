@@ -5,7 +5,7 @@ const input = JSON.parse(
   await readFile(resolve(process.argv[2] ?? "work/weekly-input.json"), "utf8"),
 );
 const response = await fetch(
-  `https://stock-daily-4ip.pages.dev/api/weekly/${input.weekEnd}`,
+  `https://stock-daily-8k4.pages.dev/api/weekly/${input.weekEnd}`,
   { signal: AbortSignal.timeout(20_000) },
 );
 if (!response.ok) {

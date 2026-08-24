@@ -27,7 +27,7 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>();
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const productionOrigin = "https://stock-daily-4ip.pages.dev";
+const productionOrigin = "https://stock-daily-8k4.pages.dev";
 const cacheHeaders = {
   "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
   "Content-Type": "text/html; charset=UTF-8",

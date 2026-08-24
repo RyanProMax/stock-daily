@@ -2,7 +2,7 @@
 
 一个部署在 Cloudflare Pages、使用 Cloudflare D1 保存历史日报和周报的双语市场备忘录。页面以“市场快照 → 定价信号板 → 往期日报”组织核心信息。
 
-线上地址：[stock-daily-4ip.pages.dev](https://stock-daily-4ip.pages.dev/)
+线上地址：[stock-daily-8k4.pages.dev](https://stock-daily-8k4.pages.dev/)
 
 ## 功能
 
