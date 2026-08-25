@@ -298,7 +298,10 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const marketStories = report.stories.filter((story) =>
     story.regions.includes(data.market),
   );
-  const isAttribution = report.contractVersion === "market-attribution-v9";
+  const isAttribution = [
+    "market-attribution-v9",
+    "codex-market-research-v10",
+  ].includes(report.contractVersion ?? "");
   const marketDrivers = (report.drivers ?? []).filter(
     (driver) => driver.market === data.market,
   );
@@ -457,6 +460,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
+          aiChainView={report.aiChainViews?.[data.market]}
           drivers={marketDrivers}
           aiUpdates={marketAiUpdates}
           market={data.market}

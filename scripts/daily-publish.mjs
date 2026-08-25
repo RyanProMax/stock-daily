@@ -4,59 +4,118 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-  getNewsBudget,
-  NEWS_MAX_PER_MARKET,
-} from "./news-pipeline.mjs";
-import {
-  SECTOR_COUNT_PER_MARKET,
-  sectorHeatScore,
-} from "./sector-heat.mjs";
+import { AI_CHAIN_LAYERS } from "./ai-chain.mjs";
+import { auditCodexRun } from "./daily-agent-audit.mjs";
+import { buildMarketBriefs } from "./daily-collect.mjs";
 import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
   marketAsOfFromInput,
 } from "./daily-policy.mjs";
-import {
-  assignSignalMetadata,
-  checkpointDueAt,
-  enrichNewsItem,
-  supportedEntityKeys,
-} from "./signal-intelligence.mjs";
+import { auditReportSources } from "./daily-source-audit.mjs";
 import {
   buildMarketSessions,
-  causalEventEvidenceMatches,
   driverDirectionMatches,
-  evidenceFitsSession,
-  localMarketWrapMatches,
-  sectorExtremes,
 } from "./market-attribution.mjs";
-import { AI_CHAIN_LAYERS } from "./ai-chain.mjs";
+import {
+  SECTOR_COUNT_PER_MARKET,
+  sectorHeatScore,
+  topSectorHeat,
+} from "./sector-heat.mjs";
 
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
-const categories = new Set(["公司", "宏观", "商品", "行业"]);
-const tones = new Set(["positive", "negative", "mixed", "neutral"]);
-const signalDirections = new Set(["positive", "negative", "mixed"]);
-const signalHorizons = new Set(["intraday", "1-5d", "1-4w"]);
-const signalConfidences = new Set(["low", "medium", "high"]);
+const CONTRACT_VERSION = "codex-market-research-v10";
+const MARKETS = ["CN", "US"];
+const DRIVER_STATUSES = new Set(["explained", "partial", "structural"]);
+const DRIVER_BASES = new Set(["structural", "event", "macro"]);
+const DRIVER_DIRECTIONS = new Set(["positive", "negative", "mixed"]);
+const EVIDENCE_KINDS = new Set([
+  "market_data",
+  "market_wrap",
+  "event",
+  "official",
+]);
+const SOURCE_TYPES = new Set(["first_party", "publisher", "expert"]);
+const FIRST_PARTY_SOURCE_DOMAINS = [
+  "bea.gov",
+  "bls.gov",
+  "cmegroup.com",
+  "csindex.com.cn",
+  "eia.gov",
+  "federalreserve.gov",
+  "gov.cn",
+  "hkex.com.hk",
+  "hkexnews.hk",
+  "nasdaq.com",
+  "nyse.com",
+  "pbc.gov.cn",
+  "sec.gov",
+  "sse.com.cn",
+  "stats.gov.cn",
+  "szse.cn",
+  "treasury.gov",
+];
+const ESTABLISHED_PUBLISHER_HOSTS = new Set([
+  "21jingji.com",
+  "apnews.com",
+  "barrons.com",
+  "bloomberg.com",
+  "caixin.com",
+  "cls.cn",
+  "cnbc.com",
+  "cnstock.com",
+  "finance.eastmoney.com",
+  "finance.yahoo.com",
+  "ft.com",
+  "marketwatch.com",
+  "m.nbd.com.cn",
+  "nbd.com.cn",
+  "people.com.cn",
+  "reuters.com",
+  "finance.sina.com.cn",
+  "stcn.com",
+  "thepaper.cn",
+  "wap.eastmoney.com",
+  "wsj.com",
+  "wtop.com",
+  "xinhuanet.com",
+  "yicai.com",
+]);
+const SEARCH_RESULT_URL =
+  /(?:google\.[^/]+\/search|bing\.com\/search|search\.brave\.com\/search|duckduckgo\.com\/?\?q=)/iu;
+const INTERNAL_COPY =
+  /\b(?:Codex|OpenAI|API(?:\s+Skill)?|Agent|provider|schema|pipeline|market_data_query|newsDiagnostics|schemaVersion|contractVersion)\b|内部评分|调试标记/iu;
+const RAW_DATE_OR_TIMESTAMP =
+  /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 
-const tickerAliases = {
-  AAPL: /\bapple\b/i,
-  AMZN: /\bamazon\b/i,
-  BABA: /\baliexpress\b|\balibaba\b|全球速卖通/i,
-  CCK: /\bcrown holdings\b/i,
-  EDU: /\bnew oriental(?: education)?\b|新东方/i,
-  GOOG: /\bgoogle\b|\balphabet\b/i,
-  GOOGL: /\bgoogle\b|\balphabet\b/i,
-  GFS: /\bglobalfoundries\b|格罗方德/i,
-  META: /\bmeta\b|\bfacebook\b/i,
-  MSFT: /\bmicrosoft\b/i,
-  NVDA: /\bnvidia\b/i,
-  PG: /\bprocter\s*&\s*gamble\b|\bp&g\b|宝洁/i,
-  TSLA: /\btesla\b/i,
-  VRSN: /\bverisign\b/i,
-};
+function hostnameMatches(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+export function verifiedExternalSourceType(source, platform = "web") {
+  if (platform === "x") return "expert";
+  let hostname;
+  try {
+    hostname = new URL(source).hostname.toLocaleLowerCase();
+  } catch {
+    return "expert";
+  }
+  if (
+    FIRST_PARTY_SOURCE_DOMAINS.some((domain) =>
+      hostnameMatches(hostname, domain),
+    )
+  ) {
+    return "first_party";
+  }
+  const publisherHostname = hostname.replace(/^www\./u, "");
+  if (ESTABLISHED_PUBLISHER_HOSTS.has(publisherHostname)) {
+    return "publisher";
+  }
+  return "expert";
+}
 
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -70,2335 +129,1415 @@ function requireText(value, label, maxLength, minLength = 2) {
   const text = value
     .normalize("NFC")
     .replace(/\p{Cf}/gu, "")
-    .replace(/\s+/g, " ")
+    .replace(/\s+/gu, " ")
     .trim();
   if (text.length < minLength) throw new Error(`${label} 少于 ${minLength} 字`);
   if (text.length > maxLength) throw new Error(`${label} 超过 ${maxLength} 字`);
   return text;
 }
 
-function completeSentence(
-  value,
-  label,
-  maxLength,
-  minLength,
-  terminator = "。",
-) {
+function readerText(value, label, maxLength, minLength = 2) {
   const text = requireText(value, label, maxLength, minLength);
-  if (/[。！？.!?]$/.test(text)) return text;
-  if (text.length >= maxLength) {
-    throw new Error(`${label} 未在长度限制内写完`);
+  if (INTERNAL_COPY.test(text)) throw new Error(`${label} 暴露了内部实现术语`);
+  if (RAW_DATE_OR_TIMESTAMP.test(text)) {
+    throw new Error(`${label} 包含未本地化的时间戳或日期`);
   }
-  return `${text}${terminator}`;
+  return text;
 }
 
-function stringArray(value, label, maxItems, maxLength, minItems = 0) {
+function stringArray(value, label, minItems, maxItems, maxLength = 80) {
   if (!Array.isArray(value)) throw new Error(`${label} 必须是数组`);
-  const items = value
-    .filter((item) => typeof item === "string")
-    .map((item) =>
-      item
-        .normalize("NFC")
-        .replace(/\p{Cf}/gu, "")
-        .replace(/\s+/g, " ")
-        .trim(),
-    )
-    .filter(Boolean);
+  const items = value.map((item, index) =>
+    requireText(item, `${label}[${index}]`, maxLength, 1),
+  );
   if (items.length < minItems || items.length > maxItems) {
     throw new Error(`${label} 数量必须为 ${minItems}–${maxItems}`);
   }
-  if (items.some((item) => item.length > maxLength)) {
-    throw new Error(`${label} 单项超过 ${maxLength} 字`);
-  }
-  return [...new Set(items)];
+  if (new Set(items).size !== items.length) throw new Error(`${label} 不得重复`);
+  return items;
 }
 
-function topicKey(title) {
-  const normalized = title.toLocaleLowerCase();
-  if (
-    /\btreasury\b|\byield\b|\binterest rate\b|\bfederal reserve\b|\bfed\b|\becb\b|\binflation\b|\bmortgage\b|国债|收益率|利率|美联储|通胀/.test(
-      normalized,
-    )
-  ) {
-    return "rates";
-  }
-  if (/\bopec\b|\boil\b|\bcrude\b|欧佩克|原油|油价/.test(normalized)) {
-    return "energy";
-  }
-  if (/\bgold\b|\bsilver\b|\bcopper\b|黄金|白银|铜价/.test(normalized)) {
-    return "metals";
-  }
-  if (
-    /\btariff\b|\btrade deal\b|\bsanction\b|关税|贸易|出口|进口/.test(normalized)
-  ) {
-    return "trade";
-  }
-  if (
-    /\bstock market\b|\bnasdaq\b|\bs&p\b|\bdow\b|\bbig tech\b|美股|纳斯达克|标普|道琼斯|科技股|三大指数/.test(
-      normalized,
-    )
-  ) {
-    return "equities";
-  }
-  if (
-    /\bearnings\b|\bguidance\b|\brevenue\b|\bprofit\b|财报|业绩|营收|利润/.test(
-      normalized,
-    )
-  ) {
-    return "earnings";
-  }
-  return `other:${normalized.replace(/\W/g, "").slice(0, 32)}`;
+function numericChange(item) {
+  const match = String(item?.change ?? "").match(/^([+-]?\d+(?:\.\d+)?)%$/u);
+  return match ? Number(match[1]) : Number.NaN;
 }
 
-function topicTags(title) {
-  const normalized = title.toLocaleLowerCase();
-  const topics = new Set();
-  if (
-    /\btreasury\b|\byield\b|\binterest rate\b|\bfederal reserve\b|\bfed\b|\becb\b|\binflation\b|\bmortgage\b|国债|收益率|利率|美联储|通胀/.test(
-      normalized,
-    )
-  ) {
-    topics.add("rates");
-  }
-  if (/\bopec\b|\boil\b|\bcrude\b|欧佩克|原油|油价/.test(normalized)) {
-    topics.add("energy");
-  }
-  if (/\bgold\b|\bsilver\b|\bcopper\b|黄金|白银|铜价/.test(normalized)) {
-    topics.add("metals");
-  }
-  if (
-    /\btariff\b|\btrade deal\b|\bsanction\b|关税|贸易|出口|进口/.test(normalized)
-  ) {
-    topics.add("trade");
-  }
-  if (
-    /\bstock market\b|\bnasdaq\b|\bs&p\b|\bdow\b|\bbig tech\b|美股|纳斯达克|标普|道琼斯|科技股|三大指数/.test(
-      normalized,
-    )
-  ) {
-    topics.add("equities");
-  }
-  if (
-    /\bearnings\b|\bguidance\b|\brevenue\b|\bprofit\b|财报|业绩|营收|利润/.test(
-      normalized,
-    )
-  ) {
-    topics.add("earnings");
-  }
-  return topics;
+function expectedDirection(change) {
+  return Math.abs(change) < 0.005 ? "flat" : change > 0 ? "up" : "down";
 }
 
-function tickerIsSupported(ticker, sourceTitle) {
-  const alias = tickerAliases[ticker];
-  if (alias) return alias.test(sourceTitle);
-  return new RegExp(`\\b${ticker.replace(/[.-]/g, "\\$&")}\\b`).test(sourceTitle);
-}
-
-function assertNumbersBounded(sourceFacts, generatedText) {
-  const source = sourceFacts.toLocaleLowerCase().replaceAll(",", "");
-  const generatedNumbers =
-    generatedText.toLocaleLowerCase().replaceAll(",", "").match(/\d+(?:\.\d+)?/g) ??
-    [];
-  for (const number of new Set(generatedNumbers)) {
-    if (!new RegExp(`(^|\\D)${number.replace(".", "\\.")}(\\D|$)`).test(source)) {
-      throw new Error(`解读引用了已核验事实未提供的数字 ${number}`);
-    }
+function validateConstituents(items, market, asOf, label) {
+  if (!Array.isArray(items) || items.length !== 4) {
+    throw new Error(`${label}.constituents 必须包含四只代表标的`);
   }
-}
-
-function assertStoryFactsBounded(sourceFacts, generatedText) {
-  const source = sourceFacts.toLocaleLowerCase();
-  assertNumbersBounded(sourceFacts, generatedText);
-  if (
-    !topicTags(sourceFacts).has("rates") &&
-    /美债|国债收益率|基点|无风险利率.{0,8}(升至|降至|回落至)/.test(generatedText)
-  ) {
-    throw new Error("解读混入了该来源未提供的利率行情");
-  }
-  if (
-    /\bunprepared\b.*6%|\bcould\b|\bif\b/.test(source) &&
-    /升至\s*6%|达到\s*6%/.test(generatedText) &&
-    !/若|如果|一旦|假设|情景/.test(generatedText)
-  ) {
-    throw new Error("新闻中的情景数字被写成已发生事实");
-  }
-  if (
-    /\bboj\b|\bbank of japan\b/.test(source) &&
-    !/\byen\b/.test(source) &&
-    /日元.{0,8}(承压|升值|贬值|走强|走弱)/.test(generatedText)
-  ) {
-    throw new Error("来源未提供日元方向，不得自行推断");
-  }
-}
-
-function assertToneIsAnalyzed(tone, interpretation, generatedText, label) {
-  if (
-    /待确认|方向未明|方向不(?:明|确定)|无法(?:判断|确认|判定)|难以判断|暂(?:时)?不能判断|信息不足|标题未(?:披露|说明|给出)|现有信息不足|取决于后续|若后续/.test(
-      generatedText,
-    )
-  ) {
-    throw new Error(`${label} 以信息不足代替事实核验和影响分析`);
-  }
-  const toneSignals = {
-    positive: /利好|支撑|改善|提振|增强|上修|受益/,
-    negative: /利空|压制|压低|恶化|下修|承压|削弱|挤压|拖累/,
-    mixed: /分化|利好.{0,50}利空|受益.{0,50}承压|支撑.{0,50}压制|一方面.{0,80}(另一方面|但|同时)/,
-    neutral: /中性|整体稳定|例行(?:发行|公布|更新)|正负因素.{0,20}(抵消|平衡)|不改变.{0,20}(预期|方向|定价)/,
-  };
-  if (!toneSignals[tone].test(interpretation)) {
-    throw new Error(`${label} 未明确说明 ${tone} 判断及其传导依据`);
-  }
-}
-
-function assertMarketDirections(text, markets) {
-  const clauses = text
-    .split(/[。！？；;，,\n]/)
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-  const checks = [
-    {
-      market: markets.find((item) => item.symbol === "IXIC"),
-      up: /纳斯达克.{0,10}(上涨|走高|反弹|收涨)/,
-      down: /纳斯达克.{0,10}(下跌|走低|暴跌|收跌)/,
-    },
-    {
-      market: markets.find((item) => item.symbol === "SPX"),
-      up: /(标普|S&P ?500).{0,10}(上涨|走高|反弹|收涨)/i,
-      down: /(标普|S&P ?500).{0,10}(下跌|走低|暴跌|收跌)/i,
-    },
-    {
-      market: markets.find((item) => item.symbol === "DJI"),
-      up: /(道琼斯|道指|DOW).{0,10}(上涨|走高|反弹|收涨)/i,
-      down: /(道琼斯|道指|DOW).{0,10}(下跌|走低|暴跌|收跌)/i,
-    },
-    {
-      market: markets.find((item) => item.symbol === "DGS10"),
-      up: /(美债|国债|10年期).{0,12}(收益率|利率).{0,8}(上涨|上升|走高|攀升)/,
-      down:
-        /(美债|国债|10年期).{0,12}(收益率|利率).{0,8}(下降|下跌|回落|走低)/,
-    },
-    {
-      market: markets.find((item) => item.symbol === "SSE"),
-      up: /(上证|A股).{0,10}(上涨|走高|反弹|收涨)/,
-      down: /(上证|A股).{0,10}(下跌|走低|回落|收跌)/,
-    },
-    {
-      market: markets.find((item) => item.symbol === "CSI300"),
-      up: /(沪深|A股).{0,10}(上涨|走高|反弹|收涨)/,
-      down: /(沪深|A股).{0,10}(下跌|走低|回落|收跌)/,
-    },
-  ];
-
-  for (const { market, up, down } of checks) {
-    if (!market) continue;
+  const symbols = new Set();
+  for (const [index, value] of items.entries()) {
+    const item = requireObject(value, `${label}.constituents[${index}]`);
+    const change = numericChange(item);
+    const close = Number(String(item.value ?? "").replaceAll(",", ""));
     if (
-      market.direction === "up" &&
-      clauses.some((clause) => down.test(clause))
+      typeof item.symbol !== "string" ||
+      !item.symbol.trim() ||
+      symbols.has(item.symbol) ||
+      typeof item.name !== "string" ||
+      typeof item.nameEn !== "string" ||
+      !Number.isFinite(close) ||
+      close <= 0 ||
+      !Number.isFinite(change) ||
+      item.direction !== expectedDirection(change) ||
+      item.asOf !== asOf ||
+      typeof item.source !== "string" ||
+      !item.source.startsWith("https://")
     ) {
-      throw new Error(`${market.name} 方向与行情数据矛盾`);
+      throw new Error(`${label}.constituents 字段无效`);
     }
-    if (
-      market.direction === "down" &&
-      clauses.some((clause) => up.test(clause))
-    ) {
-      throw new Error(`${market.name} 方向与行情数据矛盾`);
-    }
+    symbols.add(item.symbol);
   }
-}
-
-function requiredTickerGroups(sourceTitle) {
-  return [
-    { pattern: /\bapple\b/i, accepted: ["AAPL"] },
-    { pattern: /\bamazon\b/i, accepted: ["AMZN"] },
-    { pattern: /\bgoogle\b|\balphabet\b/i, accepted: ["GOOG", "GOOGL"] },
-    { pattern: /\bmeta\b|\bfacebook\b/i, accepted: ["META"] },
-    { pattern: /\bmicrosoft\b/i, accepted: ["MSFT"] },
-    { pattern: /\bnvidia\b/i, accepted: ["NVDA"] },
-    { pattern: /\btesla\b/i, accepted: ["TSLA"] },
-    { pattern: /\baliexpress\b|\balibaba\b|全球速卖通/i, accepted: ["BABA"] },
-    { pattern: /\bcrown holdings\b/i, accepted: ["CCK"] },
-    { pattern: /\bverisign\b/i, accepted: ["VRSN"] },
-  ].filter((group) => group.pattern.test(sourceTitle));
-}
-
-function validateLegacyInput(value) {
-  const input = requireObject(value, "daily-input");
-  const supportedContract =
-    (input.schemaVersion === 7 &&
-      input.contractVersion === "codex-daily-v7") ||
-    (input.schemaVersion === 8 &&
-      input.contractVersion === "codex-daily-v8");
-  if (
-    !supportedContract ||
-    typeof input.runId !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(input.reportDate) ||
-    !DAILY_UPDATE_KINDS.includes(input.updateKind) ||
-    input.cutoffAt !== dailyCutoffAt(input.reportDate, input.updateKind) ||
-    !Array.isArray(input.markets) ||
-    input.markets.length !== 10 ||
-    !Array.isArray(input.sectorHeat) ||
-    input.sectorHeat.length !== SECTOR_COUNT_PER_MARKET * 2 ||
-    !Array.isArray(input.news) ||
-    input.news.length === 0 ||
-    input.news.length > NEWS_MAX_PER_MARKET * 2
-  ) {
-    throw new Error("daily-input 结构或数量不符合 codex-daily-v7/v8");
-  }
-  const sectorCounts = new Map([
-    ["CN", 0],
-    ["US", 0],
-  ]);
-  const sectorKeys = new Set();
-  for (const sectorValue of input.sectorHeat) {
-    const sector = requireObject(sectorValue, "sectorHeat");
-    const changeMatch =
-      typeof sector.change === "string"
-        ? sector.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
-        : null;
-    const changeValue = changeMatch ? Number(changeMatch[1]) : Number.NaN;
-    const expectedDirection =
-      Math.abs(changeValue) < 0.005
-        ? "flat"
-        : changeValue > 0
-          ? "up"
-          : "down";
-    const key = `${sector.market}:${sector.symbol}`;
-    if (
-      !sectorCounts.has(sector.market) ||
-      typeof sector.symbol !== "string" ||
-      !/^[A-Z0-9]{2,10}$/.test(sector.symbol) ||
-      typeof sector.name !== "string" ||
-      typeof sector.nameEn !== "string" ||
-      !Number.isFinite(changeValue) ||
-      sector.direction !== expectedDirection ||
-      sector.score !== sectorHeatScore(sector.market, changeValue) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(sector.asOf) ||
-      typeof sector.source !== "string" ||
-      !sector.source.startsWith("https://") ||
-      sectorKeys.has(key)
-    ) {
-      throw new Error("板块行情字段无效");
-    }
-    sectorKeys.add(key);
-    sectorCounts.set(sector.market, sectorCounts.get(sector.market) + 1);
-  }
-  if (
-    sectorCounts.get("CN") !== SECTOR_COUNT_PER_MARKET ||
-    sectorCounts.get("US") !== SECTOR_COUNT_PER_MARKET
-  ) {
-    throw new Error(
-      `板块行情必须分别包含 ${SECTOR_COUNT_PER_MARKET} 个 CN 与 ${SECTOR_COUNT_PER_MARKET} 个 US 行业`,
-    );
-  }
-  const marketCounts = new Map([
-    ["CN", 0],
-    ["US", 0],
-  ]);
-  for (const marketValue of input.markets) {
-    const market = requireObject(marketValue, "market");
-    if (
-      !marketCounts.has(market.region) ||
-      !["up", "down", "flat"].includes(market.direction) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(market.asOf) ||
-      typeof market.source !== "string" ||
-      !market.source.startsWith("https://")
-    ) {
-      throw new Error("行情字段无效");
-    }
-    marketCounts.set(market.region, marketCounts.get(market.region) + 1);
-  }
-  if (marketCounts.get("CN") !== 6 || marketCounts.get("US") !== 4) {
-    throw new Error("行情必须包含 6 个 CN 与 4 个 US 指标");
-  }
-  const marketDataDiagnostics = requireObject(
-    input.marketDataDiagnostics,
-    "marketDataDiagnostics",
-  );
-  const providerSymbols = Array.isArray(marketDataDiagnostics.providers)
-    ? marketDataDiagnostics.providers.map((item) => item?.symbol)
-    : [];
-  if (
-    marketDataDiagnostics.schemaVersion !== "market-data-query.v1" ||
-    marketDataDiagnostics.status !== "ok" ||
-    marketDataDiagnostics.source !== "market_data_query" ||
-    marketDataDiagnostics.persistence !== "none" ||
-    Date.parse(marketDataDiagnostics.cutoffAt) !== Date.parse(input.cutoffAt) ||
-    marketDataDiagnostics.marketCount !== 10 ||
-    !Number.isFinite(Date.parse(marketDataDiagnostics.computedAt)) ||
-    providerSymbols.length !== 10 ||
-    new Set(providerSymbols).size !== 10 ||
-    ![
-      "SPX",
-      "IXIC",
-      "DJI",
-      "DGS10",
-      "SSE",
-      "SZSE",
-      "CSI300",
-      "CSI500",
-      "CHINEXT",
-      "STAR50",
-    ].every((symbol) => providerSymbols.includes(symbol))
-  ) {
-    throw new Error("行情必须来自完整、无持久化的 API daily-pack");
-  }
-  const newsCounts = new Map([
-    ["CN", 0],
-    ["US", 0],
-  ]);
-  const cutoffTime = Date.parse(input.cutoffAt);
-  for (const newsValue of input.news) {
-    const news = requireObject(newsValue, "news");
-    const publishedAt = Date.parse(news.publishedAt);
-    if (
-      typeof news.title !== "string" ||
-      news.title.length < 8 ||
-      typeof news.facts !== "string" ||
-      news.facts.length < 30 ||
-      news.facts.length > 900 ||
-      typeof news.url !== "string" ||
-      !news.url.startsWith("https://") ||
-      typeof news.publishedAt !== "string" ||
-      !Number.isFinite(publishedAt) ||
-      publishedAt > cutoffTime ||
-      !Array.isArray(news.regions) ||
-      news.regions.length === 0 ||
-      news.regions.some((region) => !newsCounts.has(region))
-    ) {
-      throw new Error("新闻事实字段无效");
-    }
-    for (const region of new Set(news.regions)) {
-      newsCounts.set(region, newsCounts.get(region) + 1);
-    }
-  }
-  const newsBudget = getNewsBudget(input.reportDate);
-  if (
-    newsCounts.get("CN") < newsBudget.minimumPerMarket ||
-    newsCounts.get("US") < newsBudget.minimumPerMarket ||
-    newsCounts.get("CN") > newsBudget.maximumPerMarket ||
-    newsCounts.get("US") > newsBudget.maximumPerMarket
-  ) {
-    throw new Error(
-      `候选新闻每个市场必须包含 ${newsBudget.minimumPerMarket}–${newsBudget.maximumPerMarket} 条事实`,
-    );
-  }
-  const diagnostics = requireObject(
-    input.newsDiagnostics,
-    "newsDiagnostics",
-  );
-  if (
-    !["live", "hybrid", "audited"].includes(diagnostics.mode) ||
-    !Number.isInteger(diagnostics.candidateCount) ||
-    !Number.isInteger(diagnostics.hydratedCount) ||
-    !Number.isInteger(diagnostics.rejectedDuringHydration) ||
-    diagnostics.minimumPerMarket !== newsBudget.minimumPerMarket ||
-    diagnostics.targetPerMarket !== newsBudget.targetPerMarket ||
-    diagnostics.selectedByMarket?.CN !== newsCounts.get("CN") ||
-    diagnostics.selectedByMarket?.US !== newsCounts.get("US") ||
-    !Array.isArray(diagnostics.sources)
-  ) {
-    throw new Error("newsDiagnostics 与候选新闻或当日预算不一致");
-  }
-  return input;
 }
 
 function validateSectorRows(rows, expectedPerMarket, label) {
   if (!Array.isArray(rows) || rows.length !== expectedPerMarket * 2) {
     throw new Error(`${label} 必须分别包含 ${expectedPerMarket} 个 CN 与 US 行业`);
   }
-  const counts = new Map([["CN", 0], ["US", 0]]);
+  const counts = { CN: 0, US: 0 };
   const keys = new Set();
-  for (const value of rows) {
-    const sector = requireObject(value, label);
-    const match = typeof sector.change === "string"
-      ? sector.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
-      : null;
-    const change = match ? Number(match[1]) : Number.NaN;
-    const direction = Math.abs(change) < 0.005 ? "flat" : change > 0 ? "up" : "down";
-    const key = `${sector.market}:${sector.symbol}`;
+  for (const [index, value] of rows.entries()) {
+    const row = requireObject(value, `${label}[${index}]`);
+    const change = numericChange(row);
+    const key = `${row.market}:${row.symbol}`;
     if (
-      !counts.has(sector.market) ||
-      typeof sector.symbol !== "string" ||
-      !/^[A-Z0-9]{2,10}$/.test(sector.symbol) ||
-      typeof sector.name !== "string" ||
-      typeof sector.nameEn !== "string" ||
+      !MARKETS.includes(row.market) ||
+      typeof row.symbol !== "string" ||
+      !/^[A-Z0-9]{2,10}$/u.test(row.symbol) ||
+      typeof row.name !== "string" ||
+      typeof row.nameEn !== "string" ||
       !Number.isFinite(change) ||
-      sector.direction !== direction ||
-      sector.score !== sectorHeatScore(sector.market, change) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(sector.asOf) ||
-      typeof sector.source !== "string" ||
-      !sector.source.startsWith("https://") ||
-      !Array.isArray(sector.constituents) ||
-      sector.constituents.length !== 4 ||
+      row.direction !== expectedDirection(change) ||
+      row.score !== sectorHeatScore(row.market, change) ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(row.asOf) ||
+      typeof row.source !== "string" ||
+      !row.source.startsWith("https://") ||
       keys.has(key)
     ) {
       throw new Error(`${label} 字段无效`);
     }
+    validateConstituents(row.constituents, row.market, row.asOf, `${label}.${key}`);
     keys.add(key);
-    const constituentSymbols = new Set();
-    for (const constituent of sector.constituents) {
-      const constituentChange = typeof constituent?.change === "string"
-        ? constituent.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
-        : null;
-      const constituentValue = constituentChange
-        ? Number(constituentChange[1])
-        : Number.NaN;
-      const close = Number(String(constituent?.value ?? "").replaceAll(",", ""));
-      const constituentDirection = Math.abs(constituentValue) < 0.005
-        ? "flat"
-        : constituentValue > 0
-          ? "up"
-          : "down";
-      if (
-        typeof constituent?.symbol !== "string" ||
-        constituentSymbols.has(constituent.symbol) ||
-        typeof constituent.name !== "string" || constituent.name.length < 2 ||
-        typeof constituent.nameEn !== "string" || constituent.nameEn.length < 2 ||
-        !Number.isFinite(close) || close <= 0 ||
-        !Number.isFinite(constituentValue) ||
-        constituent.direction !== constituentDirection ||
-        constituent.asOf !== sector.asOf ||
-        typeof constituent.source !== "string" ||
-        !constituent.source.startsWith("https://")
-      ) {
-        throw new Error(`${label}.${sector.market}.${sector.symbol}.constituents 字段无效`);
-      }
-      constituentSymbols.add(constituent.symbol);
-    }
-    counts.set(sector.market, counts.get(sector.market) + 1);
+    counts[row.market] += 1;
   }
-  if (counts.get("CN") !== expectedPerMarket || counts.get("US") !== expectedPerMarket) {
+  if (counts.CN !== expectedPerMarket || counts.US !== expectedPerMarket) {
     throw new Error(`${label} 市场数量无效`);
   }
 }
 
 function validateAiChainRows(rows) {
   if (!Array.isArray(rows) || rows.length !== AI_CHAIN_LAYERS.length * 2) {
-    throw new Error("aiChainPerformance 必须分别包含 8 个 CN 与 US 环节");
+    throw new Error("aiChainPerformance 必须分别包含八个 CN 与 US 环节");
   }
-  for (const market of ["CN", "US"]) {
+  for (const market of MARKETS) {
     const marketRows = rows.filter((row) => row?.market === market);
     if (
       marketRows.length !== AI_CHAIN_LAYERS.length ||
       new Set(marketRows.map((row) => row.layer)).size !== AI_CHAIN_LAYERS.length
     ) {
-      throw new Error(`${market} aiChainPerformance 环节不完整`);
+      throw new Error(`${market} AI 产业链环节不完整`);
     }
     for (const layer of AI_CHAIN_LAYERS) {
-      const metric = requireObject(
-        marketRows.find((row) => row.layer === layer),
+      const row = requireObject(
+        marketRows.find((item) => item.layer === layer),
         `aiChainPerformance.${market}.${layer}`,
       );
-      const match = typeof metric.change === "string"
-        ? metric.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
-        : null;
-      const change = match ? Number(match[1]) : Number.NaN;
-      const direction = Math.abs(change) < 0.005
-        ? "flat"
-        : change > 0
-          ? "up"
-          : "down";
+      const change = numericChange(row);
       if (
-        typeof metric.name !== "string" || metric.name.length < 2 ||
-        typeof metric.nameEn !== "string" || metric.nameEn.length < 4 ||
-        typeof metric.benchmark !== "string" || metric.benchmark.length < 3 ||
-        typeof metric.benchmarkEn !== "string" || metric.benchmarkEn.length < 4 ||
-        metric.benchmarkKind !== "equal_weight_basket" ||
-        typeof metric.symbol !== "string" || !/^AI-(?:CN|US)-[a-z_]+$/.test(metric.symbol) ||
-        !Number.isFinite(change) || metric.direction !== direction ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(metric.asOf) ||
-        typeof metric.source !== "string" || !metric.source.startsWith("https://") ||
-        !Array.isArray(metric.constituents) || metric.constituents.length !== 4
+        row.benchmarkKind !== "equal_weight_basket" ||
+        typeof row.name !== "string" ||
+        typeof row.nameEn !== "string" ||
+        typeof row.benchmark !== "string" ||
+        typeof row.benchmarkEn !== "string" ||
+        row.symbol !== `AI-${market}-${layer}` ||
+        !Number.isFinite(change) ||
+        row.direction !== expectedDirection(change) ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(row.asOf) ||
+        typeof row.source !== "string" ||
+        !row.source.startsWith("https://")
       ) {
         throw new Error(`aiChainPerformance.${market}.${layer} 字段无效`);
       }
-      const constituentSymbols = new Set();
-      for (const constituent of metric.constituents) {
-        const constituentChange = typeof constituent?.change === "string"
-          ? constituent.change.match(/^([+-]?\d+(?:\.\d+)?)%$/)
-          : null;
-        const constituentValue = constituentChange
-          ? Number(constituentChange[1])
-          : Number.NaN;
-        const constituentDirection = Math.abs(constituentValue) < 0.005
-          ? "flat"
-          : constituentValue > 0
-            ? "up"
-            : "down";
-        const close = Number(String(constituent?.value ?? "").replaceAll(",", ""));
-        if (
-          typeof constituent?.symbol !== "string" ||
-          constituentSymbols.has(constituent.symbol) ||
-          typeof constituent.name !== "string" || constituent.name.length < 2 ||
-          typeof constituent.nameEn !== "string" || constituent.nameEn.length < 2 ||
-          !Number.isFinite(close) || close <= 0 ||
-          !Number.isFinite(constituentValue) ||
-          constituent.direction !== constituentDirection ||
-          constituent.asOf !== metric.asOf ||
-          typeof constituent.source !== "string" ||
-          !constituent.source.startsWith("https://")
-        ) {
-          throw new Error(`aiChainPerformance.${market}.${layer}.constituents 字段无效`);
-        }
-        constituentSymbols.add(constituent.symbol);
-      }
+      validateConstituents(
+        row.constituents,
+        market,
+        row.asOf,
+        `aiChainPerformance.${market}.${layer}`,
+      );
     }
   }
 }
 
-function validateV9Input(value) {
-  const input = requireObject(value, "daily-input");
-  if (
-    input.schemaVersion !== 9 ||
-    input.contractVersion !== "market-attribution-v9" ||
-    typeof input.runId !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(input.reportDate) ||
-    !DAILY_UPDATE_KINDS.includes(input.updateKind) ||
-    input.cutoffAt !== dailyCutoffAt(input.reportDate, input.updateKind) ||
-    !Array.isArray(input.markets) ||
-    input.markets.length !== 10 ||
-    !Array.isArray(input.news) ||
-    input.news.length > NEWS_MAX_PER_MARKET * 2
-  ) {
-    throw new Error("daily-input 结构或数量不符合 market-attribution-v9");
+function validateMarkets(input) {
+  if (!Array.isArray(input.markets) || input.markets.length !== 10) {
+    throw new Error("markets 必须包含十项行情");
   }
-  validateSectorRows(input.sectorPerformance, 11, "sectorPerformance");
-  validateSectorRows(input.sectorHeat, SECTOR_COUNT_PER_MARKET, "sectorHeat");
-  validateAiChainRows(input.aiChainPerformance);
-
-  const marketCounts = new Map([["CN", 0], ["US", 0]]);
-  for (const value of input.markets) {
-    const market = requireObject(value, "market");
+  const expectedSymbols = new Set([
+    "SPX",
+    "IXIC",
+    "DJI",
+    "DGS10",
+    "SSE",
+    "SZSE",
+    "CSI300",
+    "CSI500",
+    "CHINEXT",
+    "STAR50",
+  ]);
+  const counts = { CN: 0, US: 0 };
+  for (const market of input.markets) {
+    const changeMatch = String(market?.change ?? "").match(
+      market?.symbol === "DGS10"
+        ? /^([+-]?\d+(?:\.\d+)?)\s*bp$/u
+        : /^([+-]?\d+(?:\.\d+)?)%$/u,
+    );
+    const change = changeMatch ? Number(changeMatch[1]) : Number.NaN;
     if (
-      !marketCounts.has(market.region) ||
-      !["up", "down", "flat"].includes(market.direction) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(market.asOf) ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(market.previousAsOf) ||
+      !MARKETS.includes(market?.region) ||
+      !expectedSymbols.delete(market.symbol) ||
+      typeof market.name !== "string" ||
+      !market.name.trim() ||
+      typeof market.value !== "string" ||
+      !market.value.trim() ||
+      !Number.isFinite(change) ||
+      market.direction !== expectedDirection(change) ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(market.asOf ?? "") ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(market.previousAsOf ?? "") ||
       market.previousAsOf >= market.asOf ||
       typeof market.source !== "string" ||
       !market.source.startsWith("https://")
     ) {
       throw new Error("行情字段无效");
     }
-    marketCounts.set(market.region, marketCounts.get(market.region) + 1);
+    counts[market.region] += 1;
   }
-  if (marketCounts.get("CN") !== 6 || marketCounts.get("US") !== 4) {
-    throw new Error("行情必须包含 6 个 CN 与 4 个 US 指标");
+  if (expectedSymbols.size || counts.CN !== 6 || counts.US !== 4) {
+    throw new Error("行情必须包含六个 CN 与四个 US 指标");
   }
+}
 
-  const marketDataDiagnostics = requireObject(
+function validateMarketDataDiagnostics(input) {
+  const diagnostics = requireObject(
     input.marketDataDiagnostics,
     "marketDataDiagnostics",
   );
-  const providers = Array.isArray(marketDataDiagnostics.providers)
-    ? marketDataDiagnostics.providers
-    : [];
-  const providerSymbols = providers.map((item) => item?.symbol);
-  const marketsBySymbol = new Map(input.markets.map((item) => [item.symbol, item]));
+  const providers = Array.isArray(diagnostics.providers) ? diagnostics.providers : [];
+  const bySymbol = new Map(input.markets.map((market) => [market.symbol, market]));
   if (
-    marketDataDiagnostics.schemaVersion !== "market-data-query.v1" ||
-    marketDataDiagnostics.status !== "ok" ||
-    marketDataDiagnostics.source !== "market_data_query" ||
-    marketDataDiagnostics.persistence !== "none" ||
-    Date.parse(marketDataDiagnostics.cutoffAt) !== Date.parse(input.cutoffAt) ||
-    marketDataDiagnostics.marketCount !== 10 ||
-    !Number.isFinite(Date.parse(marketDataDiagnostics.computedAt)) ||
+    diagnostics.schemaVersion !== "market-data-query.v1" ||
+    diagnostics.status !== "ok" ||
+    diagnostics.source !== "market_data_query" ||
+    diagnostics.persistence !== "none" ||
+    Date.parse(diagnostics.cutoffAt) !== Date.parse(input.cutoffAt) ||
+    diagnostics.marketCount !== 10 ||
+    !Number.isFinite(Date.parse(diagnostics.computedAt)) ||
     providers.length !== 10 ||
-    new Set(providerSymbols).size !== 10 ||
+    new Set(providers.map((item) => item?.symbol)).size !== 10 ||
     providers.some((provider) => {
-      const market = marketsBySymbol.get(provider?.symbol);
-      return !market ||
+      const market = bySymbol.get(provider?.symbol);
+      return (
+        !market ||
         provider.asOf !== market.asOf ||
-        provider.previousAsOf !== market.previousAsOf;
+        provider.previousAsOf !== market.previousAsOf
+      );
     })
   ) {
-    throw new Error("行情必须来自包含前一交易日的完整 API daily-pack");
+    throw new Error("行情必须来自包含前一交易日的完整 daily-pack");
   }
+}
 
-  const expectedSessions = buildMarketSessions(input.markets);
-  if (!Array.isArray(input.marketSessions) || input.marketSessions.length !== 2) {
-    throw new Error("marketSessions 必须包含 CN 与 US");
+function validateSessionsAndDates(input) {
+  const expected = buildMarketSessions(input.markets);
+  if (JSON.stringify(input.marketSessions) !== JSON.stringify(expected)) {
+    throw new Error("marketSessions 与行情交易日不一致");
   }
-  for (const expected of expectedSessions) {
-    const actual = input.marketSessions.find((item) => item.market === expected.market);
-    if (!actual || ["asOf", "previousAsOf", "windowStart", "windowEnd", "wrapDeadline"]
-      .some((key) => actual[key] !== expected[key])) {
-      throw new Error(`${expected.market} marketSessions 与行情交易日不一致`);
-    }
-    const dates = new Set(input.sectorPerformance
-      .filter((item) => item.market === expected.market)
-      .map((item) => item.asOf));
-    if (dates.size !== 1 || !dates.has(expected.asOf)) {
-      throw new Error(`${expected.market} sectorPerformance 与交易日不一致`);
-    }
-    const aiDates = new Set(input.aiChainPerformance
-      .filter((item) => item.market === expected.market)
-      .map((item) => item.asOf));
-    if (aiDates.size !== 1 || !aiDates.has(expected.asOf)) {
-      throw new Error(`${expected.market} aiChainPerformance 与交易日不一致`);
-    }
-  }
-
-  const cutoffTime = Date.parse(input.cutoffAt);
-  const newsCounts = { CN: 0, US: 0 };
-  for (const value of input.news) {
-    const news = requireObject(value, "news");
-    const publishedAt = Date.parse(news.publishedAt);
+  for (const session of expected) {
+    const sectorDates = new Set(
+      input.sectorPerformance
+        .filter((item) => item.market === session.market)
+        .map((item) => item.asOf),
+    );
+    const aiDates = new Set(
+      input.aiChainPerformance
+        .filter((item) => item.market === session.market)
+        .map((item) => item.asOf),
+    );
     if (
-      typeof news.title !== "string" || news.title.length < 8 ||
-      typeof news.facts !== "string" || news.facts.length < 30 || news.facts.length > 1200 ||
-      typeof news.url !== "string" || !news.url.startsWith("https://") ||
-      !Number.isFinite(publishedAt) || publishedAt > cutoffTime ||
-      !["event", "market_wrap"].includes(news.kind) ||
-      !Array.isArray(news.regions) || news.regions.length === 0 ||
-      news.regions.some((region) => !Object.hasOwn(newsCounts, region)) ||
-      (news.platform !== undefined && !["web", "x"].includes(news.platform)) ||
-      (news.authority !== undefined &&
-        !["first_party", "specialist", "expert"].includes(news.authority)) ||
-      (news.platform === "x" &&
-        (!/^https:\/\/x\.com\/[^/]+\/status\/\d+/.test(news.url) ||
-          typeof news.authorHandle !== "string" ||
-          !news.authorHandle.trim()))
+      sectorDates.size !== 1 ||
+      !sectorDates.has(session.asOf) ||
+      aiDates.size !== 1 ||
+      !aiDates.has(session.asOf)
     ) {
-      throw new Error("新闻事实字段无效");
+      throw new Error(`${session.market} 行情、行业与 AI 交易日不一致`);
     }
-    for (const region of new Set(news.regions)) newsCounts[region] += 1;
   }
-  if (newsCounts.CN > NEWS_MAX_PER_MARKET || newsCounts.US > NEWS_MAX_PER_MARKET) {
-    throw new Error(`候选新闻每个市场最多 ${NEWS_MAX_PER_MARKET} 条`);
-  }
+}
 
-  const diagnostics = requireObject(input.newsDiagnostics, "newsDiagnostics");
-  if (
-    !["live", "hybrid", "audited"].includes(diagnostics.mode) ||
-    diagnostics.selectedByMarket?.CN !== newsCounts.CN ||
-    diagnostics.selectedByMarket?.US !== newsCounts.US ||
-    !Array.isArray(diagnostics.sources)
-  ) {
-    throw new Error("newsDiagnostics 与候选新闻不一致");
+function validateMarketBriefs(input) {
+  const expected = buildMarketBriefs({
+    markets: input.markets,
+    marketSessions: input.marketSessions,
+    sectorPerformance: input.sectorPerformance,
+    aiChainPerformance: input.aiChainPerformance,
+  });
+  if (JSON.stringify(input.marketBriefs) !== JSON.stringify(expected)) {
+    throw new Error("marketBriefs 必须由本次确定性行情生成");
   }
-  const activeRetrieval = requireObject(
-    diagnostics.activeRetrieval,
-    "newsDiagnostics.activeRetrieval",
+}
+
+function validateSectorHeatSelection(input) {
+  const expected = MARKETS.flatMap((market) =>
+    topSectorHeat(
+      input.sectorPerformance.filter((item) => item.market === market),
+    ),
   );
-  const coverageByMarket = requireObject(
-    activeRetrieval.coverageByMarket,
-    "newsDiagnostics.activeRetrieval.coverageByMarket",
-  );
-  if (
-    typeof activeRetrieval.attempted !== "boolean" ||
-    !Number.isInteger(activeRetrieval.queryCount) ||
-    activeRetrieval.queryCount < 0 ||
-    activeRetrieval.queryCount > 6 ||
-    !Number.isInteger(activeRetrieval.candidateCount) ||
-    activeRetrieval.candidateCount < 0 ||
-    !Number.isInteger(activeRetrieval.hydratedCount) ||
-    activeRetrieval.hydratedCount < 0 ||
-    !Number.isInteger(activeRetrieval.rejectedDuringHydration) ||
-    activeRetrieval.rejectedDuringHydration < 0 ||
-    !Array.isArray(activeRetrieval.searches) ||
-    activeRetrieval.searches.length > 2 ||
-    activeRetrieval.attempted !== (activeRetrieval.queryCount > 0) ||
-    ["CN", "US"].some((market) => {
-      const coverage = coverageByMarket[market];
-      return (
-        !coverage ||
-        !["adequate", "insufficient"].includes(coverage.status) ||
-        typeof coverage.activeSearchRequired !== "boolean" ||
-        typeof coverage.activeSearchCompleted !== "boolean" ||
-        !Array.isArray(coverage.missingIntentKinds) ||
-        coverage.missingIntentKinds.some(
-          (kind) =>
-            !["market_wrap", "sector_extremes", "ai_extremes"].includes(kind),
-        )
-      );
-    }) ||
-    activeRetrieval.searches.some(
-      (search) =>
-        !["CN", "US"].includes(search?.market) ||
-        !["ok", "error"].includes(search?.status) ||
-        !Array.isArray(search?.intentIds) ||
-        !Array.isArray(search?.intentResults) ||
-        search.intentResults.length !== search.intentIds.length ||
-        search.intentResults.some(
-          (intent) =>
-            !search.intentIds.includes(intent?.id) ||
-            !["market_wrap", "sector_extremes", "ai_extremes"].includes(
-              intent?.kind,
-            ) ||
-            !Number.isInteger(intent?.resultCount) ||
-            intent.resultCount < 0,
-        ) ||
-        !Number.isInteger(search?.resultCount) ||
-        search.resultCount < 0 ||
-        !Number.isInteger(search?.durationMs) ||
-        search.durationMs < 0 ||
-        (search.attempts !== undefined &&
-          (!Array.isArray(search.attempts) ||
-            search.attempts.length < 1 ||
-            search.attempts.length > 2 ||
-            search.attempts.some(
-              (attempt) =>
-                typeof attempt?.provider !== "string" ||
-                !attempt.provider.trim() ||
-                !["ok", "error"].includes(attempt?.status) ||
-                !Number.isInteger(attempt?.resultCount) ||
-                attempt.resultCount < 0 ||
-                !Number.isInteger(attempt?.durationMs) ||
-                attempt.durationMs < 0,
-            ) ||
-            (search.status === "ok" &&
-              !search.attempts.some((attempt) => attempt.status === "ok")) ||
-            (search.status === "error" &&
-              search.attempts.some((attempt) => attempt.status === "ok")))),
-    )
-  ) {
-    throw new Error("主动检索诊断字段无效");
+  if (JSON.stringify(input.sectorHeat) !== JSON.stringify(expected)) {
+    throw new Error("sectorHeat 必须由完整一级行业确定性选出");
   }
-  return input;
 }
 
 export function validateInput(value) {
-  return value?.contractVersion === "market-attribution-v9"
-    ? validateV9Input(value)
-    : validateLegacyInput(value);
+  const input = requireObject(value, "daily-input");
+  if (
+    input.schemaVersion !== 10 ||
+    input.contractVersion !== CONTRACT_VERSION ||
+    typeof input.runId !== "string" ||
+    input.runId.length < 8 ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(input.reportDate ?? "") ||
+    !DAILY_UPDATE_KINDS.includes(input.updateKind) ||
+    input.cutoffAt !== dailyCutoffAt(input.reportDate, input.updateKind) ||
+    !Number.isFinite(Date.parse(input.collectedAt)) ||
+    Object.hasOwn(input, "news") ||
+    Object.hasOwn(input, "newsDiagnostics")
+  ) {
+    throw new Error(`daily-input 不符合 ${CONTRACT_VERSION}`);
+  }
+  validateMarkets(input);
+  validateMarketDataDiagnostics(input);
+  validateSectorRows(input.sectorPerformance, 11, "sectorPerformance");
+  validateSectorRows(input.sectorHeat, SECTOR_COUNT_PER_MARKET, "sectorHeat");
+  validateSectorHeatSelection(input);
+  validateAiChainRows(input.aiChainPerformance);
+  validateSessionsAndDates(input);
+  validateMarketBriefs(input);
+  return input;
 }
 
-function validateOverview(value, label) {
-  const overviewValue = requireObject(value, label);
-  if (!["positive", "negative", "mixed"].includes(overviewValue.tone)) {
-    throw new Error(`${label}.tone 必须明确为 positive、negative 或 mixed`);
+function marketDataRecords(input, market) {
+  const records = [];
+  for (const metric of input.markets.filter((item) => item.region === market)) {
+    if (metric.source) {
+      records.push({
+        source: metric.source,
+        scope: "index",
+        symbol: metric.symbol,
+        data: metric,
+      });
+    }
   }
-  const overview = {
-    tone: overviewValue.tone,
-    interpretation: completeSentence(
-      overviewValue.interpretation,
-      `${label}.interpretation`,
-      180,
-      42,
-    ),
-    positive: stringArray(
-      overviewValue.positive,
-      `${label}.positive`,
-      4,
-      18,
-      0,
-    ),
-    negative: stringArray(
-      overviewValue.negative,
-      `${label}.negative`,
-      4,
-      18,
-      0,
-    ),
-  };
-  if (overview.positive.length + overview.negative.length < 2) {
-    throw new Error(`${label} 至少列出两个受影响市场或板块`);
+  for (const row of input.sectorPerformance.filter(
+    (item) => item.market === market,
+  )) {
+    if (row.source) {
+      records.push({
+        source: row.source,
+        scope: "sector",
+        sectorSymbol: row.symbol,
+        data: row,
+      });
+    }
+    for (const constituent of row.constituents ?? []) {
+      if (constituent.source) {
+        records.push({
+          source: constituent.source,
+          scope: "sector_constituent",
+          sectorSymbol: row.symbol,
+          data: { sector: row.symbol, constituent },
+        });
+      }
+    }
   }
-  if (overview.tone === "positive" && overview.positive.length === 0) {
-    throw new Error(`${label} 为利好时必须列出主要受益对象`);
+  for (const row of input.aiChainPerformance.filter(
+    (item) => item.market === market,
+  )) {
+    if (row.source) {
+      records.push({
+        source: row.source,
+        scope: "ai",
+        layer: row.layer,
+        data: row,
+      });
+    }
+    for (const constituent of row.constituents ?? []) {
+      if (constituent.source) {
+        records.push({
+          source: constituent.source,
+          scope: "ai_constituent",
+          layer: row.layer,
+          data: { layer: row.layer, constituent },
+        });
+      }
+    }
   }
-  if (overview.tone === "negative" && overview.negative.length === 0) {
-    throw new Error(`${label} 为利空时必须列出主要承压对象`);
-  }
+  return records;
+}
+
+function marketDataSourceSet(input, market) {
+  return new Set(marketDataRecords(input, market).map((item) => item.source));
+}
+
+function marketDataBindings(input, market, source) {
+  return marketDataRecords(input, market).filter(
+    (record) => record.source === source,
+  );
+}
+
+function validateEvidence(value, input, market, label) {
+  const evidence = requireObject(value, label);
+  const title = readerText(evidence.title, `${label}.title`, 220, 4);
+  const facts = readerText(evidence.facts, `${label}.facts`, 1600, 20);
+  const source = requireText(evidence.source, `${label}.source`, 1200, 12);
+  const sourceLabel = readerText(
+    evidence.sourceLabel,
+    `${label}.sourceLabel`,
+    80,
+    2,
+  );
+  const publishedAt = requireText(
+    evidence.publishedAt,
+    `${label}.publishedAt`,
+    40,
+    10,
+  );
+  const publishedTime = Date.parse(publishedAt);
   if (
-    overview.tone === "mixed" &&
-    (overview.positive.length === 0 || overview.negative.length === 0)
+    !source.startsWith("https://") ||
+    SEARCH_RESULT_URL.test(source) ||
+    !EVIDENCE_KINDS.has(evidence.kind) ||
+    !SOURCE_TYPES.has(evidence.sourceType) ||
+    !["web", "x"].includes(evidence.platform) ||
+    typeof evidence.authorHandle !== "string" ||
+    !Number.isFinite(publishedTime) ||
+    !ISO_TIMESTAMP.test(publishedAt)
   ) {
-    throw new Error(`${label} 为分化时必须同时列出利好与利空对象`);
+    throw new Error(`${label} 证据字段无效`);
+  }
+  const authorHandle = evidence.authorHandle.trim();
+  const xSourceMatch = source.match(
+    /^https:\/\/x\.com\/([a-z0-9_]+)\/status\/\d+(?:[/?#]|$)/iu,
+  );
+  if (
+    (evidence.platform === "x" &&
+      (!xSourceMatch ||
+        !authorHandle ||
+        xSourceMatch[1].toLocaleLowerCase() !==
+          authorHandle.toLocaleLowerCase())) ||
+    (evidence.platform === "web" && authorHandle)
+  ) {
+    throw new Error(`${label} 平台与作者字段不一致`);
+  }
+
+  const verifiedSourceType =
+    evidence.kind === "market_data"
+      ? evidence.sourceType
+      : verifiedExternalSourceType(source, evidence.platform);
+  if (
+    evidence.kind !== "market_data" &&
+    evidence.sourceType !== verifiedSourceType
+  ) {
+    throw new Error(`${label} 来源层级与 URL 不一致`);
+  }
+
+  const session = input.marketSessions.find((item) => item.market === market);
+  const dataSources = marketDataSourceSet(input, market);
+  if (evidence.kind === "market_data") {
+    const bindings = marketDataBindings(input, market, source);
+    if (
+      !dataSources.has(source) ||
+      evidence.sourceType === "expert" ||
+      evidence.platform !== "web" ||
+      publishedAt !== session.windowEnd
+    ) {
+      throw new Error(`${label} 行情证据必须逐字引用本次输入`);
+    }
+    assertNumbersBounded(
+      approvedGroundingText(bindings.map((binding) => binding.data)),
+      `${title} ${facts}`,
+      `${label}.facts`,
+    );
+  } else {
+    const start = Date.parse(session.windowStart);
+    const close = Date.parse(session.windowEnd);
+    const deadline = Date.parse(session.wrapDeadline);
+    if (
+      publishedTime <= start ||
+      publishedTime > deadline ||
+      dataSources.has(source) ||
+      (evidence.kind === "market_wrap" && publishedTime < close) ||
+      (evidence.kind !== "market_wrap" && publishedTime > close)
+    ) {
+      throw new Error(`${label} 外部证据不在本次市场窗口内`);
+    }
+  }
+  return {
+    title,
+    facts,
+    source,
+    sourceLabel,
+    publishedAt: new Date(publishedTime).toISOString(),
+    kind: evidence.kind,
+    sourceType: verifiedSourceType,
+    platform: evidence.platform,
+    authorHandle: xSourceMatch?.[1] ?? "",
+  };
+}
+
+const COUNT_GROUNDING_FIELDS = {
+  advancing: "advancing count sectors up",
+  declining: "declining count sectors down",
+  flat: "flat count sectors flat",
+  marketCount: "market indicator total count",
+  sectorCount: "sector total count",
+  aiLayerCount: "AI layer total count",
+};
+
+export function approvedGroundingText(value) {
+  const facts = [];
+  function visit(item) {
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+    if (!item || typeof item !== "object") return;
+    if (typeof item.value === "string" && item.value.trim()) {
+      facts.push(`level ${item.value}`);
+    }
+    if (typeof item.change === "string" && item.change.trim()) {
+      facts.push(`change ${item.change} direction ${item.direction ?? ""}`);
+    }
+    if (Number.isInteger(item.tenor) && item.tenor > 0) {
+      facts.push(`tenor ${item.tenor}Y`);
+    }
+    for (const [field, prefix] of Object.entries(COUNT_GROUNDING_FIELDS)) {
+      if (Number.isInteger(item[field]) && item[field] >= 0) {
+        const unit = field === "aiLayerCount"
+          ? "layers"
+          : field === "marketCount"
+            ? "indicators"
+            : "sectors";
+        facts.push(`${prefix} ${item[field]} ${unit}`);
+      }
+    }
+    for (const child of Object.values(item)) {
+      if (child && typeof child === "object") visit(child);
+    }
+  }
+  visit(value);
+  return facts.join("\n");
+}
+
+function groundingEnvelope(input, market) {
+  const markets = input.markets.filter(
+    (item) => !market || item.region === market,
+  );
+  const sectors = input.sectorPerformance.filter(
+    (item) => !market || item.market === market,
+  );
+  const aiLayers = input.aiChainPerformance.filter(
+    (item) => !market || item.market === market,
+  );
+  const coveredMarkets = market ? [market] : MARKETS;
+  return {
+    marketCount: markets.length,
+    sectorCount: sectors.length,
+    aiLayerCount: aiLayers.length,
+    markets,
+    sectorPerformance: sectors,
+    aiChainPerformance: aiLayers,
+    marketBriefs: market ? input.marketBriefs[market] : input.marketBriefs,
+    marketCoverage: coveredMarkets.map((coveredMarket) => ({
+      marketCount: input.markets.filter(
+        (item) => item.region === coveredMarket,
+      ).length,
+      sectorCount: input.sectorPerformance.filter(
+        (item) => item.market === coveredMarket,
+      ).length,
+      aiLayerCount: input.aiChainPerformance.filter(
+        (item) => item.market === coveredMarket,
+      ).length,
+    })),
+    treasuryTenor: markets.some((item) => item.symbol === "DGS10")
+      ? { tenor: 10 }
+      : undefined,
+  };
+}
+
+function sanitizeNumericText(value) {
+  return String(value)
+    .normalize("NFC")
+    .toLocaleLowerCase()
+    .replaceAll(",", "")
+    .replaceAll("，", "")
+    .replace(/https:\/\/[^\s"'<>\])}]+/giu, " ")
+    .replace(
+      /\b\d{4}-\d{1,2}-\d{1,2}(?:t\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:z|[+-]\d{2}:\d{2})?)?\b/giu,
+      " ",
+    )
+    .replace(/\b\d{4}年\d{1,2}月\d{1,2}日/gu, " ")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/gu, " ");
+}
+
+function claimUnit(before, after) {
+  const head = before.slice(-32);
+  const tail = after.trimStart();
+  if (/^(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b)/iu.test(tail)) {
+    return "percent";
+  }
+  if (/^(?:bp|bps|个?\s*基点|basis\s+points?\b)/iu.test(tail)) {
+    return "basis_point";
+  }
+  if (/^(?:点|points?\b)/iu.test(tail) || /(?:level|收于|报于|报)\s*$/iu.test(head)) {
+    return "level";
+  }
+  if (/^(?:-?year\b|years?\b|年期|年\b|y\b)/iu.test(tail)) {
+    return "tenor";
   }
   if (
-    !/利好|利空|支撑|压制|估值|风险偏好|无风险利率|融资成本|现金流|需求|成本/.test(
-      overview.interpretation,
+    /^(?:个|只|项|层|家|条|次|种|行业|板块|环节|涨|跌|平|sectors?\b|layers?\b|indicators?\b|stocks?\b|companies?\b|items?\b)/iu.test(
+      tail,
     )
   ) {
-    throw new Error(`${label}.interpretation 缺少利好/利空与传导机制`);
+    return "count";
   }
-  return overview;
+  return /(?:tenor)\s*$/iu.test(head) ? "tenor" : "bare";
 }
 
-function validateMarketView(value, market, markets) {
-  const viewValue = requireObject(value, `marketViews.${market}`);
-  const headline = requireText(
-    viewValue.headline,
-    `marketViews.${market}.headline`,
-    22,
-    8,
-  );
-  if (headline.includes("盘前简报") || /\d/.test(headline)) {
-    throw new Error(`marketViews.${market}.headline 过于泛化或含数字`);
+function directionWord(value) {
+  if (
+    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|升|\bup\b|\brose\b|\brisen\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b)/iu.test(
+      value,
+    )
+  ) {
+    return "positive";
   }
-  const summary = completeSentence(
-    viewValue.summary,
-    `marketViews.${market}.summary`,
-    88,
+  if (
+    /(?:下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b)/iu.test(
+      value,
+    )
+  ) {
+    return "negative";
+  }
+  if (/(?:持平|\bflat\b|\bunchanged\b)/iu.test(value)) return "flat";
+  return "neutral";
+}
+
+function claimPolarity(raw, before, after, unit) {
+  const sign = raw.startsWith("+")
+    ? "positive"
+    : raw.startsWith("-")
+      ? "negative"
+      : "neutral";
+  if (/(?:至|到|\bto\b|\bat\b)\s*$/iu.test(before)) return "neutral";
+  if (unit === "count" && /(?:\bof\b|共)\s*$/iu.test(before)) {
+    return "neutral";
+  }
+  const prefix = before.match(
+    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|下跌|下降|收跌|跌幅|减少|降低|回落|走低|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|持平|\bflat\b|\bunchanged\b)\s*(?:约|了|为)?\s*$/iu,
+  )?.[0];
+  const suffix = after.match(
+    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|sectors?\b|layers?\b|indicators?\b|stocks?\b|companies?\b|items?\b))*\s*(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|涨|下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|持平|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bflat\b|\bunchanged\b)/iu,
+  )?.[0];
+  const word = directionWord(`${prefix ?? ""} ${suffix ?? ""}`);
+  if (sign !== "neutral" && word !== "neutral" && sign !== word) {
+    return "conflict";
+  }
+  return sign !== "neutral" ? sign : word;
+}
+
+export function numericClaims(value) {
+  const text = sanitizeNumericText(value);
+  const claims = [];
+  const pattern = /[+-]?\d+(?:\.\d+)?/gu;
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[0];
+    const index = match.index;
+    const end = index + raw.length;
+    const before = text.slice(Math.max(0, index - 48), index);
+    const after = text.slice(end, Math.min(text.length, end + 48));
+    const unit = claimUnit(before, after);
+    const previous = text[index - 1] ?? "";
+    const next = text[end] ?? "";
+    if (
+      /(?:s&p|csi|star|dgs|标普|沪深|中证|科创)\s*$/iu.test(before) ||
+      /[a-z0-9_]/iu.test(previous) ||
+      (/[a-z_]/iu.test(next) && unit !== "tenor") ||
+      (unit === "bare" &&
+        (/[\p{L}]/u.test(previous) ||
+          /[\p{L}]/u.test(next)))
+    ) {
+      continue;
+    }
+    claims.push({
+      raw,
+      number: String(Math.abs(Number(raw))),
+      unit,
+      polarity: claimPolarity(raw, before, after, unit),
+    });
+  }
+  return claims;
+}
+
+function assertNumbersBounded(sourceFacts, generatedText, label) {
+  const sourceClaims = numericClaims(sourceFacts);
+  for (const claim of numericClaims(generatedText)) {
+    const sameNumberAndUnit = sourceClaims.filter(
+      (source) =>
+        source.number === claim.number && source.unit === claim.unit,
+    );
+    if (sameNumberAndUnit.length === 0) {
+      throw new Error(`${label} 引用了证据未提供的数字 ${claim.raw}`);
+    }
+    if (
+      claim.polarity === "conflict" ||
+      (claim.polarity !== "neutral" &&
+        !sameNumberAndUnit.some(
+          (source) => source.polarity === claim.polarity,
+        ))
+    ) {
+      throw new Error(
+        `${label} 引用了证据未提供的数字 ${claim.raw}，或涨跌方向与证据不一致`,
+      );
+    }
+  }
+}
+
+function inputGroundingText(input) {
+  return approvedGroundingText(groundingEnvelope(input));
+}
+
+function marketGroundingText(input, market) {
+  return approvedGroundingText(groundingEnvelope(input, market));
+}
+
+function aiGroundingText(input, market) {
+  const aiLayers = input.aiChainPerformance.filter(
+    (item) => item.market === market,
+  );
+  return approvedGroundingText({
+    aiLayerCount: aiLayers.length,
+    aiChainPerformance: aiLayers,
+    aiLeaders: input.marketBriefs[market].aiLeaders,
+    aiLaggards: input.marketBriefs[market].aiLaggards,
+  });
+}
+
+function evidenceGroundingText(input, market, evidence) {
+  const marketBindings = evidence
+    .filter((item) => item.kind === "market_data")
+    .flatMap((item) => marketDataBindings(input, market, item.source))
+    .map((binding) => binding.data);
+  return `${approvedGroundingText(marketBindings)} ${evidence
+    .map((item) => `${item.title} ${item.facts}`)
+    .join(" ")}`;
+}
+
+function validateDriver(value, input, index) {
+  const label = `drivers[${index}]`;
+  const driver = requireObject(value, label);
+  if (
+    !MARKETS.includes(driver.market) ||
+    !["primary", "secondary"].includes(driver.role) ||
+    !DRIVER_BASES.has(driver.basis) ||
+    !DRIVER_DIRECTIONS.has(driver.direction)
+  ) {
+    throw new Error(`${label} 分类字段无效`);
+  }
+  const title = readerText(driver.title, `${label}.title`, 80, 5);
+  const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
+  const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 20);
+  const sectorSymbols = stringArray(
+    driver.sectorSymbols,
+    `${label}.sectorSymbols`,
+    1,
+    4,
+    16,
+  );
+  const marketSectors = input.sectorPerformance.filter(
+    (item) => item.market === driver.market,
+  );
+  const allowedSymbols = new Set(marketSectors.map((item) => item.symbol));
+  if (sectorSymbols.some((symbol) => !allowedSymbols.has(symbol))) {
+    throw new Error(`${label} 引用了其他市场或不存在的行业`);
+  }
+  if (
+    !driverDirectionMatches(
+      driver.direction,
+      sectorSymbols,
+      input.sectorPerformance,
+    )
+  ) {
+    throw new Error(`${label} 与行业涨跌方向不一致`);
+  }
+  if (!Array.isArray(driver.evidence) || driver.evidence.length < 1 || driver.evidence.length > 4) {
+    throw new Error(`${label}.evidence 数量必须为 1–4`);
+  }
+  const evidence = driver.evidence.map((item, evidenceIndex) =>
+    validateEvidence(item, input, driver.market, `${label}.evidence[${evidenceIndex}]`),
+  );
+  if (new Set(evidence.map((item) => item.source)).size !== evidence.length) {
+    throw new Error(`${label}.evidence URL 不得重复`);
+  }
+  const marketData = evidence.filter((item) => item.kind === "market_data");
+  const external = evidence.filter((item) => item.kind !== "market_data");
+  if (
+    marketData.some((item) =>
+      marketDataBindings(input, driver.market, item.source).every(
+        (binding) =>
+          binding.scope !== "index" &&
+          !(
+            ["sector", "sector_constituent"].includes(binding.scope) &&
+            sectorSymbols.includes(binding.sectorSymbol)
+          ),
+      ),
+    )
+  ) {
+    throw new Error(`${label} 的行情证据与驱动行业不匹配`);
+  }
+  if (
+    (driver.basis === "structural" &&
+      (marketData.length < 1 || external.length > 0)) ||
+    (driver.basis !== "structural" &&
+      (marketData.length < 1 ||
+        !external.some((item) => item.sourceType !== "expert")))
+  ) {
+    throw new Error(`${label} 的 ${driver.basis} 证据组合不充分`);
+  }
+  const generatedText = `${title} ${summary} ${mechanism}`;
+  assertNumbersBounded(
+    `${marketGroundingText(input, driver.market)} ${evidenceGroundingText(
+      input,
+      driver.market,
+      evidence,
+    )}`,
+    generatedText,
+    label,
+  );
+  return {
+    market: driver.market,
+    role: driver.role,
+    basis: driver.basis,
+    direction: driver.direction,
+    title,
+    summary,
+    mechanism,
+    sectorSymbols,
+    evidence,
+  };
+}
+
+function validateAiUpdate(value, input, index) {
+  const label = `aiChainUpdates[${index}]`;
+  const update = requireObject(value, label);
+  if (!MARKETS.includes(update.market) || !AI_CHAIN_LAYERS.includes(update.layer)) {
+    throw new Error(`${label} 市场或环节无效`);
+  }
+  const title = readerText(update.title, `${label}.title`, 90, 5);
+  const summary = readerText(update.summary, `${label}.summary`, 360, 20);
+  const implication = readerText(
+    update.implication,
+    `${label}.implication`,
+    420,
     20,
   );
-  const overview = validateOverview(
-    viewValue.overview,
-    `marketViews.${market}.overview`,
+  if (!Array.isArray(update.evidence) || update.evidence.length < 2 || update.evidence.length > 4) {
+    throw new Error(`${label}.evidence 数量必须为 2–4`);
+  }
+  const evidence = update.evidence.map((item, evidenceIndex) =>
+    validateEvidence(item, input, update.market, `${label}.evidence[${evidenceIndex}]`),
   );
-  const headerText = [
-    headline,
-    summary,
-    overview.interpretation,
-    ...overview.positive,
-    ...overview.negative,
-  ].join("\n");
-  if (/\d/.test(headerText) || /领涨|领跌/.test(headerText)) {
-    throw new Error(`marketViews.${market} 不得重复数字或使用领涨领跌`);
-  }
   if (
-    market === "CN" &&
-    /美股|纳斯达克|纳指|标普|道琼斯|道指|美债|美联储/.test(headerText)
-  ) {
-    throw new Error("CN 市场总览混入 US 行情");
-  }
-  if (
-    market === "US" &&
-    /A股|上证|沪深|中国大盘股|中国股市/.test(headerText)
-  ) {
-    throw new Error("US 市场总览混入 CN 行情");
-  }
-  assertMarketDirections(
-    headerText,
-    markets.filter((item) => item.region === market),
-  );
-  return { headline, summary, overview };
-}
-
-function phraseIsGrounded(phrase, sourceFacts) {
-  const source = sourceFacts
-    .toLocaleLowerCase()
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
-  const value = phrase
-    .toLocaleLowerCase()
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
-  if (value.length >= 2 && source.includes(value)) return true;
-  const chinesePairs = [
-    ...value.matchAll(/(?=([\p{Script=Han}]{2}))/gu),
-  ].map((match) => match[1]);
-  if (chinesePairs.some((pair) => source.includes(pair))) return true;
-  const englishWords = phrase
-    .toLocaleLowerCase()
-    .match(/[a-z]{4,}/g) ?? [];
-  return englishWords.some((word) => source.includes(word));
-}
-
-function validateAgentSignal(
-  value,
-  {
-    index,
-    importance,
-    reportDate,
-    sourceFacts,
-    enrichment,
-    sectors,
-    tickers,
-    required,
-  },
-) {
-  if (importance < 3) return undefined;
-  if (!required && value === undefined) return undefined;
-  const label = `stories[${index}].signal`;
-  const signal = requireObject(value, label);
-  const thesis = completeSentence(signal.thesis, `${label}.thesis`, 140, 20);
-  const scoreReason = completeSentence(
-    signal.scoreReason,
-    `${label}.scoreReason`,
-    100,
-    12,
-  );
-  if (!signalHorizons.has(signal.horizon)) {
-    throw new Error(`${label}.horizon 无效`);
-  }
-  if (!signalConfidences.has(signal.confidence)) {
-    throw new Error(`${label}.confidence 无效`);
-  }
-  if (
-    !Array.isArray(signal.transmission) ||
-    signal.transmission.length < 1 ||
-    signal.transmission.length > 3
-  ) {
-    throw new Error(`${label}.transmission 必须包含 1–3 步`);
-  }
-  const genericNodes =
-    /^(?:事件|消息|政策|数据|公司|行业|市场|相关板块|相关资产|资产|风险偏好|估值|现金流)$/u;
-  const transmission = signal.transmission.map((stepValue, stepIndex) => {
-    const step = requireObject(
-      stepValue,
-      `${label}.transmission[${stepIndex}]`,
-    );
-    const order = Number(step.order);
-    if (order !== stepIndex + 1 || order > 3) {
-      throw new Error(`${label}.transmission[${stepIndex}].order 必须连续`);
-    }
-    const from = requireText(
-      step.from,
-      `${label}.transmission[${stepIndex}].from`,
-      30,
-      2,
-    );
-    const to = requireText(
-      step.to,
-      `${label}.transmission[${stepIndex}].to`,
-      30,
-      2,
-    );
-    const mechanism = completeSentence(
-      step.mechanism,
-      `${label}.transmission[${stepIndex}].mechanism`,
-      100,
-      12,
-    );
-    if (
-      typeof step.conditional !== "boolean" ||
-      (genericNodes.test(from) && genericNodes.test(to))
-    ) {
-      throw new Error(
-        `${label}.transmission[${stepIndex}] 缺少具体事件或影响对象`,
-      );
-    }
-    return {
-      order,
-      from,
-      to,
-      mechanism,
-      conditional: step.conditional,
-    };
-  });
-  if (!transmission.some((step) => phraseIsGrounded(step.from, sourceFacts))) {
-    throw new Error(`${label}.transmission 起点无法回溯到已核验事实`);
-  }
-
-  if (
-    !Array.isArray(signal.exposures) ||
-    signal.exposures.length < 1 ||
-    signal.exposures.length > 6
-  ) {
-    throw new Error(`${label}.exposures 必须包含 1–6 项`);
-  }
-  const supportedKeys = supportedEntityKeys(enrichment.entities);
-  const exposures = signal.exposures.map((exposureValue, exposureIndex) => {
-    const exposure = requireObject(
-      exposureValue,
-      `${label}.exposures[${exposureIndex}]`,
-    );
-    const ticker =
-      typeof exposure.ticker === "string" && exposure.ticker.trim()
-        ? exposure.ticker.trim().toUpperCase()
-        : undefined;
-    const exchange =
-      typeof exposure.exchange === "string" && exposure.exchange.trim()
-        ? exposure.exchange.trim().toUpperCase()
-        : undefined;
-    if (!signalDirections.has(exposure.direction)) {
-      throw new Error(`${label}.exposures[${exposureIndex}].direction 无效`);
-    }
-    if (
-      (ticker && !exchange) ||
-      (!ticker && exchange) ||
-      (ticker && !supportedKeys.has(`${exchange}:${ticker}`))
-    ) {
-      throw new Error(
-        `${label}.exposures[${exposureIndex}] 含无法由事实归属的 ticker`,
-      );
-    }
-    return {
-      name: requireText(
-        exposure.name,
-        `${label}.exposures[${exposureIndex}].name`,
-        36,
-        2,
-      ),
-      ...(ticker ? { ticker, exchange } : {}),
-      direction: exposure.direction,
-      basis: completeSentence(
-        exposure.basis,
-        `${label}.exposures[${exposureIndex}].basis`,
-        100,
-        12,
-      ),
-    };
-  });
-  for (const entity of enrichment.entities) {
-    if (
-      !exposures.some(
-        (exposure) =>
-          exposure.ticker === entity.ticker &&
-          exposure.exchange === entity.exchange,
-      )
-    ) {
-      throw new Error(
-        `${label}.exposures 必须包含 ${entity.exchange}:${entity.ticker}`,
-      );
-    }
-    if (!tickers.includes(entity.ticker)) {
-      throw new Error(
-        `stories[${index}].tickers 必须包含 ${entity.ticker}`,
-      );
-    }
-  }
-
-  const checkpointValue = requireObject(
-    signal.checkpoint,
-    `${label}.checkpoint`,
-  );
-  const checkpoint = {
-    metric: requireText(
-      checkpointValue.metric,
-      `${label}.checkpoint.metric`,
-      72,
-      4,
-    ),
-    dueAt: checkpointDueAt(
-      reportDate,
-      signal.horizon,
-      checkpointValue.dueInDays,
-    ),
-    confirmIf: completeSentence(
-      checkpointValue.confirmIf,
-      `${label}.checkpoint.confirmIf`,
-      120,
-      12,
-    ),
-    invalidateIf: completeSentence(
-      checkpointValue.invalidateIf,
-      `${label}.checkpoint.invalidateIf`,
-      120,
-      12,
-    ),
-    status: "pending",
-  };
-
-  const generatedText = [
-    thesis,
-    scoreReason,
-    ...transmission.flatMap((step) => [
-      step.from,
-      step.to,
-      step.mechanism,
-    ]),
-    ...exposures.flatMap((exposure) => [exposure.name, exposure.basis]),
-    checkpoint.metric,
-    checkpoint.confirmIf,
-    checkpoint.invalidateIf,
-  ].join(" ");
-  assertStoryFactsBounded(sourceFacts, generatedText);
-  if (
-    /投资者(可以|应当|应该)|值得关注|投资机会|(?:建议|应该|应当|可以).{0,6}(?:买入|卖出)|(?:买入|卖出)(?:建议|评级)|仓位|目标价/.test(
-      generatedText,
+    !evidence.some((item) => item.kind === "market_data") ||
+    !evidence.some(
+      (item) => item.kind !== "market_data" && item.sourceType !== "expert",
     )
   ) {
-    throw new Error(`${label} 含投资建议`);
-  }
-
-  return {
-    thesis,
-    scoreReason,
-    baselineKind: enrichment.baselineKind,
-    metrics: enrichment.metrics,
-    reactions: enrichment.reactions,
-    transmission,
-    exposures,
-    horizon: signal.horizon,
-    confidence: signal.confidence,
-    checkpoint,
-  };
-}
-
-function validateLegacyReport(value, input) {
-  const report = requireObject(value, "daily-report");
-  const headline = requireText(report.headline, "headline", 22, 8);
-  if (headline.includes("盘前简报") || /\d/.test(headline)) {
-    throw new Error("headline 过于泛化或含数字");
-  }
-  const summary = completeSentence(report.summary, "summary", 88, 20);
-  const overviewValue = requireObject(report.overview, "overview");
-  if (!["positive", "negative", "mixed"].includes(overviewValue.tone)) {
-    throw new Error("overview.tone 必须明确为 positive、negative 或 mixed");
-  }
-  const overview = {
-    tone: overviewValue.tone,
-    interpretation: completeSentence(
-      overviewValue.interpretation,
-      "overview.interpretation",
-      180,
-      42,
-    ),
-    positive: stringArray(
-      overviewValue.positive,
-      "overview.positive",
-      4,
-      18,
-      0,
-    ),
-    negative: stringArray(
-      overviewValue.negative,
-      "overview.negative",
-      4,
-      18,
-      0,
-    ),
-  };
-  if (overview.positive.length + overview.negative.length < 2) {
-    throw new Error("overview 至少列出两个受影响市场或板块");
-  }
-  if (overview.tone === "positive" && overview.positive.length === 0) {
-    throw new Error("利好总览必须列出主要受益对象");
-  }
-  if (overview.tone === "negative" && overview.negative.length === 0) {
-    throw new Error("利空总览必须列出主要承压对象");
+    throw new Error(`${label} 缺少 AI 行情与外部交叉证据`);
   }
   if (
-    overview.tone === "mixed" &&
-    (overview.positive.length === 0 || overview.negative.length === 0)
-  ) {
-    throw new Error("分化总览必须同时列出利好与利空对象");
-  }
-  if (
-    !/利好|利空|支撑|压制|估值|风险偏好|无风险利率|融资成本|现金流|需求|成本/.test(
-      overview.interpretation,
-    )
-  ) {
-    throw new Error("overview.interpretation 缺少利好/利空与传导机制");
-  }
-  const marketViewsValue = requireObject(report.marketViews, "marketViews");
-  const marketViews = {
-    CN: validateMarketView(marketViewsValue.CN, "CN", input.markets),
-    US: validateMarketView(marketViewsValue.US, "US", input.markets),
-  };
-  if (!Array.isArray(report.stories) || report.stories.length !== input.news.length) {
-    throw new Error("stories 必须逐条对应全部候选新闻");
-  }
-
-  const storyDrafts = report.stories.map((storyValue, index) => {
-    const story = requireObject(storyValue, `stories[${index}]`);
-    const sourceIndex = Number(story.sourceIndex);
-    if (sourceIndex !== index) {
-      throw new Error(`stories[${index}].sourceIndex 必须为 ${index}`);
-    }
-    if (!categories.has(story.category) || !tones.has(story.tone)) {
-      throw new Error(`stories[${index}] 分类或方向无效`);
-    }
-    const importance = Number(story.importance);
-    if (!Number.isInteger(importance) || importance < 1 || importance > 5) {
-      throw new Error(`stories[${index}].importance 必须为 1–5`);
-    }
-    const title = requireText(story.title, `stories[${index}].title`, 28, 8);
-    if (/[|｜]/.test(title) || !/[\u3400-\u9fff]/.test(title)) {
-      throw new Error(`stories[${index}].title 必须是自然中文短标题`);
-    }
-    const storySummary = completeSentence(
-      story.summary,
-      `stories[${index}].summary`,
-      90,
-      15,
-    );
-    const interpretation = completeSentence(
-      story.interpretation,
-      `stories[${index}].interpretation`,
-      130,
-      18,
-    );
-    const sectors = stringArray(
-      story.sectors,
-      `stories[${index}].sectors`,
-      3,
-      18,
-      1,
-    );
-    if (sectors.some((sector) => !/[\u3400-\u9fff]/.test(sector))) {
-      throw new Error(`stories[${index}].sectors 必须是中文短标签`);
-    }
-    const sourceTitle = input.news[index].title;
-    const sourceFacts = `${sourceTitle} ${input.news[index].facts}`;
-    const enrichment = enrichNewsItem(input.news[index]);
-    const sourceTopics = topicTags(sourceFacts);
-    const generatedTopic = topicKey(title);
-    if (
-      sourceTopics.size > 0 &&
-      !generatedTopic.startsWith("other:") &&
-      !sourceTopics.has(generatedTopic)
-    ) {
-      throw new Error(`stories[${index}] 主题与来源标题不匹配`);
-    }
-    const mechanismTopic = generatedTopic.startsWith("other:")
-      ? topicKey(sourceFacts)
-      : generatedTopic;
-    if (
-      mechanismTopic === "equities" &&
-      !/估值|风险偏好|指数权重|权重/.test(interpretation)
-    ) {
-      throw new Error(`stories[${index}] 指数新闻缺少估值、权重或风险偏好机制`);
-    }
-    if (
-      mechanismTopic === "rates" &&
-      !/折现率|融资成本|估值|债券吸引力|无风险利率/.test(interpretation)
-    ) {
-      throw new Error(`stories[${index}] 利率新闻缺少折现率或融资成本机制`);
-    }
-    const generatedText = [title, storySummary, interpretation].join(" ");
-    assertStoryFactsBounded(sourceFacts, generatedText);
-    assertToneIsAnalyzed(
-      story.tone,
-      interpretation,
-      generatedText,
-      `stories[${index}]`,
-    );
-    if (
-      /投资者(可以|应当|应该)|值得关注|投资机会|继续(上涨|下跌)|建议|仍具吸引力|股票.{0,8}吸引力|股价.{0,8}吸引力/.test(
-        generatedText,
-      )
-    ) {
-      throw new Error(`stories[${index}] 含投资建议`);
-    }
-    if (
-      /(下跌|大跌|暴跌|下挫|回落|下滑).{0,10}((会|将|可能).{0,4}导致|→).{0,12}(利润|盈利)|(上涨|大涨|反弹).{0,10}((会|将|可能).{0,4}导致|→).{0,12}(利润|盈利)|整个.{0,12}(行业|经济)的发展|投资者.{0,10}损失|利润变化|盈利变化|受影响板块|相关.{0,6}板块$/.test(
-        interpretation,
-      )
-    ) {
-      throw new Error(`stories[${index}] 存在空泛或倒置因果`);
-    }
-    if (
-      !/利润|成本|利率|收益率|估值|现金流|风险偏好|需求|供给|产量|关税|贸易|出口|进口|汇率|融资|资本开支|油价|指数权重/.test(
-        interpretation,
-      )
-    ) {
-      throw new Error(`stories[${index}] 缺少具体市场传导机制`);
-    }
-    const enrichedTickers = new Set(
-      enrichment.entities.map((entity) => entity.ticker),
-    );
-    const tickers = [
-      ...new Set([
-        ...stringArray(
-          story.tickers,
-          `stories[${index}].tickers`,
-          4,
-          6,
-          0,
-        )
-          .map((ticker) => ticker.toUpperCase())
-          .filter(
-            (ticker) =>
-              (/^[A-Z][A-Z0-9.-]{0,7}$/.test(ticker) ||
-                /^\d{6}$/.test(ticker)) &&
-              (tickerIsSupported(ticker, sourceFacts) ||
-                enrichedTickers.has(ticker)),
-          ),
-        ...enrichedTickers,
-      ]),
-    ];
-    if (tickers.length > 4) {
-      throw new Error(`stories[${index}].tickers 来源公司超过 4 个`);
-    }
-    for (const group of requiredTickerGroups(sourceFacts)) {
-      if (!group.accepted.some((ticker) => tickers.includes(ticker))) {
-        throw new Error(
-          `stories[${index}] 来源明确出现公司，必须填写 ${group.accepted.join(" 或 ")}`,
+    !evidence.some(
+      (item) => {
+        if (item.kind !== "market_data") return false;
+        const bindings = marketDataBindings(input, update.market, item.source);
+        const aiBindings = bindings.filter((binding) =>
+          ["ai", "ai_constituent"].includes(binding.scope),
         );
-      }
-    }
-    for (const entity of enrichment.entities) {
-      if (!tickers.includes(entity.ticker)) {
-        throw new Error(
-          `stories[${index}] 来源明确出现上市公司，必须填写 ${entity.ticker}`,
+        return aiBindings.some(
+          (binding) =>
+            binding.layer === update.layer &&
+            (binding.scope === "ai_constituent" ||
+              new Set(aiBindings.map((candidate) => candidate.layer)).size === 1),
         );
-      }
-    }
-    const signal = validateAgentSignal(story.signal, {
-      index,
-      importance,
-      reportDate: input.reportDate,
-      sourceFacts,
-      enrichment,
-      sectors,
-      tickers,
-      required: input.contractVersion === "codex-daily-v8",
-    });
-
-    return {
-      sourceIndex,
-      category: story.category,
-      importance,
-      title,
-      summary: storySummary,
-      tone: story.tone,
-      interpretation,
-      sectors,
-      tickers,
-      ...(signal ? { signal } : {}),
-    };
-  });
-  const signalMetadata = storyDrafts.some((story) => story.signal)
-    ? assignSignalMetadata(input.news, storyDrafts)
-    : [];
-  const stories = storyDrafts.map((story, index) => {
-    if (!story.signal) return story;
-    return {
-      ...story,
-      signal: {
-        version: 2,
-        score: signalMetadata[index].score,
-        scoreReason: story.signal.scoreReason,
-        rankByMarket: signalMetadata[index].rankByMarket,
-        roleByMarket: signalMetadata[index].roleByMarket,
-        thesis: story.signal.thesis,
-        baselineKind: story.signal.baselineKind,
-        metrics: story.signal.metrics,
-        reactions: story.signal.reactions,
-        transmission: story.signal.transmission,
-        exposures: story.signal.exposures,
-        horizon: story.signal.horizon,
-        confidence: story.signal.confidence,
-        checkpoint: story.signal.checkpoint,
       },
-    };
-  });
-
-  const translationsValue = requireObject(report.translations, "translations");
-  const englishValue = requireObject(translationsValue.en, "translations.en");
-  const englishOverviewValue = requireObject(
-    englishValue.overview,
-    "translations.en.overview",
-  );
-  const englishStoriesValue = englishValue.stories;
-  if (
-    !Array.isArray(englishStoriesValue) ||
-    englishStoriesValue.length !== stories.length
+    )
   ) {
-    throw new Error("translations.en.stories 必须逐条对应 stories");
+    throw new Error(`${label} 未引用对应 AI 环节的本地行情`);
   }
-  const englishMarketViewsValue = requireObject(
-    englishValue.marketViews,
-    "translations.en.marketViews",
+  assertNumbersBounded(
+    evidenceGroundingText(input, update.market, evidence),
+    `${title} ${summary} ${implication}`,
+    label,
   );
-  const englishMarketViews = Object.fromEntries(
-    ["CN", "US"].map((market) => {
-      const viewValue = requireObject(
-        englishMarketViewsValue[market],
-        `translations.en.marketViews.${market}`,
-      );
-      const viewOverviewValue = requireObject(
-        viewValue.overview,
-        `translations.en.marketViews.${market}.overview`,
-      );
-      const view = {
-        headline: requireText(
-          viewValue.headline,
-          `translations.en.marketViews.${market}.headline`,
-          100,
-          8,
-        ),
-        summary: completeSentence(
-          viewValue.summary,
-          `translations.en.marketViews.${market}.summary`,
-          240,
-          20,
-          ".",
-        ),
-        overview: {
-          interpretation: completeSentence(
-            viewOverviewValue.interpretation,
-            `translations.en.marketViews.${market}.overview.interpretation`,
-            420,
-            30,
-            ".",
+  return {
+    market: update.market,
+    layer: update.layer,
+    title,
+    summary,
+    implication,
+    evidence,
+  };
+}
+
+function validateViews(value, label) {
+  const views = requireObject(value, label);
+  return Object.fromEntries(
+    MARKETS.map((market) => {
+      const view = requireObject(views[market], `${label}.${market}`);
+      if (!DRIVER_STATUSES.has(view.driverStatus)) {
+        throw new Error(`${label}.${market}.driverStatus 无效`);
+      }
+      return [
+        market,
+        {
+          headline: readerText(
+            view.headline,
+            `${label}.${market}.headline`,
+            90,
+            5,
           ),
-          positive: stringArray(
-            viewOverviewValue.positive,
-            `translations.en.marketViews.${market}.overview.positive`,
-            4,
-            48,
-            0,
+          summary: readerText(
+            view.summary,
+            `${label}.${market}.summary`,
+            360,
+            20,
           ),
-          negative: stringArray(
-            viewOverviewValue.negative,
-            `translations.en.marketViews.${market}.overview.negative`,
-            4,
-            48,
-            0,
-          ),
+          driverStatus: view.driverStatus,
         },
-      };
-      const viewText = [
-        view.headline,
-        view.summary,
-        view.overview.interpretation,
-        ...view.overview.positive,
-        ...view.overview.negative,
-      ].join(" ");
-      if (/\d/.test(viewText)) {
-        throw new Error(
-          `translations.en.marketViews.${market} 不得重复行情数字`,
-        );
-      }
-      if (
-        market === "CN" &&
-        /\bNasdaq\b|\bS&P\b|\bDow\b|\bTreasur|\bFederal Reserve\b/i.test(
-          viewText,
-        )
-      ) {
-        throw new Error("英文 CN 市场总览混入 US 行情");
-      }
-      if (
-        market === "US" &&
-        /\bA-shares?\b|\bShanghai\b|\bCSI\b|\bChina equities\b/i.test(
-          viewText,
-        )
-      ) {
-        throw new Error("英文 US 市场总览混入 CN 行情");
-      }
-      return [market, view];
+      ];
     }),
   );
-  const translations = {
-    en: {
-      headline: requireText(
-        englishValue.headline,
-        "translations.en.headline",
-        100,
-        8,
-      ),
-      summary: completeSentence(
-        englishValue.summary,
-        "translations.en.summary",
-        240,
-        20,
-        ".",
-      ),
-      overview: {
-        interpretation: completeSentence(
-          englishOverviewValue.interpretation,
-          "translations.en.overview.interpretation",
-          420,
-          30,
-          ".",
-        ),
-        positive: stringArray(
-          englishOverviewValue.positive,
-          "translations.en.overview.positive",
-          4,
-          48,
-          0,
-        ),
-        negative: stringArray(
-          englishOverviewValue.negative,
-          "translations.en.overview.negative",
-          4,
-          48,
-          0,
-        ),
-      },
-      marketViews: englishMarketViews,
-      stories: englishStoriesValue.map((storyValue, index) => {
-        const englishStory = requireObject(
-          storyValue,
-          `translations.en.stories[${index}]`,
-        );
-        const translated = {
-          title: requireText(
-            englishStory.title,
-            `translations.en.stories[${index}].title`,
-            120,
-            6,
-          ),
-          summary: completeSentence(
-            englishStory.summary,
-            `translations.en.stories[${index}].summary`,
-            260,
-            12,
-            ".",
-          ),
-          interpretation: completeSentence(
-            englishStory.interpretation,
-            `translations.en.stories[${index}].interpretation`,
-            360,
-            18,
-            ".",
-          ),
-          sectors: stringArray(
-            englishStory.sectors,
-            `translations.en.stories[${index}].sectors`,
-            3,
-            40,
-            1,
-          ),
-        };
-        if (translated.sectors.length !== stories[index].sectors.length) {
-          throw new Error(
-            `translations.en.stories[${index}].sectors 必须逐项对应中文标签`,
-          );
-        }
-        const englishSignalValue = englishStory.signal;
-        if (stories[index].signal) {
-          const englishSignal = requireObject(
-            englishSignalValue,
-            `translations.en.stories[${index}].signal`,
-          );
-          if (
-            !Array.isArray(englishSignal.transmission) ||
-            englishSignal.transmission.length !==
-              stories[index].signal.transmission.length ||
-            !Array.isArray(englishSignal.exposures) ||
-            englishSignal.exposures.length !==
-              stories[index].signal.exposures.length
-          ) {
-            throw new Error(
-              `translations.en.stories[${index}].signal 必须对应中文传导和对象`,
-            );
-          }
-          const englishCheckpoint = requireObject(
-            englishSignal.checkpoint,
-            `translations.en.stories[${index}].signal.checkpoint`,
-          );
-          translated.signal = {
-            thesis: completeSentence(
-              englishSignal.thesis,
-              `translations.en.stories[${index}].signal.thesis`,
-              360,
-              20,
-              ".",
-            ),
-            scoreReason: completeSentence(
-              englishSignal.scoreReason,
-              `translations.en.stories[${index}].signal.scoreReason`,
-              240,
-              12,
-              ".",
-            ),
-            transmission: englishSignal.transmission.map(
-              (stepValue, stepIndex) => {
-                const step = requireObject(
-                  stepValue,
-                  `translations.en.stories[${index}].signal.transmission[${stepIndex}]`,
-                );
-                return {
-                  from: requireText(
-                    step.from,
-                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].from`,
-                    90,
-                    2,
-                  ),
-                  to: requireText(
-                    step.to,
-                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].to`,
-                    90,
-                    2,
-                  ),
-                  mechanism: completeSentence(
-                    step.mechanism,
-                    `translations.en.stories[${index}].signal.transmission[${stepIndex}].mechanism`,
-                    280,
-                    10,
-                    ".",
-                  ),
-                };
-              },
-            ),
-            exposures: englishSignal.exposures.map(
-              (exposureValue, exposureIndex) => {
-                const exposure = requireObject(
-                  exposureValue,
-                  `translations.en.stories[${index}].signal.exposures[${exposureIndex}]`,
-                );
-                return {
-                  name: requireText(
-                    exposure.name,
-                    `translations.en.stories[${index}].signal.exposures[${exposureIndex}].name`,
-                    90,
-                    2,
-                  ),
-                  basis: completeSentence(
-                    exposure.basis,
-                    `translations.en.stories[${index}].signal.exposures[${exposureIndex}].basis`,
-                    280,
-                    10,
-                    ".",
-                  ),
-                };
-              },
-            ),
-            checkpoint: {
-              metric: requireText(
-                englishCheckpoint.metric,
-                `translations.en.stories[${index}].signal.checkpoint.metric`,
-                180,
-                4,
-              ),
-              confirmIf: completeSentence(
-                englishCheckpoint.confirmIf,
-                `translations.en.stories[${index}].signal.checkpoint.confirmIf`,
-                320,
-                10,
-                ".",
-              ),
-              invalidateIf: completeSentence(
-                englishCheckpoint.invalidateIf,
-                `translations.en.stories[${index}].signal.checkpoint.invalidateIf`,
-                320,
-                10,
-                ".",
-              ),
-              ...(typeof englishCheckpoint.observation === "string" &&
-              englishCheckpoint.observation.trim()
-                ? {
-                    observation: completeSentence(
-                      englishCheckpoint.observation,
-                      `translations.en.stories[${index}].signal.checkpoint.observation`,
-                      320,
-                      10,
-                      ".",
-                    ),
-                  }
-                : {}),
-            },
-          };
-        } else if (englishSignalValue !== undefined) {
-          throw new Error(
-            `translations.en.stories[${index}].signal 不应为低重要度新闻生成`,
-          );
-        }
-        const translatedSignalText = translated.signal
-          ? [
-              translated.signal.thesis,
-              translated.signal.scoreReason,
-              ...translated.signal.transmission.flatMap((step) => [
-                step.from,
-                step.to,
-                step.mechanism,
-              ]),
-              ...translated.signal.exposures.flatMap((exposure) => [
-                exposure.name,
-                exposure.basis,
-              ]),
-              translated.signal.checkpoint.metric,
-              translated.signal.checkpoint.confirmIf,
-              translated.signal.checkpoint.invalidateIf,
-            ]
-          : [];
-        assertNumbersBounded(
-          `${input.news[index].title} ${input.news[index].facts}`,
-          [
-            translated.title,
-            translated.summary,
-            translated.interpretation,
-            ...translatedSignalText,
-          ].join(" "),
-        );
-        return translated;
-      }),
-    },
-  };
-
-  const headerText = [
-    headline,
-    summary,
-    overview.interpretation,
-    ...overview.positive,
-    ...overview.negative,
-  ].join("\n");
-  if (/\d/.test(headerText)) {
-    throw new Error("顶部总览不得重复具体数字或日期，行情卡片已展示这些信息");
-  }
-  if (/领涨|领跌/.test(headerText)) {
-    throw new Error("顶部总览不得使用相对领涨或领跌措辞");
-  }
-  assertMarketDirections(headerText, input.markets);
-
-  return {
-    headline,
-    summary,
-    overview,
-    marketViews,
-    stories,
-    translations,
-  };
 }
 
-function marketTone(input, market) {
-  const symbol = market === "CN" ? "SSE" : "SPX";
-  return input.markets.find((item) => item.symbol === symbol)?.direction === "down"
-    ? "negative"
-    : "positive";
+function validateResearchAudit(value) {
+  const audit = requireObject(value, "researchAudit");
+  return Object.fromEntries(
+    MARKETS.map((market) => {
+      const item = requireObject(audit[market], `researchAudit.${market}`);
+      const queries = stringArray(
+        item.queries,
+        `researchAudit.${market}.queries`,
+        3,
+        12,
+        220,
+      );
+      if (
+        !Number.isInteger(item.sourcesReviewed) ||
+        item.sourcesReviewed < 1 ||
+        !["sufficient", "limited"].includes(item.outcome)
+      ) {
+        throw new Error(`researchAudit.${market} 字段无效`);
+      }
+      return [
+        market,
+        {
+          queries,
+          sourcesReviewed: item.sourcesReviewed,
+          outcome: item.outcome,
+        },
+      ];
+    }),
+  );
 }
 
-function causalHeadline(value, label, { sectorNames, driverTitles, unattributed, english = false }) {
-  const headline = requireText(value, label, english ? 110 : 32, english ? 8 : 8);
-  const movement = english
-    ? /\b(?:rose|fell|gained|slid|higher|lower|led|lagged|rallied|retreated)\b/i
-    : /上涨|下跌|普涨|普跌|收涨|收跌|走强|走弱|领涨|领跌|反弹|回落|承压/;
-  if (!movement.test(headline)) {
-    throw new Error(`${label} 必须说明市场表现`);
-  }
-  const normalized = headline.toLocaleLowerCase();
-  const sectorGrounded = sectorNames.some((phrase) => {
-    const candidate = String(phrase).trim().toLocaleLowerCase();
-    return candidate.length >= 2 && normalized.includes(candidate);
-  });
-  const driverGrounded = driverTitles.some((title) => phraseIsGrounded(headline, title));
-  if ((!sectorGrounded && !driverGrounded) || (unattributed && !sectorGrounded)) {
-    throw new Error(`${label} 必须包含可回溯的原因或行业`);
-  }
-  if (/^(?:股指|指数|大盘|市场)(?:普涨|普跌|分化|走强|走弱)$/.test(headline)) {
-    throw new Error(`${label} 是无原因标题`);
-  }
-  return headline;
-}
-
-function insufficientCoverage(input, market, kind) {
-  const coverage = input.newsDiagnostics?.activeRetrieval?.coverageByMarket?.[market];
-  if (coverage?.status !== "insufficient") return false;
-  if (!kind) return true;
-  return coverage.missingIntentKinds?.includes(kind) ||
-    coverage.activeSearchCompleted === false;
-}
-
-function validateV9Report(value, input) {
-  const report = requireObject(value, "daily-report");
-  const driversValue = Array.isArray(report.drivers) ? report.drivers : null;
-  if (!driversValue) throw new Error("drivers 必须是数组");
-  const marketSessions = Object.fromEntries(input.marketSessions.map((item) => [item.market, item]));
-  const driverCounts = { CN: 0, US: 0 };
-  const primaryCounts = { CN: 0, US: 0 };
-
-  const drivers = driversValue.map((value, index) => {
-    const label = `drivers[${index}]`;
-    const driver = requireObject(value, label);
-    if (!["CN", "US"].includes(driver.market)) throw new Error(`${label}.market 无效`);
-    if (!["primary", "secondary"].includes(driver.role)) throw new Error(`${label}.role 无效`);
-    if (!signalDirections.has(driver.direction)) throw new Error(`${label}.direction 无效`);
-    const title = requireText(driver.title, `${label}.title`, 34, 6);
-    const summary = completeSentence(driver.summary, `${label}.summary`, 120, 18);
-    const mechanism = completeSentence(driver.mechanism, `${label}.mechanism`, 160, 22);
-    const sectorSymbols = stringArray(driver.sectorSymbols, `${label}.sectorSymbols`, 5, 10, 1);
-    const performance = input.sectorPerformance.filter((item) => item.market === driver.market);
-    if (sectorSymbols.some((symbol) => !performance.some((item) => item.symbol === symbol))) {
-      throw new Error(`${label}.sectorSymbols 包含其他市场或未知行业`);
-    }
-    if (!driverDirectionMatches(driver.direction, sectorSymbols, performance)) {
-      throw new Error(`${label} 与行业涨跌方向不一致`);
-    }
-    if (!Array.isArray(driver.evidenceIndexes) || driver.evidenceIndexes.length < 2 || driver.evidenceIndexes.length > 3) {
-      throw new Error(`${label}.evidenceIndexes 必须包含 2–3 项`);
-    }
-    const evidenceIndexes = [...new Set(driver.evidenceIndexes.map(Number))];
-    if (
-      evidenceIndexes.length !== driver.evidenceIndexes.length ||
-      evidenceIndexes.some((sourceIndex) => !Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= input.news.length)
-    ) {
-      throw new Error(`${label}.evidenceIndexes 无效`);
-    }
-    const evidence = evidenceIndexes.map((sourceIndex) => input.news[sourceIndex]);
-    if (evidence.some((item) => !evidenceFitsSession(item, marketSessions[driver.market]))) {
-      throw new Error(`${label} 引用了归因窗口之外的消息`);
-    }
-    if (
-      evidence.some((item) => item.platform === "x") &&
-      !evidence.some((item) => item.platform !== "x")
-    ) {
-      throw new Error(`${label} 引用 X 时必须包含非 X 交叉验证来源`);
-    }
-    const localWraps = evidence.filter((item) =>
-      localMarketWrapMatches(
-        item,
-        driver.market,
-        performance,
-        marketSessions[driver.market],
-      ),
-    );
-    if (localWraps.length === 0) {
-      throw new Error(`${label} 缺少本地收盘归因证据`);
-    }
-    if (
-      !evidence.some(
-        (item) =>
-          causalEventEvidenceMatches(item) &&
-          localWraps.every((wrap) => wrap.url !== item.url),
-      )
-    ) {
-      throw new Error(`${label} 缺少独立的因果事件证据`);
-    }
-    const sourceFacts = evidence.map((item) => `${item.title} ${item.facts}`).join(" ");
-    if (/\p{Script=Han}/u.test(sourceFacts) && !phraseIsGrounded(title, sourceFacts)) {
-      throw new Error(`${label}.title 无法回溯到已核验事实`);
-    }
-    assertNumbersBounded(sourceFacts, `${title} ${summary} ${mechanism}`);
-    driverCounts[driver.market] += 1;
-    if (driver.role === "primary") primaryCounts[driver.market] += 1;
-    return {
-      id: stableId(`${driver.market}:${title}:${evidenceIndexes.join(",")}`),
-      market: driver.market,
-      role: driver.role,
-      direction: driver.direction,
-      title,
-      summary,
-      mechanism,
-      sectorSymbols,
-      evidenceIndexes,
-    };
-  });
-  for (const market of ["CN", "US"]) {
-    if (driverCounts[market] > 3 || primaryCounts[market] > 1) {
-      throw new Error(`${market} 只能包含一条主驱动和最多两条次驱动`);
-    }
-    if (driverCounts[market] > 0 && primaryCounts[market] !== 1) {
-      throw new Error(`${market} 有驱动时必须且只能有一条主驱动`);
-    }
-  }
-
-  const aiUpdatesValue = Array.isArray(report.aiChainUpdates)
-    ? report.aiChainUpdates
-    : null;
-  if (!aiUpdatesValue) throw new Error("aiChainUpdates 必须是数组");
-  const aiUpdateCounts = { CN: 0, US: 0 };
-  const aiUpdateLayers = { CN: new Set(), US: new Set() };
-  const aiChainUpdates = aiUpdatesValue.map((value, index) => {
-    const label = `aiChainUpdates[${index}]`;
-    const update = requireObject(value, label);
-    if (!["CN", "US"].includes(update.market)) {
-      throw new Error(`${label}.market 无效`);
-    }
-    if (!AI_CHAIN_LAYERS.includes(update.layer)) {
-      throw new Error(`${label}.layer 无效`);
-    }
-    if (aiUpdateLayers[update.market].has(update.layer)) {
-      throw new Error(`${label} 与同市场已有 AI 产业链环节重复`);
-    }
-    const title = requireText(update.title, `${label}.title`, 38, 8);
-    const summary = completeSentence(update.summary, `${label}.summary`, 180, 30);
-    const implication = completeSentence(
-      update.implication,
-      `${label}.implication`,
-      180,
-      24,
-    );
-    if (
-      !Array.isArray(update.evidenceIndexes) ||
-      update.evidenceIndexes.length < 1 ||
-      update.evidenceIndexes.length > 3
-    ) {
-      throw new Error(`${label}.evidenceIndexes 必须包含 1–3 项`);
-    }
-    const evidenceIndexes = [...new Set(update.evidenceIndexes.map(Number))];
-    if (
-      evidenceIndexes.length !== update.evidenceIndexes.length ||
-      evidenceIndexes.some(
-        (sourceIndex) =>
-          !Number.isInteger(sourceIndex) ||
-          sourceIndex < 0 ||
-          sourceIndex >= input.news.length,
-      )
-    ) {
-      throw new Error(`${label}.evidenceIndexes 无效`);
-    }
-    const evidence = evidenceIndexes.map((sourceIndex) => input.news[sourceIndex]);
-    if (
-      evidence.some(
-        (item) =>
-          !item.regions.includes(update.market) ||
-          !evidenceFitsSession(item, marketSessions[update.market]),
-      )
-    ) {
-      throw new Error(`${label} 引用了其他市场或归因窗口之外的消息`);
-    }
-    if (
-      evidence.some((item) => item.platform === "x") &&
-      !evidence.some((item) => item.platform !== "x")
-    ) {
-      throw new Error(`${label} 引用 X 时必须包含非 X 交叉验证来源`);
-    }
-    const sourceFacts = evidence
-      .map((item) => `${item.title} ${item.facts}`)
-      .join(" ");
-    if (/\p{Script=Han}/u.test(sourceFacts) && !phraseIsGrounded(title, sourceFacts)) {
-      throw new Error(`${label}.title 无法回溯到已核验事实`);
-    }
-    assertNumbersBounded(sourceFacts, `${title} ${summary} ${implication}`);
-    aiUpdateCounts[update.market] += 1;
-    aiUpdateLayers[update.market].add(update.layer);
-    return {
-      id: stableId(
-        `ai:${update.market}:${update.layer}:${title}:${evidenceIndexes.join(",")}`,
-      ),
-      market: update.market,
-      layer: update.layer,
-      title,
-      summary,
-      implication,
-      evidenceIndexes,
-    };
-  });
-  if (aiUpdateCounts.CN > 4 || aiUpdateCounts.US > 4) {
-    throw new Error("每个市场最多包含 4 条 AI 产业链动态");
-  }
-
-  const aiChainViewsValue = requireObject(report.aiChainViews, "aiChainViews");
-  const aiChainViews = {};
-  for (const market of ["CN", "US"]) {
-    const label = `aiChainViews.${market}`;
-    const value = requireObject(aiChainViewsValue[market], label);
-    const agentStatus = value.driverStatus;
-    if (!["explained", "partial", "unattributed"].includes(agentStatus)) {
-      throw new Error(`${label}.driverStatus 无效`);
-    }
-    if ((aiUpdateCounts[market] === 0) !== (agentStatus === "unattributed")) {
-      throw new Error(`${label}.driverStatus 与 AI 驱动数量不一致`);
-    }
-    const marketMetrics = input.aiChainPerformance
-      .filter((item) => item.market === market)
-      .map((item) => ({
-        ...item,
-        changeValue: Number(item.change.replace("%", "")),
-      }))
-      .sort((left, right) => right.changeValue - left.changeValue);
-    const marketUpdates = aiChainUpdates.filter((item) => item.market === market);
-    const agentSummary = completeSentence(value.summary, `${label}.summary`, 150, 24);
-    if (agentStatus === "unattributed" && !/未发现单一消息主导/.test(agentSummary)) {
-      throw new Error(`${label}.summary 必须明确未发现单一消息主导`);
-    }
-    const isInsufficient =
-      aiUpdateCounts[market] === 0 &&
-      insufficientCoverage(input, market, "ai_extremes");
-    const status = isInsufficient ? "insufficient" : agentStatus;
-    const summary = isInsufficient
-      ? "当日可核验的 AI 产业链异动证据覆盖不足，暂不作单一归因。"
-      : agentSummary;
-    aiChainViews[market] = {
-      headline: causalHeadline(value.headline, `${label}.headline`, {
-        sectorNames: marketMetrics.map((item) => item.name),
-        driverTitles: marketUpdates.map((item) => item.title),
-        unattributed: aiUpdateCounts[market] === 0,
-      }),
-      summary,
-      driverStatus: status,
-      leaderLayers: marketMetrics.slice(0, 2).map((item) => item.layer),
-      laggardLayers: marketMetrics.slice(-2).reverse().map((item) => item.layer),
-      driverIds: marketUpdates.map((item) => item.id),
-    };
-  }
-
-  const marketViewsValue = requireObject(report.marketViews, "marketViews");
-  const marketViews = {};
-  for (const market of ["CN", "US"]) {
-    const value = requireObject(marketViewsValue[market], `marketViews.${market}`);
-    const agentStatus = value.driverStatus;
-    if (!["explained", "partial", "unattributed"].includes(agentStatus)) {
-      throw new Error(`marketViews.${market}.driverStatus 无效`);
-    }
-    if ((driverCounts[market] === 0) !== (agentStatus === "unattributed")) {
-      throw new Error(`marketViews.${market}.driverStatus 与驱动数量不一致`);
-    }
-    const agentSummary = completeSentence(value.summary, `marketViews.${market}.summary`, 120, 20);
-    if (agentStatus === "unattributed" && !/未发现单一消息主导/.test(agentSummary)) {
-      throw new Error(`marketViews.${market}.summary 必须明确未发现单一消息主导`);
-    }
-    const isInsufficient =
-      driverCounts[market] === 0 && insufficientCoverage(input, market);
-    const status = isInsufficient ? "insufficient" : agentStatus;
-    const summary = isInsufficient
-      ? "当日可核验的本地收盘与异动证据覆盖不足，暂不作单一归因。"
-      : agentSummary;
-    const extremes = sectorExtremes(input.sectorPerformance, market);
-    const marketDrivers = drivers.filter((item) => item.market === market);
-    const headline = causalHeadline(value.headline, `marketViews.${market}.headline`, {
-      sectorNames: input.sectorPerformance.filter((item) => item.market === market).map((item) => item.name),
-      driverTitles: marketDrivers.map((item) => item.title),
-      unattributed: driverCounts[market] === 0,
-    });
-    const tone = marketTone(input, market);
-    marketViews[market] = {
-      headline,
-      summary,
-      driverStatus: status,
-      leaderSectorSymbols: extremes.leaders.map((item) => item.symbol),
-      laggardSectorSymbols: extremes.laggards.map((item) => item.symbol),
-      driverIds: marketDrivers.map((item) => item.id),
-      overview: {
-        tone,
-        interpretation: summary,
-        positive: extremes.leaders.map((item) => item.name),
-        negative: extremes.laggards.map((item) => item.name),
-      },
-    };
-  }
-
-  const headline = causalHeadline(report.headline, "headline", {
-    sectorNames: input.sectorPerformance.map((item) => item.name),
-    driverTitles: drivers.map((item) => item.title),
-    unattributed: drivers.length === 0,
-  });
-  const summary = completeSentence(report.summary, "summary", 150, 24);
-
-  const english = requireObject(requireObject(report.translations, "translations").en, "translations.en");
-  const englishDriversValue = english.drivers;
-  if (!Array.isArray(englishDriversValue) || englishDriversValue.length !== drivers.length) {
-    throw new Error("translations.en.drivers 必须逐项对应 drivers");
-  }
-  const translatedDrivers = englishDriversValue.map((value, index) => {
-    const translated = requireObject(value, `translations.en.drivers[${index}]`);
-    return {
-      title: requireText(translated.title, `translations.en.drivers[${index}].title`, 120, 5),
-      summary: completeSentence(translated.summary, `translations.en.drivers[${index}].summary`, 320, 12, "."),
-      mechanism: completeSentence(translated.mechanism, `translations.en.drivers[${index}].mechanism`, 380, 14, "."),
-    };
-  });
-  const englishAiUpdatesValue = english.aiChainUpdates;
-  if (
-    !Array.isArray(englishAiUpdatesValue) ||
-    englishAiUpdatesValue.length !== aiChainUpdates.length
-  ) {
-    throw new Error("translations.en.aiChainUpdates 必须逐项对应 aiChainUpdates");
-  }
-  const translatedAiUpdates = englishAiUpdatesValue.map((value, index) => {
-    const translated = requireObject(
-      value,
-      `translations.en.aiChainUpdates[${index}]`,
-    );
-    return {
-      title: requireText(
-        translated.title,
-        `translations.en.aiChainUpdates[${index}].title`,
-        140,
-        8,
-      ),
-      summary: completeSentence(
-        translated.summary,
-        `translations.en.aiChainUpdates[${index}].summary`,
-        420,
-        18,
-        ".",
-      ),
-      implication: completeSentence(
-        translated.implication,
-        `translations.en.aiChainUpdates[${index}].implication`,
-        420,
-        18,
-        ".",
-      ),
-    };
-  });
-  const englishMarketViewsValue = requireObject(english.marketViews, "translations.en.marketViews");
-  const englishMarketViews = {};
-  for (const market of ["CN", "US"]) {
-    const value = requireObject(englishMarketViewsValue[market], `translations.en.marketViews.${market}`);
-    const translatedMarketDrivers = translatedDrivers.filter((_, index) => drivers[index].market === market);
-    const isInsufficient = marketViews[market].driverStatus === "insufficient";
-    const translatedSummary = completeSentence(
-      value.summary,
-      `translations.en.marketViews.${market}.summary`,
-      320,
-      18,
-      ".",
-    );
-    const summary = isInsufficient
-      ? "Verified session evidence is incomplete, so no single-cause attribution is made."
-      : translatedSummary;
-    englishMarketViews[market] = {
-      headline: causalHeadline(value.headline, `translations.en.marketViews.${market}.headline`, {
-        sectorNames: input.sectorPerformance.filter((item) => item.market === market).map((item) => item.nameEn),
-        driverTitles: translatedMarketDrivers.map((item) => item.title),
-        unattributed: driverCounts[market] === 0,
-        english: true,
-      }),
-      summary,
-      driverStatus: marketViews[market].driverStatus,
-      overview: {
-        tone: marketViews[market].overview.tone,
-        interpretation: summary,
-        positive: sectorExtremes(input.sectorPerformance, market).leaders.map((item) => item.nameEn),
-        negative: sectorExtremes(input.sectorPerformance, market).laggards.map((item) => item.nameEn),
-      },
-    };
-  }
-  const englishAiChainViewsValue = requireObject(
-    english.aiChainViews,
+function validateTranslation(value, drivers, aiUpdates, input) {
+  const translations = requireObject(value, "translations");
+  const en = requireObject(translations.en, "translations.en");
+  const marketViews = requireObject(
+    en.marketViews,
+    "translations.en.marketViews",
+  );
+  const aiChainViews = requireObject(
+    en.aiChainViews,
     "translations.en.aiChainViews",
   );
-  const englishAiChainViews = {};
-  for (const market of ["CN", "US"]) {
-    const label = `translations.en.aiChainViews.${market}`;
-    const value = requireObject(englishAiChainViewsValue[market], label);
-    const translatedMarketUpdates = translatedAiUpdates.filter(
-      (_, index) => aiChainUpdates[index].market === market,
-    );
-    const isInsufficient = aiChainViews[market].driverStatus === "insufficient";
-    englishAiChainViews[market] = {
-      headline: causalHeadline(value.headline, `${label}.headline`, {
-        sectorNames: input.aiChainPerformance
-          .filter((item) => item.market === market)
-          .map((item) => item.nameEn),
-        driverTitles: translatedMarketUpdates.map((item) => item.title),
-        unattributed: aiUpdateCounts[market] === 0,
-        english: true,
-      }),
-      summary: isInsufficient
-        ? "Verified AI-chain evidence is incomplete, so no single-cause attribution is made."
-        : completeSentence(value.summary, `${label}.summary`, 380, 20, "."),
-    };
+  const translatedDrivers = Array.isArray(en.drivers) ? en.drivers : [];
+  const translatedAiUpdates = Array.isArray(en.aiChainUpdates)
+    ? en.aiChainUpdates
+    : [];
+  if (
+    translatedDrivers.length !== drivers.length ||
+    translatedAiUpdates.length !== aiUpdates.length
+  ) {
+    throw new Error("英文翻译必须与中文驱动和 AI 动态逐项对应");
   }
-  const allExtremes = ["CN", "US"].flatMap((market) => {
-    const extremes = sectorExtremes(input.sectorPerformance, market);
-    return [...extremes.leaders, ...extremes.laggards];
-  });
-  const positive = allExtremes.filter((item) => item.direction === "up").map((item) => item.name);
-  const negative = allExtremes.filter((item) => item.direction === "down").map((item) => item.name);
-  const translations = {
-    en: {
-      headline: causalHeadline(english.headline, "translations.en.headline", {
-        sectorNames: input.sectorPerformance.map((item) => item.nameEn),
-        driverTitles: translatedDrivers.map((item) => item.title),
-        unattributed: drivers.length === 0,
-        english: true,
-      }),
-      summary: completeSentence(english.summary, "translations.en.summary", 380, 20, "."),
-      overview: {
-        interpretation: completeSentence(english.summary, "translations.en.summary", 380, 20, "."),
-        positive: positive.map((item) => input.sectorPerformance.find((sector) => sector.name === item)?.nameEn ?? item),
-        negative: negative.map((item) => input.sectorPerformance.find((sector) => sector.name === item)?.nameEn ?? item),
-      },
-      marketViews: englishMarketViews,
-      aiChainViews: englishAiChainViews,
-      drivers: translatedDrivers,
-      aiChainUpdates: translatedAiUpdates,
-      stories: [],
-    },
+  const result = {
+    headline: readerText(en.headline, "translations.en.headline", 140, 5),
+    summary: readerText(en.summary, "translations.en.summary", 500, 20),
+    marketViews: {},
+    aiChainViews: {},
+    drivers: translatedDrivers.map((value, index) => {
+      const item = requireObject(value, `translations.en.drivers[${index}]`);
+      return {
+        title: readerText(item.title, `translations.en.drivers[${index}].title`, 140, 5),
+        summary: readerText(item.summary, `translations.en.drivers[${index}].summary`, 500, 20),
+        mechanism: readerText(
+          item.mechanism,
+          `translations.en.drivers[${index}].mechanism`,
+          700,
+          20,
+        ),
+      };
+    }),
+    aiChainUpdates: translatedAiUpdates.map((value, index) => {
+      const item = requireObject(value, `translations.en.aiChainUpdates[${index}]`);
+      return {
+        title: readerText(item.title, `translations.en.aiChainUpdates[${index}].title`, 160, 5),
+        summary: readerText(item.summary, `translations.en.aiChainUpdates[${index}].summary`, 600, 20),
+        implication: readerText(
+          item.implication,
+          `translations.en.aiChainUpdates[${index}].implication`,
+          700,
+          20,
+        ),
+      };
+    }),
   };
+  for (const market of MARKETS) {
+    const marketView = requireObject(
+      marketViews[market],
+      `translations.en.marketViews.${market}`,
+    );
+    const aiView = requireObject(
+      aiChainViews[market],
+      `translations.en.aiChainViews.${market}`,
+    );
+    result.marketViews[market] = {
+      headline: readerText(
+        marketView.headline,
+        `translations.en.marketViews.${market}.headline`,
+        160,
+        5,
+      ),
+      summary: readerText(
+        marketView.summary,
+        `translations.en.marketViews.${market}.summary`,
+        600,
+        20,
+      ),
+    };
+    result.aiChainViews[market] = {
+      headline: readerText(
+        aiView.headline,
+        `translations.en.aiChainViews.${market}.headline`,
+        160,
+        5,
+      ),
+      summary: readerText(
+        aiView.summary,
+        `translations.en.aiChainViews.${market}.summary`,
+        600,
+        20,
+      ),
+    };
+
+    const marketDriverEvidence = drivers
+      .filter((item) => item.market === market)
+      .flatMap((item) => item.evidence);
+    const marketAiEvidence = aiUpdates
+      .filter((item) => item.market === market)
+      .flatMap((item) => item.evidence);
+    assertNumbersBounded(
+      `${marketGroundingText(input, market)} ${evidenceGroundingText(
+        input,
+        market,
+        marketDriverEvidence,
+      )}`,
+      `${result.marketViews[market].headline} ${result.marketViews[market].summary}`,
+      `translations.en.marketViews.${market}`,
+    );
+    assertNumbersBounded(
+      `${aiGroundingText(input, market)} ${evidenceGroundingText(
+        input,
+        market,
+        marketAiEvidence,
+      )}`,
+      `${result.aiChainViews[market].headline} ${result.aiChainViews[market].summary}`,
+      `translations.en.aiChainViews.${market}`,
+    );
+  }
+
+  for (const [index, item] of result.drivers.entries()) {
+    const driver = drivers[index];
+    assertNumbersBounded(
+      `${marketGroundingText(input, driver.market)} ${evidenceGroundingText(
+        input,
+        driver.market,
+        driver.evidence,
+      )}`,
+      `${item.title} ${item.summary} ${item.mechanism}`,
+      `translations.en.drivers[${index}]`,
+    );
+  }
+  for (const [index, item] of result.aiChainUpdates.entries()) {
+    const update = aiUpdates[index];
+    assertNumbersBounded(
+      evidenceGroundingText(input, update.market, update.evidence),
+      `${item.title} ${item.summary} ${item.implication}`,
+      `translations.en.aiChainUpdates[${index}]`,
+    );
+  }
+  assertNumbersBounded(
+    `${inputGroundingText(input)} ${[...drivers, ...aiUpdates].flatMap((item) => item.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
+    `${result.headline} ${result.summary}`,
+    "translations.en overview",
+  );
+  return { en: result };
+}
+
+function validateDriverSets(drivers, marketViews) {
+  for (const market of MARKETS) {
+    const rows = drivers.filter((driver) => driver.market === market);
+    if (rows.length < 1 || rows.length > 3) {
+      throw new Error(`${market} 必须包含一至三条驱动`);
+    }
+    if (rows.filter((driver) => driver.role === "primary").length !== 1) {
+      throw new Error(`${market} 必须恰好包含一条主驱动`);
+    }
+    if (!rows.some((driver) => driver.basis === "structural")) {
+      throw new Error(`${market} 缺少结构性盘面解释`);
+    }
+    const primary = rows.find((driver) => driver.role === "primary");
+    const nonStructural = rows.some((driver) => driver.basis !== "structural");
+    const status = marketViews[market].driverStatus;
+    if (
+      (status === "explained" && primary.basis === "structural") ||
+      (status === "structural" && nonStructural) ||
+      (status === "partial" && !nonStructural)
+    ) {
+      throw new Error(`${market} driverStatus 与证据类型不一致`);
+    }
+  }
+}
+
+export function validateReport(value, input) {
+  const report = requireObject(value, "daily-report");
+  if (report.contractVersion !== CONTRACT_VERSION) {
+    throw new Error(`daily-report 必须使用 ${CONTRACT_VERSION}`);
+  }
+  const headline = readerText(report.headline, "headline", 100, 8);
+  const summary = readerText(report.summary, "summary", 420, 30);
+  const marketViews = validateViews(report.marketViews, "marketViews");
+  const aiChainViews = validateViews(report.aiChainViews, "aiChainViews");
+  if (!Array.isArray(report.drivers)) throw new Error("drivers 必须是数组");
+  const drivers = report.drivers.map((item, index) =>
+    validateDriver(item, input, index),
+  );
+  validateDriverSets(drivers, marketViews);
+  if (!Array.isArray(report.aiChainUpdates) || report.aiChainUpdates.length > 8) {
+    throw new Error("aiChainUpdates 最多八条");
+  }
+  const aiChainUpdates = report.aiChainUpdates.map((item, index) =>
+    validateAiUpdate(item, input, index),
+  );
+  for (const market of MARKETS) {
+    const rows = aiChainUpdates.filter((item) => item.market === market);
+    if (
+      rows.length > 4 ||
+      new Set(rows.map((item) => item.layer)).size !== rows.length
+    ) {
+      throw new Error(`${market} AI 动态数量或环节重复`);
+    }
+    if (rows.length === 0 && aiChainViews[market].driverStatus !== "structural") {
+      throw new Error(`${market} 无 AI 事件证据时必须使用结构性解释`);
+    }
+    if (rows.length > 0 && aiChainViews[market].driverStatus === "structural") {
+      throw new Error(`${market} 有 AI 事件证据时不得标为纯结构性解释`);
+    }
+  }
+  const researchAudit = validateResearchAudit(report.researchAudit);
+  const translations = validateTranslation(
+    report.translations,
+    drivers,
+    aiChainUpdates,
+    input,
+  );
+  for (const market of MARKETS) {
+    const marketDriverEvidence = drivers
+      .filter((item) => item.market === market)
+      .flatMap((item) => item.evidence);
+    const marketAiEvidence = aiChainUpdates
+      .filter((item) => item.market === market)
+      .flatMap((item) => item.evidence);
+    assertNumbersBounded(
+      `${marketGroundingText(input, market)} ${evidenceGroundingText(
+        input,
+        market,
+        marketDriverEvidence,
+      )}`,
+      `${marketViews[market].headline} ${marketViews[market].summary}`,
+      `marketViews.${market}`,
+    );
+    assertNumbersBounded(
+      `${aiGroundingText(input, market)} ${evidenceGroundingText(
+        input,
+        market,
+        marketAiEvidence,
+      )}`,
+      `${aiChainViews[market].headline} ${aiChainViews[market].summary}`,
+      `aiChainViews.${market}`,
+    );
+  }
+  assertNumbersBounded(
+    `${inputGroundingText(input)} ${drivers.flatMap((driver) => driver.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
+    `${headline} ${summary}`,
+    "日报总览",
+  );
   return {
+    contractVersion: CONTRACT_VERSION,
     headline,
     summary,
-    overview: {
-      tone: marketViews.CN.overview.tone === marketViews.US.overview.tone
-        ? marketViews.CN.overview.tone
-        : "mixed",
-      interpretation: summary,
-      positive,
-      negative,
-    },
     marketViews,
     aiChainViews,
     drivers,
     aiChainUpdates,
-    stories: [],
     translations,
+    researchAudit,
   };
 }
 
-export function validateReport(value, input) {
-  return input.contractVersion === "market-attribution-v9"
-    ? validateV9Report(value, input)
-    : validateLegacyReport(value, input);
+function stableId(value) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function driverId(driver) {
+  return stableId(
+    [
+      driver.market,
+      driver.basis,
+      driver.title,
+      ...driver.evidence.map((item) => item.source),
+    ].join("|"),
+  );
+}
+
+function aiUpdateId(update) {
+  return stableId(
+    [
+      update.market,
+      update.layer,
+      update.title,
+      ...update.evidence.map((item) => item.source),
+    ].join("|"),
+  );
+}
+
+function sectorNames(input, drivers, market, direction, language = "zh") {
+  const symbols = new Set(
+    drivers
+      .filter((driver) => driver.market === market && driver.direction === direction)
+      .flatMap((driver) => driver.sectorSymbols),
+  );
+  return input.sectorPerformance
+    .filter((sector) => sector.market === market && symbols.has(sector.symbol))
+    .map((sector) => (language === "en" ? sector.nameEn : sector.name))
+    .slice(0, 4);
+}
+
+function marketOverview(input, drivers, market, interpretation, language = "zh") {
+  const primary = drivers.find(
+    (driver) => driver.market === market && driver.role === "primary",
+  );
+  return {
+    tone: primary?.direction ?? "mixed",
+    interpretation,
+    positive: sectorNames(input, drivers, market, "positive", language),
+    negative: sectorNames(input, drivers, market, "negative", language),
+  };
+}
+
+function storedEvidence(evidence) {
+  const authority = {
+    first_party: "first_party",
+    publisher: "specialist",
+    expert: "expert",
+  }[evidence.sourceType];
+  return {
+    title: evidence.title,
+    facts: evidence.facts,
+    source: evidence.source,
+    sourceLabel: evidence.sourceLabel,
+    publishedAt: evidence.publishedAt,
+    kind: evidence.kind,
+    sourceType: evidence.sourceType,
+    platform: evidence.platform,
+    authority,
+    ...(evidence.authorHandle ? { authorHandle: evidence.authorHandle } : {}),
+  };
+}
+
+export function buildReportContent(input, report) {
+  const marketAsOf = marketAsOfFromInput(input);
+  const drivers = report.drivers.map((driver) => ({
+    id: driverId(driver),
+    market: driver.market,
+    role: driver.role,
+    basis: driver.basis,
+    direction: driver.direction,
+    title: driver.title,
+    summary: driver.summary,
+    mechanism: driver.mechanism,
+    sectorSymbols: driver.sectorSymbols,
+    evidence: driver.evidence.map(storedEvidence),
+  }));
+  const aiChainUpdates = report.aiChainUpdates.map((update) => ({
+    id: aiUpdateId(update),
+    market: update.market,
+    layer: update.layer,
+    title: update.title,
+    summary: update.summary,
+    implication: update.implication,
+    evidence: update.evidence.map(storedEvidence),
+  }));
+  const marketViews = Object.fromEntries(
+    MARKETS.map((market) => {
+      const brief = input.marketBriefs[market];
+      const driverIds = drivers
+        .filter((driver) => driver.market === market)
+        .map((driver) => driver.id);
+      return [
+        market,
+        {
+          ...report.marketViews[market],
+          overview: marketOverview(
+            input,
+            report.drivers,
+            market,
+            report.marketViews[market].summary,
+          ),
+          leaderSectorSymbols: brief.sectorLeaders.map((item) => item.symbol),
+          laggardSectorSymbols: brief.sectorLaggards.map((item) => item.symbol),
+          driverIds,
+        },
+      ];
+    }),
+  );
+  const aiChainViews = Object.fromEntries(
+    MARKETS.map((market) => [
+      market,
+      {
+        ...report.aiChainViews[market],
+        leaderLayers: input.marketBriefs[market].aiLeaders.map((item) => item.layer),
+        laggardLayers: input.marketBriefs[market].aiLaggards.map((item) => item.layer),
+        driverIds: aiChainUpdates
+          .filter((item) => item.market === market)
+          .map((item) => item.id),
+      },
+    ]),
+  );
+  const overview = {
+    tone: "mixed",
+    interpretation: report.summary,
+    positive: [
+      ...new Set(
+        MARKETS.flatMap((market) =>
+          marketViews[market].overview.positive,
+        ),
+      ),
+    ].slice(0, 6),
+    negative: [
+      ...new Set(
+        MARKETS.flatMap((market) =>
+          marketViews[market].overview.negative,
+        ),
+      ),
+    ].slice(0, 6),
+  };
+  const en = report.translations.en;
+  const translatedMarketViews = Object.fromEntries(
+    MARKETS.map((market) => [
+      market,
+      {
+        ...en.marketViews[market],
+        overview: marketOverview(
+          input,
+          report.drivers,
+          market,
+          en.marketViews[market].summary,
+          "en",
+        ),
+      },
+    ]),
+  );
+  const translations = {
+    en: {
+      ...en,
+      overview: {
+        interpretation: en.summary,
+        positive: [
+          ...new Set(
+            MARKETS.flatMap((market) =>
+              translatedMarketViews[market].overview.positive,
+            ),
+          ),
+        ].slice(0, 6),
+        negative: [
+          ...new Set(
+            MARKETS.flatMap((market) =>
+              translatedMarketViews[market].overview.negative,
+            ),
+          ),
+        ].slice(0, 6),
+      },
+      marketViews: translatedMarketViews,
+      stories: [],
+    },
+  };
+  return JSON.stringify({
+    contractVersion: CONTRACT_VERSION,
+    overview,
+    marketViews,
+    aiChainViews,
+    updateKind: input.updateKind,
+    marketAsOf,
+    marketSessions: input.marketSessions,
+    markets: input.markets.map(
+      ({ asOf: _asOf, previousAsOf: _previousAsOf, ...market }) => market,
+    ),
+    sectorPerformance: input.sectorPerformance,
+    aiChainPerformance: input.aiChainPerformance,
+    sectorHeat: input.sectorHeat,
+    drivers,
+    aiChainUpdates,
+    stories: [],
+    translations,
+    isSample: false,
+  });
 }
 
 function sqlText(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function stableId(url) {
-  return createHash("sha256").update(url).digest("hex").slice(0, 16);
-}
-
-export function buildReportContent(input, report) {
-  const marketAsOf = marketAsOfFromInput(input);
-  if (input.contractVersion === "market-attribution-v9") {
-    return JSON.stringify({
-      contractVersion: input.contractVersion,
-      overview: report.overview,
-      marketViews: report.marketViews,
-      aiChainViews: report.aiChainViews,
-      updateKind: input.updateKind,
-      marketAsOf,
-      marketSessions: input.marketSessions,
-      markets: input.markets.map(({ asOf: _asOf, previousAsOf: _previousAsOf, ...market }) => market),
-      sectorPerformance: input.sectorPerformance,
-      aiChainPerformance: input.aiChainPerformance,
-      sectorHeat: input.sectorHeat,
-      drivers: report.drivers.map((driver) => ({
-        id: driver.id,
-        market: driver.market,
-        role: driver.role,
-        direction: driver.direction,
-        title: driver.title,
-        summary: driver.summary,
-        mechanism: driver.mechanism,
-        sectorSymbols: driver.sectorSymbols,
-        evidence: driver.evidenceIndexes.map((sourceIndex) => {
-          const source = input.news[sourceIndex];
-          return {
-            title: source.title,
-            facts: source.facts,
-            source: source.url,
-            sourceLabel: source.source,
-            publishedAt: source.publishedAt,
-            kind: source.kind,
-            ...(source.platform ? { platform: source.platform } : {}),
-            ...(source.authority ? { authority: source.authority } : {}),
-            ...(source.authorHandle ? { authorHandle: source.authorHandle } : {}),
-          };
-        }),
-      })),
-      aiChainUpdates: report.aiChainUpdates.map((update) => ({
-        id: update.id,
-        market: update.market,
-        layer: update.layer,
-        title: update.title,
-        summary: update.summary,
-        implication: update.implication,
-        evidence: update.evidenceIndexes.map((sourceIndex) => {
-          const source = input.news[sourceIndex];
-          return {
-            title: source.title,
-            facts: source.facts,
-            source: source.url,
-            sourceLabel: source.source,
-            publishedAt: source.publishedAt,
-            kind: source.kind,
-            ...(source.platform ? { platform: source.platform } : {}),
-            ...(source.authority ? { authority: source.authority } : {}),
-            ...(source.authorHandle ? { authorHandle: source.authorHandle } : {}),
-          };
-        }),
-      })),
-      stories: [],
-      translations: report.translations,
-      isSample: false,
-    });
-  }
-  return JSON.stringify({
-    overview: report.overview,
-    marketViews: report.marketViews,
-    updateKind: input.updateKind,
-    marketAsOf,
-    markets: input.markets.map(({ asOf: _asOf, ...market }) => market),
-    sectorHeat: input.sectorHeat,
-    stories: report.stories.map((story) => {
-      const source = input.news[story.sourceIndex];
-      const enrichment = enrichNewsItem(source);
-      return {
-        id: stableId(source.url),
-        regions: source.regions,
-        category: story.category,
-        importance: story.importance,
-        title: story.title,
-        summary: story.summary,
-        evidence: `原始标题：${source.title}；核验事实：${source.facts}`,
-        source: source.url,
-        sourceLabel: source.source,
-        publishedAt: source.publishedAt,
-        evidenceSource: enrichment.evidenceSource,
-        ai: {
-          tone: story.tone,
-          interpretation: story.interpretation,
-          sectors: story.sectors,
-          tickers: story.tickers,
-        },
-        ...(story.signal ? { signal: story.signal } : {}),
-      };
-    }),
-    translations: report.translations,
-    isSample: false,
-  });
+function evidenceCount(report) {
+  return new Set(
+    [...report.drivers, ...report.aiChainUpdates].flatMap((item) =>
+      item.evidence.map((evidence) => evidence.source),
+    ),
+  ).size;
 }
 
 function completedSql(input, report) {
@@ -2406,7 +1545,7 @@ function completedSql(input, report) {
   const marketAsOf = marketAsOfFromInput(input);
   const dataCut = `CN ${marketAsOf.CN} · US ${marketAsOf.US}`;
   const content = buildReportContent(input, report);
-
+  const sourceCount = evidenceCount(report);
   return `
 UPDATE daily_reports
 SET edition = edition + 10000
@@ -2458,7 +1597,7 @@ INSERT INTO ingestion_runs (
   ${sqlText(finishedAt)},
   'completed',
   ${input.markets.length},
-  ${input.news.length},
+  ${sourceCount},
   NULL
 )
 ON CONFLICT(run_id) DO UPDATE SET
@@ -2487,7 +1626,7 @@ INSERT INTO ingestion_runs (
   ${sqlText(finishedAt)},
   'failed',
   ${input.markets.length},
-  ${input.news.length},
+  0,
   ${sqlText(message)}
 )
 ON CONFLICT(run_id) DO UPDATE SET
@@ -2534,39 +1673,35 @@ async function main() {
     .filter((argument) => !["--check", "--local"].includes(argument));
   const inputPath = resolve(paths[0] ?? "work/daily-input.json");
   const reportPath = resolve(paths[1] ?? "work/daily-report.json");
+  const eventsPath = resolve(paths[2] ?? "work/daily-agent-events.jsonl");
   const input = validateInput(JSON.parse(await readFile(inputPath, "utf8")));
+  const report = validateReport(
+    JSON.parse(await readFile(reportPath, "utf8")),
+    input,
+  );
+  const result = {
+    status: checkOnly ? "valid" : "published",
+    reportDate: input.reportDate,
+    marketCount: input.markets.length,
+    driverCount: report.drivers.length,
+    aiUpdateCount: report.aiChainUpdates.length,
+    evidenceCount: evidenceCount(report),
+  };
+  if (checkOnly) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const eventsText = await readFile(eventsPath, "utf8");
+  auditCodexRun(eventsText, report);
+  await auditReportSources(report);
 
   try {
-    const report = validateReport(
-      JSON.parse(await readFile(reportPath, "utf8")),
-      input,
-    );
-    if (checkOnly) {
-      console.log(
-        JSON.stringify(
-          {
-            status: "valid",
-            reportDate: input.reportDate,
-            marketCount: input.markets.length,
-            storyCount: report.stories.length,
-            driverCount: report.drivers?.length ?? 0,
-          },
-          null,
-          2,
-        ),
-      );
-      return;
-    }
-
     const output = await executeSql(completedSql(input, report), { local });
     console.log(
       JSON.stringify(
         {
-          status: "published",
-          reportDate: input.reportDate,
-          marketCount: input.markets.length,
-          storyCount: report.stories.length,
-          driverCount: report.drivers?.length ?? 0,
+          ...result,
           database: local ? "stock-daily-db (local)" : "stock-daily-db",
           wrangler: output,
         },
@@ -2575,12 +1710,10 @@ async function main() {
       ),
     );
   } catch (error) {
-    if (!checkOnly) {
-      try {
-        await executeSql(failedSql(input, error), { local });
-      } catch {
-        // The primary error is more useful than a secondary audit failure.
-      }
+    try {
+      await executeSql(failedSql(input, error), { local });
+    } catch {
+      // Preserve the publication failure as the primary error.
     }
     throw error;
   }

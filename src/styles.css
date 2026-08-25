@@ -3293,12 +3293,26 @@ footer {
   white-space: nowrap;
 }
 
-.page-shell[data-contract="market-attribution-v9"] .daily-focus-main,
-.page-shell[data-contract="market-attribution-v9"] .daily-focus-main h1 {
+.page-shell:is(
+    [data-contract="market-attribution-v9"],
+    [data-contract="codex-market-research-v10"]
+  )
+  .daily-focus-main,
+.page-shell:is(
+    [data-contract="market-attribution-v9"],
+    [data-contract="codex-market-research-v10"]
+  )
+  .daily-focus-main
+  h1 {
   max-width: none;
 }
 
-.page-shell[data-contract="market-attribution-v9"] .daily-focus-main h1 {
+.page-shell:is(
+    [data-contract="market-attribution-v9"],
+    [data-contract="codex-market-research-v10"]
+  )
+  .daily-focus-main
+  h1 {
   font-size: clamp(42px, 4.4vw, 60px);
 }
 
@@ -3605,7 +3619,12 @@ footer {
     gap: 10px;
   }
 
-  .page-shell[data-contract="market-attribution-v9"] .daily-focus-main h1 {
+  .page-shell:is(
+      [data-contract="market-attribution-v9"],
+      [data-contract="codex-market-research-v10"]
+    )
+    .daily-focus-main
+    h1 {
     font-size: clamp(32px, 10vw, 39px);
   }
 
@@ -4314,7 +4333,12 @@ footer {
   padding: 13px 0 10px;
 }
 
-.page-shell[data-contract="market-attribution-v9"] .hero-daily-compact .hero-copy {
+.page-shell:is(
+    [data-contract="market-attribution-v9"],
+    [data-contract="codex-market-research-v10"]
+  )
+  .hero-daily-compact
+  .hero-copy {
   padding-block: 10px;
 }
 
@@ -5334,6 +5358,28 @@ footer {
   list-style: none;
 }
 
+.snapshot-structural-view {
+  padding: 16px 20px;
+  border-top: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface-solid) 92%, var(--paper));
+  font-family: var(--sans);
+}
+
+.snapshot-structural-view strong {
+  display: block;
+  color: var(--coral);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.45;
+}
+
+.snapshot-structural-view p {
+  margin: 4px 0 0;
+  color: color-mix(in srgb, var(--ink) 90%, var(--muted));
+  font-size: 9px;
+  line-height: 1.55;
+}
+
 .snapshot-evidence-list::after {
   position: absolute;
   inset: 0;
@@ -5491,6 +5537,10 @@ footer {
   }
 
   .snapshot-evidence-list > li {
+    padding: 12px;
+  }
+
+  .snapshot-structural-view {
     padding: 12px;
   }
 

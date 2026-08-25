@@ -2,11 +2,13 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { auditCodexRun } from "./daily-agent-audit.mjs";
 import {
   buildReportContent,
   validateInput,
   validateReport,
 } from "./daily-publish.mjs";
+import { auditReportSources } from "./daily-source-audit.mjs";
 import { marketAsOfFromInput } from "./daily-policy.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -29,19 +31,28 @@ async function main() {
     throw new Error("远程替换必须显式传入 --confirm-delete-all-daily");
   }
 
-  const inputPath = resolve(argumentValue(args, "--input", "work/daily-input-v9.json"));
-  const reportPath = resolve(argumentValue(args, "--report", "work/daily-report-v9.json"));
+  const inputPath = resolve(argumentValue(args, "--input", "work/daily-input.json"));
+  const reportPath = resolve(argumentValue(args, "--report", "work/daily-report.json"));
+  const eventsPath = resolve(
+    argumentValue(args, "--events", "work/daily-agent-events.jsonl"),
+  );
   const persistTo = argumentValue(args, "--persist-to", "");
-  const input = validateInput(JSON.parse(await readFile(inputPath, "utf8")));
-  const report = validateReport(JSON.parse(await readFile(reportPath, "utf8")), input);
+  const [inputValue, reportValue, eventsText] = await Promise.all([
+    readFile(inputPath, "utf8").then(JSON.parse),
+    readFile(reportPath, "utf8").then(JSON.parse),
+    readFile(eventsPath, "utf8"),
+  ]);
+  const input = validateInput(inputValue);
+  const report = validateReport(reportValue, input);
+  auditCodexRun(eventsText, report);
+  await auditReportSources(report);
   const marketAsOf = marketAsOfFromInput(input);
   if (
-    input.contractVersion !== "market-attribution-v9" ||
-    input.reportDate !== "2026-08-22" ||
-    marketAsOf.CN !== "2026-08-21" ||
-    marketAsOf.US !== "2026-08-21"
+    input.contractVersion !== "codex-market-research-v10" ||
+    !marketAsOf.CN ||
+    !marketAsOf.US
   ) {
-    throw new Error("替换脚本只接受已校验的 2026-08-22 V9 验收样本");
+    throw new Error("替换脚本只接受已完整校验的 V10 日报");
   }
 
   const generatedAt = new Date().toISOString();
@@ -53,7 +64,7 @@ INSERT INTO daily_reports (
   report_date, edition, headline, summary, generated_at,
   data_cut, agent_model, content
 ) VALUES (
-  '2026-08-22', 1,
+  ${sqlText(input.reportDate)}, 1,
   ${sqlText(report.headline)},
   ${sqlText(report.summary)},
   ${sqlText(generatedAt)},
@@ -66,12 +77,18 @@ INSERT INTO ingestion_runs (
   market_count, news_count, error
 ) VALUES (
   ${sqlText(input.runId)},
-  '2026-08-22',
+  ${sqlText(input.reportDate)},
   ${sqlText(input.collectedAt)},
   ${sqlText(generatedAt)},
   'completed',
   ${input.markets.length},
-  ${input.news.length},
+  ${
+    new Set(
+      [...report.drivers, ...report.aiChainUpdates].flatMap((item) =>
+        item.evidence.map((evidence) => evidence.source),
+      ),
+    ).size
+  },
   NULL
 )
 ON CONFLICT(run_id) DO UPDATE SET

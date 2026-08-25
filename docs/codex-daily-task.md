@@ -1,133 +1,44 @@
-# Stock Daily 本机盘面归因任务
+# Stock Daily 本机盘面研究任务
 
-日报只解释已经完成的 CN、US 交易时段，不再生成普通新闻列表。完整流程由
-`scripts/run-codex-daily.sh` 执行：采集行情、完整一级行业表现和候选证据；Agent
-选择最多三条盘面驱动，并补充零至四条同交易时段 AI 产业链动态；本地质量门验证
-交易窗口、市场隔离、行业方向和证据；随后发布并回读生产接口。
+日报由本机 `scripts/run-codex-daily.sh` 调度。确定性程序先采集行情、完整一级行业和统一
+AI 产业链代表篮子；本地 Codex 随后使用原生网页搜索，根据实际涨跌主动研究；本地质量门
+通过后才允许发布到 Cloudflare，并从生产接口回读确认。
 
-## V9 输出契约
+## V10 输入契约
 
-`work/daily-report.json` 只能包含以下结构：
+`work/daily-input.json` 使用 `codex-market-research-v10`，包含：
 
-```json
-{
-  "headline": "原因或行业 + 市场表现的中文标题",
-  "summary": "一句盘面结论。",
-  "marketViews": {
-    "CN": {
-      "headline": "CN 原因或行业 + 市场表现",
-      "summary": "CN 盘面归因结论。",
-      "driverStatus": "explained | partial | unattributed"
-    },
-    "US": {
-      "headline": "US 原因或行业 + 市场表现",
-      "summary": "US 盘面归因结论。",
-      "driverStatus": "explained | partial | unattributed"
-    }
-  },
-  "aiChainViews": {
-    "CN": {
-      "headline": "CN 具体 AI 层级 + 当日表现",
-      "summary": "CN AI Alpha 归因结论。",
-      "driverStatus": "explained | partial | unattributed"
-    },
-    "US": {
-      "headline": "US 具体 AI 层级 + 当日表现",
-      "summary": "US AI Alpha 归因结论。",
-      "driverStatus": "explained | partial | unattributed"
-    }
-  },
-  "drivers": [
-    {
-      "market": "CN | US",
-      "role": "primary | secondary",
-      "direction": "positive | negative | mixed",
-      "title": "具体事实驱动",
-      "summary": "发生了什么。",
-      "mechanism": "该事实如何传导到本地行业和大盘。",
-      "sectorSymbols": ["同市场一级行业代码"],
-      "evidenceIndexes": [0, 1]
-    }
-  ],
-  "aiChainUpdates": [
-    {
-      "market": "CN | US",
-      "layer": "chips | memory | servers | interconnect | data_center | cloud | applications | robotics",
-      "title": "当日 AI 产业链事实",
-      "summary": "技术、订单、业绩或供需事实的完整来龙去脉。",
-      "implication": "该事实影响哪个产业链环节，以及仍有哪些约束。",
-      "evidenceIndexes": [0]
-    }
-  ],
-  "translations": {
-    "en": {
-      "headline": "Causal English headline",
-      "summary": "English market conclusion.",
-      "marketViews": {
-        "CN": { "headline": "CN causal headline", "summary": "CN conclusion." },
-        "US": { "headline": "US causal headline", "summary": "US conclusion." }
-      },
-      "aiChainViews": {
-        "CN": { "headline": "CN AI causal headline", "summary": "CN AI conclusion." },
-        "US": { "headline": "US AI causal headline", "summary": "US AI conclusion." }
-      },
-      "drivers": [
-        { "title": "Translated driver", "summary": "Translated event.", "mechanism": "Translated mechanism." }
-      ],
-      "aiChainUpdates": [
-        { "title": "Translated update", "summary": "Translated facts.", "implication": "Translated impact." }
-      ]
-    }
-  }
-}
-```
+- CN 六项、US 四项市场指标及前一交易日；
+- CN、US 各十一项一级行业和四只代表成分股；
+- CN、US 各八项 AI 产业链等权代表篮子；
+- 两个市场的交易窗口与收盘后两小时复盘窗口；
+- 由上述确定性行情生成的 `marketBriefs`。
 
-## 归因规则
+输入不再包含候选新闻池。网页信息发现、来源追踪和归因由启用原生搜索的 Codex 完成。
 
-- 每个市场独立判断，只展示零至三条驱动；有驱动时只能有一条 `primary`。
-- `event` 必须发生在前一收盘至本次收盘之间。`market_wrap` 可在收盘后两小时内
-  发布，但必须明确包含同交易日指数或行业表现。
-- 每条驱动至少引用两项、最多三项证据：一篇该市场的全天收盘归因稿，以及另一 URL
-  的具体因果事件。午间、半日、早盘、盘中、成交额、市场广度和资金流只能作为盘面
-  描述，不能充当全天收盘稿或独立原因。外部事件进入 CN 时，仍必须有本地收盘归因和
-  方向一致的 CN 一级行业，纯美股或美债消息不能单独成为 CN 驱动。
-- `sectorSymbols` 只能引用 `sectorPerformance` 中同市场行业。`positive` 至少对应一个
-  上涨行业，`negative` 至少对应一个下跌行业；第一版只说明行业领涨或领跌，不声称
-  计算了指数加权贡献。
-- 没有可靠原因时保留零条驱动，`driverStatus` 使用 `unattributed`，摘要必须明确写
-  “未发现单一消息主导”。禁止猜测或用无关新闻补位。
-- 同一事实若一方面支撑盈利或风险资产、另一方面推高利率等形成显著反向约束，
-  `driverStatus` 必须使用 `partial`。标题优先写可直接观察的行业或指数结构，不得把
-  这种事实写成单一宏观主因。
-- 标题必须是“具体原因或行业 + 市场表现”，例如“贵金属与通信走强，创业板领涨”。
-  禁止“股指普涨”“指数分化”“风险偏好改善”等无原因标题。
-- 只使用输入中的核验事实，不新增数字、公司、事件或因果。英文只翻译已经通过校验
-  的中文内容。
-- `aiChainPerformance` 在 CN、US 使用完全一致的八层口径：芯片与设备、存储、服务器
-  与算力设备、CPO / 光互连、数据中心电力与液冷、云计算 / NeoCloud、AI 软件与
-  应用、机器人。两市均使用四只本地代表标的的等权篮子；不得声称是官方指数、完整
-  行业分类或指数加权贡献。
-- `aiChainViews` 每个市场独立判断 AI Alpha 的领涨、领跌和原因。无可靠原因时使用
-  `unattributed`，摘要必须明确“未发现单一消息主导”，不得把普通 AI 新闻包装成
-  当日涨跌原因。
-- `aiChainUpdates` 每个市场可为零至四条、同一环节最多一条。只纳入交易窗口内且能
-  解释技术、订单、业绩或供需变化的事实；不得把旧公告包装成当日新催化，也不得用
-  “技术论文及企业激励”等无法回答来龙去脉的概括替代具体证据。
-- X 只采纳白名单公开账号的原帖。公司官方账号用于确认一手事实，专业研究用于补充
-  技术或供需背景，行业专家只作为线索。任何引用 X 的驱动都必须同时引用至少一个
-  非 X 来源交叉验证；页面链接必须指向原帖，不引用搬运或截图。
-- 候选证据必须先落入对应市场的交易窗口，再参与水合、排序和数量限制；不得让窗口外
-  的新资讯挤掉窗口内 X 原帖或收盘归因。每层可以有多条相互独立的证据，但大盘只映射
-  `primary`，行业只映射 `secondary`，AI 只映射 `aiChainUpdates`，不得跨层复用同一条
-  驱动制造“多条信息”的假象。
-- 读者页把每条证据压缩为两行：第一行是“高亮标题：摘要”，第二行把层级标签与每个
-  来源外链作为同一弹性流里的平级元素，全部从左侧起排并显示本地化发布时间；窄屏
-  只在实际空间不足时按元素自然换行，续行不得产生额外缩进。摘要只保留经来源支持的核心事实与
-  传导结论。V9 页头不再重复展示
-  原因型标题、摘要、利好与利空标签，只保留更新时间和日期导航。
-- `newsDiagnostics`、提供商、模型、契约或流水线术语只用于本地质量门，不进入读者页面。
+## V10 输出原则
 
-## 发布完成条件
+- 每个市场一至三条驱动，恰好一条主驱动，至少一条结构性解释。
+- 结构性解释回答“谁推动或拖累、内部是否轮动”，即使没有离散新闻也必须生成。
+- 事件或宏观解释必须同时引用本地行情和直接外部证据；专家与社交内容不能单独支撑因果。
+- 每个来源必须是可直接打开的原文链接，并记录实际发布时间和来源层级。
+- 行业代码只来自对应市场的一级行业列表；AI 环节代码不得混入行业字段。
+- 没有直接 AI 事件证据时，AI 视图必须明确采用结构性轮动解释。
+- 所有数字必须存在于输入行情或所引用证据的 `facts` 中，数值、单位和涨跌方向必须一致；
+  日期、URL、代码和内部元数据不能充当数字证据。
+- CN、US 独立判断，跨市场事件只有在本地行情响应一致且存在本地证据时才能进入。
+- AI 动态只纳入交易窗口内可核验的技术、订单、财报、政策或供需变化。
+- 读者页面只展示市场事实、解释和证据，不展示研究查询、工具或流水线状态。
 
-质量门通过不等于发布完成。定时任务只有在远程写入后回读生产接口，确认报告日期、
-更新类型、CN/US 行情日期和驱动内容一致，才算完成。
+## 完成条件
+
+Agent 输出符合 `docs/daily-report.schema.json` 只代表生成完成。定时任务还必须依次通过：
+
+1. 原生网页搜索审计覆盖 CN 与 US，并核对报告声明的查询确实执行过；
+2. 本机实际打开报告引用的每一个外部证据 URL；
+3. V10 行情、时间窗口、URL 来源层级、归因、证据和数字质量门；
+4. Cloudflare 写入；
+5. 生产接口回读与本次输入、报告逐项一致。
+
+任何一步失败都不得把本次任务标记为完成。发布命令本身也会重复执行前两项审计，不能通过
+绕开调度脚本直接写入未经审计的日报。

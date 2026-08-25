@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock Daily Codex Market Research V10",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "headline",
+    "summary",
+    "marketViews",
+    "aiChainViews",
+    "drivers",
+    "aiChainUpdates",
+    "translations",
+    "researchAudit"
+  ],
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "codex-market-research-v10"
+    },
+    "headline": { "type": "string", "minLength": 8, "maxLength": 100 },
+    "summary": { "type": "string", "minLength": 30, "maxLength": 420 },
+    "marketViews": { "$ref": "#/$defs/marketViews" },
+    "aiChainViews": { "$ref": "#/$defs/marketViews" },
+    "drivers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/driver" }
+    },
+    "aiChainUpdates": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/aiUpdate" }
+    },
+    "translations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["en"],
+      "properties": {
+        "en": { "$ref": "#/$defs/translation" }
+      }
+    },
+    "researchAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CN", "US"],
+      "properties": {
+        "CN": { "$ref": "#/$defs/researchMarket" },
+        "US": { "$ref": "#/$defs/researchMarket" }
+      }
+    }
+  },
+  "$defs": {
+    "market": {
+      "type": "string",
+      "enum": ["CN", "US"]
+    },
+    "driverStatus": {
+      "type": "string",
+      "enum": ["explained", "partial", "structural"]
+    },
+    "marketView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary", "driverStatus"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 90 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
+        "driverStatus": { "$ref": "#/$defs/driverStatus" }
+      }
+    },
+    "marketViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CN", "US"],
+      "properties": {
+        "CN": { "$ref": "#/$defs/marketView" },
+        "US": { "$ref": "#/$defs/marketView" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "facts",
+        "source",
+        "sourceLabel",
+        "publishedAt",
+        "kind",
+        "sourceType",
+        "platform",
+        "authorHandle"
+      ],
+      "properties": {
+        "title": { "type": "string", "minLength": 4, "maxLength": 220 },
+        "facts": { "type": "string", "minLength": 20, "maxLength": 1600 },
+        "source": { "type": "string", "minLength": 12, "maxLength": 1200 },
+        "sourceLabel": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "publishedAt": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["market_data", "market_wrap", "event", "official"]
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["first_party", "publisher", "expert"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["web", "x"]
+        },
+        "authorHandle": { "type": "string", "maxLength": 80 }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "role",
+        "basis",
+        "direction",
+        "title",
+        "summary",
+        "mechanism",
+        "sectorSymbols",
+        "evidence"
+      ],
+      "properties": {
+        "market": { "$ref": "#/$defs/market" },
+        "role": {
+          "type": "string",
+          "enum": ["primary", "secondary"]
+        },
+        "basis": {
+          "type": "string",
+          "enum": ["structural", "event", "macro"]
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["positive", "negative", "mixed"]
+        },
+        "title": { "type": "string", "minLength": 5, "maxLength": 80 },
+        "summary": { "type": "string", "minLength": 15, "maxLength": 300 },
+        "mechanism": { "type": "string", "minLength": 20, "maxLength": 460 },
+        "sectorSymbols": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "minLength": 1, "maxLength": 16 }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "aiUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "layer",
+        "title",
+        "summary",
+        "implication",
+        "evidence"
+      ],
+      "properties": {
+        "market": { "$ref": "#/$defs/market" },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "chips",
+            "memory",
+            "servers",
+            "interconnect",
+            "data_center",
+            "cloud",
+            "applications",
+            "robotics"
+          ]
+        },
+        "title": { "type": "string", "minLength": 5, "maxLength": 90 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
+        "implication": { "type": "string", "minLength": 20, "maxLength": 420 },
+        "evidence": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "translatedMarketView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 600 }
+      }
+    },
+    "translatedMarketViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CN", "US"],
+      "properties": {
+        "CN": { "$ref": "#/$defs/translatedMarketView" },
+        "US": { "$ref": "#/$defs/translatedMarketView" }
+      }
+    },
+    "translatedDriver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "mechanism"],
+      "properties": {
+        "title": { "type": "string", "minLength": 5, "maxLength": 140 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "mechanism": { "type": "string", "minLength": 20, "maxLength": 700 }
+      }
+    },
+    "translatedAiUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "implication"],
+      "properties": {
+        "title": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "implication": { "type": "string", "minLength": 20, "maxLength": 700 }
+      }
+    },
+    "translation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "summary",
+        "marketViews",
+        "aiChainViews",
+        "drivers",
+        "aiChainUpdates"
+      ],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 140 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "marketViews": { "$ref": "#/$defs/translatedMarketViews" },
+        "aiChainViews": { "$ref": "#/$defs/translatedMarketViews" },
+        "drivers": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/translatedDriver" }
+        },
+        "aiChainUpdates": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/translatedAiUpdate" }
+        }
+      }
+    },
+    "researchMarket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queries", "sourcesReviewed", "outcome"],
+      "properties": {
+        "queries": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1, "maxLength": 220 }
+        },
+        "sourcesReviewed": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["sufficient", "limited"]
+        }
+      }
+    }
+  }
+}

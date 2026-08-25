@@ -4,6 +4,7 @@ import type {
   AiChainConstituent,
   AiChainMetric,
   AiChainUpdate,
+  AiChainView,
   DriverEvidence,
   Language,
   MarketDriver,
@@ -31,6 +32,7 @@ interface Props {
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
   aiChainPerformance?: AiChainMetric[];
+  aiChainView?: AiChainView;
   drivers: MarketDriver[];
   aiUpdates: AiChainUpdate[];
   market: MarketRegion;
@@ -280,6 +282,7 @@ export default function MarketSnapshot({
   sectorView,
   sectorPerformance,
   aiChainPerformance,
+  aiChainView,
   drivers,
   aiUpdates,
   market,
@@ -428,6 +431,12 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
+          {aiUpdates.length === 0 && aiChainView && (
+            <article className="snapshot-structural-view">
+              <strong>{aiChainView.headline}</strong>
+              <p>{aiChainView.summary}</p>
+            </article>
+          )}
           <SnapshotEvidenceList
             items={aiEvidence}
             labels={labels}

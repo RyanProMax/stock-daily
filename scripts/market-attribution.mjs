@@ -140,13 +140,17 @@ export function sectorExtremes(performance, market, limit = 3) {
 }
 
 export function driverDirectionMatches(direction, sectorSymbols, performance) {
-  if (direction === "mixed") return sectorSymbols.length > 0;
-  return sectorSymbols.some((symbol) => {
-    const change = Number.parseFloat(
+  const changes = sectorSymbols.map((symbol) =>
+    Number.parseFloat(
       performance.find((item) => item.symbol === symbol)?.change ?? "NaN",
-    );
-    return direction === "positive" ? change > 0 : change < 0;
-  });
+    ),
+  );
+  if (direction === "mixed") {
+    return changes.some((change) => change > 0) && changes.some((change) => change < 0);
+  }
+  return changes.some((change) =>
+    direction === "positive" ? change > 0 : change < 0,
+  );
 }
 
 export function localMarketWrapMatches(

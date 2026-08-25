@@ -85,7 +85,9 @@ async function buildDailyPageData(
     ];
   }
   const [weekEvents, thesisLedger, thesisHistory] =
-    report.contractVersion === "market-attribution-v9"
+    ["market-attribution-v9", "codex-market-research-v10"].includes(
+      report.contractVersion ?? "",
+    )
       ? [null, [], []]
       : await Promise.all([
           getWeeklyEventTimeline(db, report.reportDate),

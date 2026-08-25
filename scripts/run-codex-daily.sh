@@ -32,17 +32,23 @@ fi
 readonly CODEX_BIN="${codex_bin}"
 readonly LOCK_DIR="/tmp/stock-daily-codex.lock"
 readonly LOG_FILE="${PROJECT_DIR}/work/daily-task.log"
-readonly AGENT_RESULT="${PROJECT_DIR}/work/daily-agent-result.txt"
+readonly AGENT_EVENTS_FILE="${PROJECT_DIR}/work/daily-agent-events.jsonl"
 readonly REPORT_FILE="${PROJECT_DIR}/work/daily-report.json"
 readonly PROMPT_FILE="${PROJECT_DIR}/docs/codex-daily-agent-prompt.md"
+readonly REPORT_SCHEMA_FILE="${PROJECT_DIR}/docs/daily-report.schema.json"
 readonly LEGACY_LAST_SUCCESS_FILE="${PROJECT_DIR}/work/last-scheduled-date"
 
 force_run=false
+shadow_run=false
 requested_date=""
 update_kind=""
 while (( $# > 0 )); do
   case "$1" in
     --force)
+      force_run=true
+      ;;
+    --shadow)
+      shadow_run=true
       force_run=true
       ;;
     --date)
@@ -132,17 +138,25 @@ fi
       exit "${freshness_status}"
     fi
   fi
-  /bin/rm -f "${REPORT_FILE}" "${AGENT_RESULT}"
-  "${CODEX_BIN}" exec \
+  /bin/rm -f "${REPORT_FILE}" "${AGENT_EVENTS_FILE}"
+  "${CODEX_BIN}" --search exec \
     --ephemeral \
     --ignore-user-config \
     --model gpt-5.6-sol \
     --config 'model_reasoning_effort="medium"' \
-    --sandbox workspace-write \
+    --sandbox read-only \
     --cd "${PROJECT_DIR}" \
-    --output-last-message "${AGENT_RESULT}" \
-    - < "${PROMPT_FILE}"
+    --json \
+    --output-schema "${REPORT_SCHEMA_FILE}" \
+    --output-last-message "${REPORT_FILE}" \
+    - < "${PROMPT_FILE}" > "${AGENT_EVENTS_FILE}"
+  node scripts/daily-agent-audit.mjs "${AGENT_EVENTS_FILE}" "${REPORT_FILE}"
+  node scripts/daily-source-audit.mjs "${REPORT_FILE}"
   npm run daily:check
+  if [[ "${shadow_run}" == true ]]; then
+    echo "[$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)] Stock Daily ${UPDATE_KIND} shadow run completed; publication skipped"
+    exit 0
+  fi
   npm run daily:publish
   node scripts/daily-verify.mjs
   if [[ "${force_run}" != true && -z "${requested_date}" ]]; then

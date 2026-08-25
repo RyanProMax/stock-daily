@@ -84,7 +84,7 @@ export function assessDailyFreshness(input, previousReport) {
       reason: "no_previous_report",
       marketAsOf,
       advancedMarkets: [],
-      newStoryCount: input.news?.length ?? 0,
+      newStoryCount: 0,
     };
   }
 
@@ -95,19 +95,11 @@ export function assessDailyFreshness(input, previousReport) {
       (!previousMarketAsOf[market] ||
         marketAsOf[market] > previousMarketAsOf[market]),
   );
-  const previousSources = new Set(
-    (previousReport.stories ?? [])
-      .map((story) => story.source)
-      .filter((source) => typeof source === "string"),
-  );
-  const newStoryCount = (input.news ?? []).filter(
-    (story) => !previousSources.has(story.url),
-  ).length;
+  const newStoryCount = 0;
   const checkpointChanged =
     previousReport.reportDate !== input.reportDate ||
     previousReport.updateKind !== input.updateKind;
-  const materiallyAdvanced =
-    advancedMarkets.length > 0 || newStoryCount > 0;
+  const materiallyAdvanced = advancedMarkets.length > 0;
   const publish = checkpointChanged || materiallyAdvanced;
 
   return {

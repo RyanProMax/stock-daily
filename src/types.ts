@@ -24,9 +24,12 @@ export type ThesisStatus =
 export type DriverStatus =
   | "explained"
   | "partial"
+  | "structural"
   | "unattributed"
   | "insufficient";
 export type DriverRole = "primary" | "secondary";
+export type DriverBasis = "structural" | "event" | "macro";
+export type DriverSourceType = "first_party" | "publisher" | "expert";
 export type AiChainLayer =
   | "chips"
   | "memory"
@@ -255,7 +258,8 @@ export interface DriverEvidence {
   source: string;
   sourceLabel: string;
   publishedAt: string;
-  kind: "event" | "market_wrap";
+  kind: "market_data" | "market_wrap" | "event" | "official";
+  sourceType?: DriverSourceType;
   platform?: "web" | "x";
   authority?: "first_party" | "specialist" | "expert";
   authorHandle?: string;
@@ -265,6 +269,7 @@ export interface MarketDriver {
   id: string;
   market: MarketRegion;
   role: DriverRole;
+  basis?: DriverBasis;
   direction: Exclude<ImpactTone, "neutral">;
   title: string;
   summary: string;

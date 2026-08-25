@@ -3,46 +3,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchDailyMarketPack } from "./market-data.mjs";
-import { collectNews } from "./news-pipeline.mjs";
 import {
   collectSectorPerformance,
   topSectorHeat,
 } from "./sector-heat.mjs";
-import {
-  buildMarketSessions,
-  filterNewsToMarketSessions,
-} from "./market-attribution.mjs";
+import { buildMarketSessions } from "./market-attribution.mjs";
 import {
   DAILY_UPDATE_KINDS,
   dailyCutoffAt,
 } from "./daily-policy.mjs";
 import { collectAiChainPerformance } from "./ai-chain.mjs";
-import { collectXIntelligence } from "./x-intelligence.mjs";
-
-export {
-  assessAttributionCoverage,
-  buildActiveRetrievalPlan,
-  canonicalizeUrl,
-  classifyMarketRegions,
-  deduplicateNews,
-  evidenceCoversMetric,
-  extractArticleFacts,
-  extractArticlePublishedAt,
-  getNewsBudget,
-  includeLocalWrapAnchors,
-  normalizeTextKey,
-  parseBeaReleases,
-  parseFeed,
-  parseActiveDirectHubResults,
-  parseApMarketHub,
-  relevanceScore,
-  retrieveActiveAttribution,
-  parseActiveSearchResults,
-  resolveAuditedNewsDate,
-  selectNews,
-  shouldHydrateFacts,
-  usefulFacts,
-} from "./news-pipeline.mjs";
 
 export function shanghaiDate(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -95,6 +65,84 @@ function validateMarketDates(markets, sectorPerformance, aiChainPerformance) {
   }
 }
 
+function numericChange(item) {
+  const value = Number.parseFloat(String(item?.change ?? "").replace("%", ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compactMetric(item) {
+  return {
+    symbol: item.symbol,
+    name: item.name,
+    nameEn: item.nameEn,
+    change: item.change,
+    direction: item.direction,
+  };
+}
+
+function constituentExtremes(rows, limit = 5) {
+  const unique = new Map();
+  for (const row of rows) {
+    for (const constituent of row.constituents ?? []) {
+      if (!unique.has(constituent.symbol)) {
+        unique.set(constituent.symbol, constituent);
+      }
+    }
+  }
+  const ranked = [...unique.values()].sort(
+    (left, right) => numericChange(right) - numericChange(left),
+  );
+  return {
+    leaders: ranked.slice(0, limit).map(compactMetric),
+    laggards: ranked.slice(-limit).reverse().map(compactMetric),
+  };
+}
+
+export function buildMarketBriefs({
+  markets,
+  marketSessions,
+  sectorPerformance,
+  aiChainPerformance,
+}) {
+  return Object.fromEntries(
+    ["CN", "US"].map((market) => {
+      const marketMetrics = markets.filter((item) => item.region === market);
+      const sectors = sectorPerformance.filter((item) => item.market === market);
+      const aiLayers = aiChainPerformance.filter((item) => item.market === market);
+      const rankedSectors = [...sectors].sort(
+        (left, right) => numericChange(right) - numericChange(left),
+      );
+      const rankedAiLayers = [...aiLayers].sort(
+        (left, right) => numericChange(right) - numericChange(left),
+      );
+      return [
+        market,
+        {
+          market,
+          session: marketSessions.find((item) => item.market === market),
+          indexMoves: marketMetrics.map(compactMetric),
+          sectorBreadth: {
+            advancing: sectors.filter((item) => item.direction === "up").length,
+            declining: sectors.filter((item) => item.direction === "down").length,
+            flat: sectors.filter((item) => item.direction === "flat").length,
+          },
+          sectorLeaders: rankedSectors.slice(0, 3).map(compactMetric),
+          sectorLaggards: rankedSectors.slice(-3).reverse().map(compactMetric),
+          aiLeaders: rankedAiLayers.slice(0, 2).map((item) => ({
+            layer: item.layer,
+            ...compactMetric(item),
+          })),
+          aiLaggards: rankedAiLayers.slice(-2).reverse().map((item) => ({
+            layer: item.layer,
+            ...compactMetric(item),
+          })),
+          constituentExtremes: constituentExtremes(sectors),
+        },
+      ];
+    }),
+  );
+}
+
 export async function collectDailyInput({
   reportDate = shanghaiDate(),
   updateKind = "morning",
@@ -109,7 +157,6 @@ export async function collectDailyInput({
   }
   const cutoffAt = dailyCutoffAt(reportDate, updateKind);
   const cutoffTime = Date.parse(cutoffAt);
-  const xIntelligencePromise = collectXIntelligence(cutoffTime);
   const marketPackPromise = fetchDailyMarketPack(cutoffAt);
   const sectorPerformancePromise = sectorPerformanceOverride
     ? Promise.resolve(sectorPerformanceOverride)
@@ -117,28 +164,10 @@ export async function collectDailyInput({
   const aiChainPerformancePromise = aiChainPerformanceOverride
     ? Promise.resolve(aiChainPerformanceOverride)
     : collectAiChainPerformance(cutoffTime);
-  const marketSessionsPromise = marketPackPromise.then((pack) =>
-    buildMarketSessions(pack.markets),
-  );
-  const [
-    marketPack,
-    sectorPerformance,
-    aiChainPerformance,
-    xIntelligence,
-    newsResult,
-  ] = await Promise.all([
+  const [marketPack, sectorPerformance, aiChainPerformance] = await Promise.all([
     marketPackPromise,
     sectorPerformancePromise,
     aiChainPerformancePromise,
-    xIntelligencePromise,
-    collectNews(cutoffTime, reportDate, {
-      supplementalCandidatesPromise: xIntelligencePromise.then(
-        (result) => result.candidates,
-      ),
-      marketSessionsPromise,
-      sectorPerformancePromise,
-      aiChainPerformancePromise,
-    }),
   ]);
   validateMarketDates(
     marketPack.markets,
@@ -150,16 +179,15 @@ export async function collectDailyInput({
     ...topSectorHeat(sectorPerformance.filter((item) => item.market === "US")),
   ];
   const marketSessions = buildMarketSessions(marketPack.markets);
-  const news = filterNewsToMarketSessions(newsResult.news, marketSessions);
-  const selectedByMarket = Object.fromEntries(
-    ["CN", "US"].map((market) => [
-      market,
-      news.filter((item) => item.regions.includes(market)).length,
-    ]),
-  );
+  const marketBriefs = buildMarketBriefs({
+    markets: marketPack.markets,
+    marketSessions,
+    sectorPerformance,
+    aiChainPerformance,
+  });
   return {
-    schemaVersion: 9,
-    contractVersion: "market-attribution-v9",
+    schemaVersion: 10,
+    contractVersion: "codex-market-research-v10",
     runId: randomUUID(),
     reportDate,
     updateKind,
@@ -171,12 +199,7 @@ export async function collectDailyInput({
     sectorPerformance,
     aiChainPerformance,
     sectorHeat,
-    news,
-    newsDiagnostics: {
-      ...newsResult.diagnostics,
-      selectedByMarket,
-    },
-    xIntelligenceDiagnostics: xIntelligence.diagnostics,
+    marketBriefs,
   };
 }
 
@@ -252,15 +275,7 @@ async function main() {
         heatCount: input.sectorHeat.length,
         sectorPerformanceCount: input.sectorPerformance.length,
         aiChainPerformanceCount: input.aiChainPerformance.length,
-        newsCount: input.news.length,
-        newsByMarket: input.newsDiagnostics.selectedByMarket,
-        newsCandidates: input.newsDiagnostics.candidateCount,
-        failedNewsSources: input.newsDiagnostics.sources.filter(
-          (source) => source.status === "error",
-        ).length,
-        xIntelligence: input.xIntelligenceDiagnostics.status,
-        xCandidateCount:
-          input.xIntelligenceDiagnostics.candidateCount ?? 0,
+        researchMarkets: Object.keys(input.marketBriefs),
       },
       null,
       2,

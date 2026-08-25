@@ -92,6 +92,14 @@ function props(aiUpdates = []) {
       source: `https://example.com/ai/${index}`,
       constituents: constituents(`ai-${index}`),
     })),
+    aiChainView: {
+      headline: "人工智能产业链呈现结构性轮动",
+      summary: "八个环节涨跌分化，当前没有足以解释整组行情的直接事件证据。",
+      driverStatus: "structural",
+      leaderLayers: ["chips"],
+      laggardLayers: ["memory"],
+      driverIds: [],
+    },
     drivers: [
       {
         id: "driver-1",
@@ -154,6 +162,14 @@ test("market snapshot renders unique compact evidence rows for market and sector
 
   assert.equal(document.querySelectorAll(".snapshot-evidence-list").length, 2);
   assert.equal(document.querySelectorAll(".snapshot-group-ai .snapshot-evidence-list").length, 0);
+  assert.match(
+    document.querySelector(".snapshot-structural-view").textContent,
+    /人工智能产业链呈现结构性轮动/,
+  );
+  assert.match(
+    document.querySelector(".snapshot-structural-view").textContent,
+    /当前没有足以解释整组行情的直接事件证据/,
+  );
   assert.equal(
     document.querySelectorAll(
       ".snapshot-sector-complete > .snapshot-heading > span, .snapshot-group-ai > .snapshot-heading > span",
@@ -237,4 +253,5 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
     1,
   );
   assert.ok(item.querySelector('a[href="https://example.com/ai-evidence"]'));
+  assert.equal(document.querySelectorAll(".snapshot-structural-view").length, 0);
 });

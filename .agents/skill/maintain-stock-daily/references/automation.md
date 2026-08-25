@@ -6,7 +6,7 @@
 - Close run: `npm run daily:close`
 - Evening run: `npm run daily:evening`
 - Backfill: `scripts/run-codex-daily.sh --force --date YYYY-MM-DD --update-kind morning|close|evening`
-- Stages: `daily:collect`, scheduled `daily:freshness`, `daily:check`, `daily:publish`, `daily:verify`
+- Stages: `daily:collect`, scheduled `daily:freshness`, read-only Codex native research, search audit, cited-source audit, `daily:check`, `daily:publish`, `daily:verify`
 - Schedule: Beijing 09:00 morning, 15:00 close, and 21:00 evening via `com.stock-daily.codex.plist`
 - Persistence: all three updates upsert the same `report_date`; later runs do not create another edition
 
