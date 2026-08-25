@@ -8,6 +8,8 @@ import { JSDOM } from "jsdom";
 import {
   classifyNewsKind,
   filterNewsToMarketSessions,
+  localMarketWrapMatches,
+  sectorExtremes,
 } from "./market-attribution.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +23,10 @@ const LIVE_AUDIT_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 const SOURCE_TIMEOUT_MS = 20_000;
 const MAX_CANDIDATES_PER_SOURCE = 48;
 const MAX_HYDRATION_PER_MARKET = 14;
+const MAX_ACTIVE_HYDRATION_PER_MARKET = 6;
+const ACTIVE_SEARCH_MAX_RESULTS = 18;
+const ACTIVE_SEARCH_INTERVAL_MS = 5_500;
+const ACTIVE_SEARCH_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc";
 const WORD_SEGMENTER = new Intl.Segmenter(["zh", "en"], {
   granularity: "word",
 });
@@ -758,6 +764,362 @@ export async function discoverNewsCandidates(referenceTime = Date.now()) {
   };
 }
 
+const ACTIVE_PUBLISHER_DOMAINS = new Set([
+  "apnews.com",
+  "bloomberg.com",
+  "caixinglobal.com",
+  "caixin.com",
+  "cnbc.com",
+  "economist.com",
+  "finance.yahoo.com",
+  "ft.com",
+  "marketwatch.com",
+  "reuters.com",
+  "thepaper.cn",
+  "wsj.com",
+  "yicai.com",
+]);
+
+function domainMatches(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function activeSourceTier(value) {
+  try {
+    const hostname = new URL(value).hostname.toLocaleLowerCase();
+    if (
+      hostname.endsWith(".gov") ||
+      hostname.endsWith(".gov.cn") ||
+      [
+        "federalreserve.gov",
+        "sec.gov",
+        "stats.gov.cn",
+        "sse.com.cn",
+        "szse.cn",
+      ].some((domain) =>
+        domainMatches(hostname, domain),
+      )
+    ) {
+      return "official";
+    }
+    if (
+      [...ACTIVE_PUBLISHER_DOMAINS].some((domain) =>
+        domainMatches(hostname, domain),
+      )
+    ) {
+      return "publisher";
+    }
+  } catch {
+    return "search";
+  }
+  return "search";
+}
+
+function itemText(item) {
+  return plainText(`${item?.title ?? ""} ${item?.facts ?? ""}`)
+    .toLocaleLowerCase();
+}
+
+function metricTerms(metric) {
+  const constituents = [...(metric?.constituents ?? [])]
+    .sort(
+      (left, right) =>
+        Math.abs(Number.parseFloat(right.change)) -
+        Math.abs(Number.parseFloat(left.change)),
+    )
+    .slice(0, 2)
+    .flatMap((item) => [item.name, item.nameEn, item.symbol]);
+  return [...new Set([
+    metric?.name,
+    metric?.nameEn,
+    metric?.symbol,
+    ...constituents,
+  ])]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value.length >= 2);
+}
+
+function directionPattern(direction) {
+  if (direction === "up") {
+    return /上涨|走强|反弹|领涨|收涨|增长|超预期|上调|rose|rise|rising|gained|gain|rall(?:y|ied)|surged|beat|raised/iu;
+  }
+  if (direction === "down") {
+    return /下跌|走弱|回落|领跌|收跌|下降|低于预期|下调|fell|fall|falling|lost|loss|slid|dropped|missed|cut|warning/iu;
+  }
+  return /持平|震荡|flat|unchanged|mixed/iu;
+}
+
+export function evidenceCoversMetric(evidence, metric) {
+  const terms = metricTerms(metric).map((term) => term.toLocaleLowerCase());
+  return evidence.some((item) => {
+    if (!item?.regions?.includes(metric.market)) return false;
+    const text = itemText(item);
+    return (
+      terms.some((term) => text.includes(term)) &&
+      directionPattern(metric.direction).test(text)
+    );
+  });
+}
+
+function aiExtremes(performance, market) {
+  const rows = performance
+    .filter((item) => item.market === market && item.direction !== "flat")
+    .sort(
+      (left, right) =>
+        Number.parseFloat(right.change) - Number.parseFloat(left.change),
+    );
+  if (rows.length === 0) return [];
+  return [...new Map([rows[0], rows.at(-1)].map((item) => [item.layer, item])).values()];
+}
+
+function intentQueryTerms(market, metrics = []) {
+  const marketTerms =
+    market === "CN"
+      ? ["A股", "上证", "沪深300", "China stocks"]
+      : ["Wall Street", "S&P 500", "Nasdaq", "Dow"];
+  return [...new Set([...marketTerms, ...metrics.flatMap(metricTerms)])].slice(0, 12);
+}
+
+export function buildActiveRetrievalPlan({
+  evidence = [],
+  marketSessions = [],
+  sectorPerformance = [],
+  aiChainPerformance = [],
+} = {}) {
+  const intents = [];
+  for (const market of ["CN", "US"]) {
+    const session = marketSessions.find((item) => item.market === market);
+    if (!session) continue;
+    const sectors = sectorPerformance.filter((item) => item.market === market);
+    const marketEvidence = evidence.filter((item) => item.regions?.includes(market));
+    if (!marketEvidence.some((item) => localMarketWrapMatches(item, market, sectors))) {
+      intents.push({
+        id: `${market}:market-wrap`,
+        market,
+        kind: "market_wrap",
+        queryTerms: intentQueryTerms(market),
+        windowStart: session.windowStart,
+        windowEnd: session.wrapDeadline,
+      });
+    }
+
+    const extremes = sectorExtremes(sectorPerformance, market, 1);
+    const missingSectors = [...extremes.leaders, ...extremes.laggards].filter(
+      (metric) => !evidenceCoversMetric(marketEvidence, metric),
+    );
+    if (missingSectors.length > 0) {
+      intents.push({
+        id: `${market}:sector-extremes`,
+        market,
+        kind: "sector_extremes",
+        metricKeys: missingSectors.map((item) => item.symbol),
+        queryTerms: intentQueryTerms(market, missingSectors),
+        windowStart: session.windowStart,
+        windowEnd: session.windowEnd,
+      });
+    }
+
+    const missingAi = aiExtremes(aiChainPerformance, market).filter(
+      (metric) => !evidenceCoversMetric(marketEvidence, metric),
+    );
+    if (missingAi.length > 0) {
+      intents.push({
+        id: `${market}:ai-extremes`,
+        market,
+        kind: "ai_extremes",
+        metricKeys: missingAi.map((item) => item.layer),
+        queryTerms: intentQueryTerms(market, missingAi),
+        windowStart: session.windowStart,
+        windowEnd: session.windowEnd,
+      });
+    }
+  }
+  return intents;
+}
+
+function gdeltTimestamp(value) {
+  const text = String(value ?? "").trim();
+  const compact = text.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/u);
+  if (compact) {
+    return Date.parse(
+      `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:${compact[6]}Z`,
+    );
+  }
+  return Date.parse(text);
+}
+
+function gdeltParameterTime(value) {
+  return new Date(value).toISOString().replace(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "");
+}
+
+function quotedSearchTerm(value) {
+  const term = String(value).replace(/["()]/gu, " ").replace(/\s+/gu, " ").trim();
+  return term.includes(" ") ? `\"${term}\"` : term;
+}
+
+function groupedActiveSearchUrl(intents, referenceTime) {
+  const terms = [...new Set(intents.flatMap((intent) => intent.queryTerms))]
+    .map(quotedSearchTerm)
+    .filter(Boolean)
+    .slice(0, 14);
+  const startTime = Math.min(...intents.map((intent) => Date.parse(intent.windowStart)));
+  const requestedEnd = Math.max(...intents.map((intent) => Date.parse(intent.windowEnd)));
+  const endTime = Math.min(requestedEnd, referenceTime);
+  const url = new URL(ACTIVE_SEARCH_ENDPOINT);
+  url.searchParams.set("query", `(${terms.join(" OR ")})`);
+  url.searchParams.set("mode", "artlist");
+  url.searchParams.set("maxrecords", String(ACTIVE_SEARCH_MAX_RESULTS));
+  url.searchParams.set("sort", "datedesc");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("startdatetime", gdeltParameterTime(startTime));
+  url.searchParams.set("enddatetime", gdeltParameterTime(endTime));
+  return url;
+}
+
+export function parseActiveSearchResults(body, intents, referenceTime = Date.now()) {
+  const payload = typeof body === "string" ? JSON.parse(body) : body;
+  const market = intents[0]?.market;
+  if (!market || intents.some((intent) => intent.market !== market)) {
+    throw new Error("主动检索结果必须对应单一市场");
+  }
+  const earliest = Math.min(...intents.map((intent) => Date.parse(intent.windowStart)));
+  const latest = Math.min(
+    referenceTime,
+    Math.max(...intents.map((intent) => Date.parse(intent.windowEnd))),
+  );
+  return (Array.isArray(payload?.articles) ? payload.articles : [])
+    .map((article) => {
+      const timestamp = gdeltTimestamp(article?.seendate);
+      const url = canonicalizeUrl(String(article?.url ?? ""));
+      const title = cleanTitle(article?.title ?? "", "active-search");
+      let hostname = "";
+      try {
+        hostname = new URL(url).hostname.replace(/^www\./u, "");
+      } catch {
+        return null;
+      }
+      if (
+        title.length < 8 ||
+        !url.startsWith("https://") ||
+        !Number.isFinite(timestamp) ||
+        timestamp <= earliest ||
+        timestamp > latest
+      ) {
+        return null;
+      }
+      return {
+        title,
+        url,
+        source: hostname,
+        publishedAt: new Date(timestamp).toISOString(),
+        regions: [market],
+        platform: "web",
+        _sourceId: `active:${market}`,
+        _tier: activeSourceTier(url),
+        _observedAt: new Date(timestamp).toISOString(),
+        _activeIntentIds: intents.map((intent) => intent.id),
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fetchActiveSearch(url) {
+  const response = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+    redirect: "follow",
+    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return { body: await response.text(), finalUrl: response.url };
+}
+
+export async function retrieveActiveAttribution(
+  intents,
+  referenceTime = Date.now(),
+  { fetcher = fetchActiveSearch, wait = delay } = {},
+) {
+  const groups = ["CN", "US"]
+    .map((market) => intents.filter((intent) => intent.market === market))
+    .filter((group) => group.length > 0);
+  const searches = [];
+  const candidates = [];
+  for (let index = 0; index < groups.length; index += 1) {
+    if (index > 0) await wait(ACTIVE_SEARCH_INTERVAL_MS);
+    const group = groups[index];
+    const startedAt = Date.now();
+    try {
+      const response = await fetcher(groupedActiveSearchUrl(group, referenceTime), {
+        market: group[0].market,
+        intentIds: group.map((intent) => intent.id),
+      });
+      const items = parseActiveSearchResults(response.body, group, referenceTime);
+      candidates.push(...items);
+      searches.push({
+        market: group[0].market,
+        status: "ok",
+        intentIds: group.map((intent) => intent.id),
+        intentResults: group.map((intent) => ({
+          id: intent.id,
+          kind: intent.kind,
+          resultCount: items.length,
+        })),
+        resultCount: items.length,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      searches.push({
+        market: group[0].market,
+        status: "error",
+        intentIds: group.map((intent) => intent.id),
+        intentResults: group.map((intent) => ({
+          id: intent.id,
+          kind: intent.kind,
+          resultCount: 0,
+        })),
+        resultCount: 0,
+        durationMs: Date.now() - startedAt,
+        error: safeError(error),
+      });
+    }
+  }
+  return { candidates, searches };
+}
+
+export function assessAttributionCoverage({
+  evidence = [],
+  initialPlan = [],
+  searches = [],
+  marketSessions = [],
+  sectorPerformance = [],
+  aiChainPerformance = [],
+} = {}) {
+  const remainingPlan = buildActiveRetrievalPlan({
+    evidence,
+    marketSessions,
+    sectorPerformance,
+    aiChainPerformance,
+  });
+  return Object.fromEntries(
+    ["CN", "US"].map((market) => {
+      const planned = initialPlan.filter((intent) => intent.market === market);
+      const search = searches.find((item) => item.market === market);
+      const remaining = remainingPlan.filter((intent) => intent.market === market);
+      const hasWrap = !remaining.some((intent) => intent.kind === "market_wrap");
+      const searchIncomplete =
+        planned.length > 0 && (!search || search.status !== "ok");
+      return [
+        market,
+        {
+          status: hasWrap && !searchIncomplete ? "adequate" : "insufficient",
+          activeSearchRequired: planned.length > 0,
+          activeSearchCompleted: planned.length === 0 || search?.status === "ok",
+          missingIntentKinds: [...new Set(remaining.map((intent) => intent.kind))],
+        },
+      ];
+    }),
+  );
+}
+
 function sourceScore(item) {
   if (item._tier === "audited") return 16;
   if (item.platform === "x") {
@@ -1206,6 +1568,37 @@ export function extractArticleTitle(html, fallback = "") {
   return cleanTitle(title).slice(0, 240);
 }
 
+function jsonDatePublished(value) {
+  if (Array.isArray(value)) {
+    return value.map(jsonDatePublished).find(Boolean) ?? "";
+  }
+  if (!value || typeof value !== "object") return "";
+  if (typeof value.datePublished === "string") return value.datePublished;
+  return Object.values(value).map(jsonDatePublished).find(Boolean) ?? "";
+}
+
+export function extractArticlePublishedAt(html) {
+  const document = new JSDOM(html).window.document;
+  const candidates = [
+    document.querySelector('meta[property="article:published_time"]')?.getAttribute("content"),
+    document.querySelector('meta[name="article:published_time"]')?.getAttribute("content"),
+    document.querySelector('meta[name="date"]')?.getAttribute("content"),
+    document.querySelector('meta[itemprop="datePublished"]')?.getAttribute("content"),
+    document.querySelector('time[itemprop="datePublished"][datetime]')?.getAttribute("datetime"),
+  ];
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      candidates.push(jsonDatePublished(JSON.parse(script.textContent ?? "")));
+    } catch {
+      // Other explicit publication metadata remains available.
+    }
+  }
+  const timestamp = candidates
+    .map((value) => Date.parse(String(value ?? "")))
+    .find(Number.isFinite);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
 export function xOutboundUrls(item) {
   const structured = Array.isArray(item?._outboundUrls)
     ? item._outboundUrls
@@ -1280,14 +1673,14 @@ export function shouldHydrateFacts(item, existingFacts) {
   return existingFacts.length < 80;
 }
 
-async function hydrateNewsFacts(item) {
+async function hydrateNewsFacts(item, fetcher = fetchText) {
   const existingFacts = usefulFacts(item.facts, item.title);
   if (!shouldHydrateFacts(item, existingFacts)) {
     return { ...item, facts: existingFacts };
   }
 
   try {
-    const response = await fetchText(item.url, {
+    const response = await fetcher(item.url, {
       headers: { Accept: "text/html,application/xhtml+xml" },
       source: item.source,
     });
@@ -1297,12 +1690,19 @@ async function hydrateNewsFacts(item) {
       response.finalUrl || item.url,
     );
     const facts = hydratedFacts || existingFacts;
+    const activePublishedAt = item._sourceId?.startsWith("active:")
+      ? extractArticlePublishedAt(response.body)
+      : "";
+    if (item._sourceId?.startsWith("active:") && !activePublishedAt) {
+      throw new Error(`${item.source} 正文缺少可核验的发布时间：${item.title}`);
+    }
     if (!facts) {
       throw new Error(`${item.source} 正文没有可核验的事实摘要：${item.title}`);
     }
     return {
       ...item,
       url: canonicalizeUrl(response.finalUrl || item.url),
+      ...(activePublishedAt ? { publishedAt: activePublishedAt } : {}),
       facts,
     };
   } catch (error) {
@@ -1374,7 +1774,7 @@ async function hydrateXCanonicalSource(item, fetcher = fetchText) {
 }
 
 export async function hydrateNewsEvidence(item, fetcher = fetchText) {
-  const hydrated = await hydrateNewsFacts(item);
+  const hydrated = await hydrateNewsFacts(item, fetcher);
   return hydrateXCanonicalSource(hydrated, fetcher);
 }
 
@@ -1404,6 +1804,45 @@ export function includeCanonicalPairs(
     selectedUrls.add(counterpart.url);
   }
   return result;
+}
+
+export function includeLocalWrapAnchors(
+  selected,
+  candidates,
+  sectorPerformance = [],
+  maximumPerMarket = NEWS_MAX_PER_MARKET,
+) {
+  const result = [...selected];
+  for (const market of ["CN", "US"]) {
+    const sectors = sectorPerformance.filter((item) => item.market === market);
+    if (result.some((item) => localMarketWrapMatches(item, market, sectors))) {
+      continue;
+    }
+    const anchor = candidates
+      .filter((item) => localMarketWrapMatches(item, market, sectors))
+      .sort(
+        (left, right) =>
+          relevanceScore(right) - relevanceScore(left) ||
+          right.publishedAt.localeCompare(left.publishedAt),
+      )[0];
+    if (!anchor || result.some((item) => item.url === anchor.url)) continue;
+    const marketIndexes = result
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.regions.includes(market));
+    if (marketIndexes.length >= maximumPerMarket) {
+      const removable = marketIndexes
+        .filter(({ item }) => !localMarketWrapMatches(item, market, sectors))
+        .sort(
+          (left, right) =>
+            relevanceScore(left.item) - relevanceScore(right.item),
+        )[0];
+      if (!removable) continue;
+      result.splice(removable.index, 1, anchor);
+    } else {
+      result.push(anchor);
+    }
+  }
+  return deduplicateNews(result);
 }
 
 async function mapSettledWithConcurrency(items, concurrency, worker) {
@@ -1492,6 +1931,11 @@ export async function collectNews(
     supplementalCandidates = [],
     supplementalCandidatesPromise,
     marketSessionsPromise,
+    sectorPerformancePromise,
+    aiChainPerformancePromise,
+    activeSearchFetcher,
+    activeSearchWait,
+    activeHydrationFetcher,
   } = {},
 ) {
   const budget = { ...getNewsBudget(reportDate), minimumPerMarket: 0 };
@@ -1500,7 +1944,13 @@ export async function collectNews(
     audited.length === 0 ||
     Math.abs(Date.now() - referenceTime) <= LIVE_AUDIT_WINDOW_MS;
 
-  const [discovery, promisedSupplemental, marketSessions] = await Promise.all([
+  const [
+    discovery,
+    promisedSupplemental,
+    marketSessions,
+    sectorPerformance,
+    aiChainPerformance,
+  ] = await Promise.all([
     useLiveSources
       ? discoverNewsCandidates(referenceTime)
       : Promise.resolve({ candidates: [], sources: [] }),
@@ -1508,6 +1958,8 @@ export async function collectNews(
       ? supplementalCandidatesPromise.catch(() => [])
       : Promise.resolve([]),
     marketSessionsPromise ?? Promise.resolve(null),
+    sectorPerformancePromise ?? Promise.resolve([]),
+    aiChainPerformancePromise ?? Promise.resolve([]),
   ]);
   const sourceResults = discovery.sources;
   const discovered = discovery.candidates;
@@ -1543,14 +1995,92 @@ export async function collectNews(
   const eligibleHydrated = marketSessions
     ? filterNewsToMarketSessions(hydrated, marketSessions)
     : hydrated;
-  const selected = includeCanonicalPairs(
-    selectNews(eligibleHydrated, {
-      perMarket: budget.targetPerMarket,
-      minimumScore: 8,
-      includeInternal: true,
-    }),
-    eligibleHydrated,
+  const activePlan = marketSessions
+    ? buildActiveRetrievalPlan({
+        evidence: eligibleHydrated.map((item) => ({
+          ...item,
+          kind: item.kind ?? classifyNewsKind(item),
+        })),
+        marketSessions,
+        sectorPerformance,
+        aiChainPerformance,
+      })
+    : [];
+  const activeDiscovery =
+    activePlan.length > 0
+      ? await retrieveActiveAttribution(activePlan, referenceTime, {
+          ...(activeSearchFetcher ? { fetcher: activeSearchFetcher } : {}),
+          ...(activeSearchWait ? { wait: activeSearchWait } : {}),
+        })
+      : { candidates: [], searches: [] };
+  const activeSessionCandidates = marketSessions
+    ? filterNewsToMarketSessions(activeDiscovery.candidates, marketSessions)
+    : activeDiscovery.candidates;
+  const activeHydrationQueue = selectNews(activeSessionCandidates, {
+    perMarket: MAX_ACTIVE_HYDRATION_PER_MARKET,
+    minimumScore: -3,
+    sourceLimit: 3,
+    topicLimit: 4,
+    includeInternal: true,
+  });
+  const activeHydrationResults = await mapSettledWithConcurrency(
+    activeHydrationQueue,
+    3,
+    (item) =>
+      hydrateNewsEvidence(
+        item,
+        activeHydrationFetcher ?? fetchText,
+      ),
   );
+  const activeHydrated = activeHydrationResults
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => result.value);
+  const eligibleActiveHydrated = marketSessions
+    ? filterNewsToMarketSessions(activeHydrated, marketSessions)
+    : activeHydrated;
+  const allEligibleHydrated = pairCorroboratingXEvidence(
+    deduplicateNews([...eligibleHydrated, ...eligibleActiveHydrated]),
+  );
+  const selected = includeCanonicalPairs(
+    includeLocalWrapAnchors(
+      selectNews(allEligibleHydrated, {
+        perMarket: budget.targetPerMarket,
+        minimumScore: 8,
+        includeInternal: true,
+      }),
+      allEligibleHydrated,
+      sectorPerformance,
+      budget.maximumPerMarket,
+    ),
+    allEligibleHydrated,
+  );
+  const coverageEvidence = allEligibleHydrated.map((item) => ({
+    ...item,
+    kind: item.kind ?? classifyNewsKind(item),
+  }));
+  const coverageByMarket = marketSessions
+    ? assessAttributionCoverage({
+        evidence: coverageEvidence,
+        initialPlan: activePlan,
+        searches: activeDiscovery.searches,
+        marketSessions,
+        sectorPerformance,
+        aiChainPerformance,
+      })
+    : {
+        CN: {
+          status: "insufficient",
+          activeSearchRequired: false,
+          activeSearchCompleted: false,
+          missingIntentKinds: ["market_wrap"],
+        },
+        US: {
+          status: "insufficient",
+          activeSearchRequired: false,
+          activeSearchCompleted: false,
+          missingIntentKinds: ["market_wrap"],
+        },
+      };
   const counts = marketCounts(selected);
   return {
     news: selected.map((item) =>
@@ -1563,15 +2093,28 @@ export async function collectNews(
           : audited.length > 0
             ? "audited"
             : "live",
-      candidateCount: candidates.length,
-      hydratedCount: hydrated.length,
+      candidateCount: candidates.length + activeDiscovery.candidates.length,
+      hydratedCount: hydrated.length + activeHydrated.length,
       rejectedDuringHydration: hydrationResults.filter(
+        (result) => result.status === "rejected",
+      ).length + activeHydrationResults.filter(
         (result) => result.status === "rejected",
       ).length,
       selectedByMarket: counts,
       minimumPerMarket: budget.minimumPerMarket,
       targetPerMarket: budget.targetPerMarket,
       sources: sourceResults.map(({ items, ...result }) => result),
+      activeRetrieval: {
+        attempted: activePlan.length > 0,
+        queryCount: activePlan.length,
+        candidateCount: activeDiscovery.candidates.length,
+        hydratedCount: activeHydrated.length,
+        rejectedDuringHydration: activeHydrationResults.filter(
+          (result) => result.status === "rejected",
+        ).length,
+        searches: activeDiscovery.searches,
+        coverageByMarket,
+      },
     },
   };
 }

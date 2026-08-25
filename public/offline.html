@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#123b34" />
+    <title>暂时无法连接 | Stock Daily</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        min-width: 320px;
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: max(28px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+        color: #132621;
+        background: #f5f0e6;
+        font-family: ui-serif, Georgia, serif;
+      }
+      main { width: min(100%, 540px); border-top: 8px solid #123b34; padding-top: 28px; }
+      .mark { display: grid; width: 64px; height: 64px; place-items: center; color: #f5f0e6; background: #123b34; border-radius: 12px; font-size: 24px; font-style: italic; font-weight: 700; }
+      h1 { margin: 34px 0 12px; font-size: clamp(34px, 9vw, 58px); line-height: 1; letter-spacing: -.035em; }
+      p { margin: 0; color: #586963; font-size: 17px; line-height: 1.7; }
+      a { display: inline-block; margin-top: 30px; color: #123b34; font: 700 14px/1.2 ui-sans-serif, system-ui, sans-serif; }
+      @media (prefers-color-scheme: dark) {
+        body { color: #edf2ed; background: #101816; }
+        p { color: #a7b2ac; }
+        a { color: #9bd7c6; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="mark" aria-hidden="true">SD</span>
+      <h1>暂时无法连接</h1>
+      <p>行情与日报需要联网更新。连接恢复后，请重新载入以查看最新内容。</p>
+      <a href="/">重新载入</a>
+    </main>
+  </body>
+</html>

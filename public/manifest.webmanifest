@@ -1,0 +1,35 @@
+{
+  "id": "/",
+  "name": "Stock Daily",
+  "short_name": "Stock Daily",
+  "description": "中美市场、行业与 AI 产业链的每日收盘证据简报。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "background_color": "#f5f0e6",
+  "theme_color": "#123b34",
+  "orientation": "portrait-primary",
+  "categories": ["finance", "news"],
+  "icons": [
+    {
+      "src": "/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,5 +1,18 @@
 {
   "version": 1,
   "include": ["/*"],
-  "exclude": ["/static/*", "/og.png"]
+  "exclude": [
+    "/static/*",
+    "/og.png",
+    "/manifest.webmanifest",
+    "/service-worker.js",
+    "/offline",
+    "/offline.html",
+    "/favicon.svg",
+    "/app-icon.svg",
+    "/app-icon-192.png",
+    "/app-icon-512.png",
+    "/app-icon-maskable-512.png",
+    "/apple-touch-icon.png"
+  ]
 }

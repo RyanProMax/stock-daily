@@ -89,6 +89,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+@media (display-mode: standalone) {
+  body {
+    min-height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .masthead {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .masthead-inner,
+  main,
+  .footer-inner {
+    padding-right: env(safe-area-inset-right);
+    padding-left: env(safe-area-inset-left);
+  }
+}
+
 button,
 select,
 input {

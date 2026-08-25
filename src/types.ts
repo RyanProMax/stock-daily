@@ -21,7 +21,11 @@ export type ThesisStatus =
   | "partial"
   | "invalidated"
   | "inconclusive";
-export type DriverStatus = "explained" | "partial" | "unattributed";
+export type DriverStatus =
+  | "explained"
+  | "partial"
+  | "unattributed"
+  | "insufficient";
 export type DriverRole = "primary" | "secondary";
 export type AiChainLayer =
   | "chips"

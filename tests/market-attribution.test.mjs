@@ -182,6 +182,28 @@ function fixtureInput() {
       mode: "audited", candidateCount: 3, hydratedCount: 3,
       rejectedDuringHydration: 0, selectedByMarket: { CN: 2, US: 1 },
       minimumPerMarket: 0, targetPerMarket: 8, sources: [],
+      activeRetrieval: {
+        attempted: false,
+        queryCount: 0,
+        candidateCount: 0,
+        hydratedCount: 0,
+        rejectedDuringHydration: 0,
+        searches: [],
+        coverageByMarket: {
+          CN: {
+            status: "adequate",
+            activeSearchRequired: false,
+            activeSearchCompleted: true,
+            missingIntentKinds: [],
+          },
+          US: {
+            status: "adequate",
+            activeSearchRequired: false,
+            activeSearchCompleted: true,
+            missingIntentKinds: [],
+          },
+        },
+      },
     },
   };
 }
@@ -430,6 +452,62 @@ test("V9 permits zero drivers but rejects generic headlines", () => {
   assert.equal(validateReport(report, input).drivers.length, 0);
   report.marketViews.CN.headline = "市场股指全面普涨";
   assert.throws(() => validateReport(report, input), /必须包含可回溯的原因或行业|无原因标题/);
+});
+
+test("V9 derives an insufficient-evidence reader state from coverage diagnostics", () => {
+  const rawInput = fixtureInput();
+  rawInput.newsDiagnostics.activeRetrieval.attempted = true;
+  rawInput.newsDiagnostics.activeRetrieval.queryCount = 1;
+  rawInput.newsDiagnostics.activeRetrieval.searches = [{
+    market: "CN",
+    status: "error",
+    intentIds: ["CN:market-wrap"],
+    intentResults: [{
+      id: "CN:market-wrap",
+      kind: "market_wrap",
+      resultCount: 0,
+    }],
+    resultCount: 0,
+    durationMs: 12,
+    error: "HTTP 429",
+  }];
+  rawInput.newsDiagnostics.activeRetrieval.coverageByMarket.CN = {
+    status: "insufficient",
+    activeSearchRequired: true,
+    activeSearchCompleted: false,
+    missingIntentKinds: ["market_wrap", "ai_extremes"],
+  };
+  const input = validateInput(rawInput);
+  const report = fixtureReport();
+  report.drivers = report.drivers.filter((driver) => driver.market !== "CN");
+  report.translations.en.drivers = report.translations.en.drivers.filter(
+    (_, index) => fixtureReport().drivers[index].market !== "CN",
+  );
+  report.marketViews.CN = {
+    headline: "原材料走强，A股收涨",
+    summary: "行业表现分化，未发现单一消息主导本次大盘上涨。",
+    driverStatus: "unattributed",
+  };
+  report.translations.en.marketViews.CN = {
+    headline: "Materials led as Chinese stocks rose",
+    summary: "Sector performance diverged and no single verified catalyst dominated the session.",
+  };
+  report.aiChainUpdates = [];
+  report.translations.en.aiChainUpdates = [];
+  report.aiChainViews.CN = {
+    headline: "CPO / 光互连走强，AI链上行",
+    summary: "AI代表篮子涨跌分化，未发现单一消息主导各产业层的当日表现。",
+    driverStatus: "unattributed",
+  };
+  report.translations.en.aiChainViews.CN = {
+    headline: "CPO / optical interconnects rose as China's AI basket advanced",
+    summary: "AI baskets diverged and no single verified catalyst dominated the day across layers.",
+  };
+  const validated = validateReport(report, input);
+  assert.equal(validated.marketViews.CN.driverStatus, "insufficient");
+  assert.match(validated.marketViews.CN.summary, /证据覆盖不足/);
+  assert.equal(validated.aiChainViews.CN.driverStatus, "insufficient");
+  assert.match(validated.translations.en.marketViews.CN.summary, /evidence is incomplete/i);
 });
 
 test("V9 rejects a pure US item as a CN driver and rejects opposite sector direction", () => {

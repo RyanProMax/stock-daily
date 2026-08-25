@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Stock Daily">
+  <rect width="64" height="64" rx="14" fill="#f5f0e6"/>
+  <path d="M8 7h44v50H8z" rx="8" fill="#123b34"/>
+  <path d="M52 18h5v26h-5z" fill="#c85a43"/>
+  <text x="12" y="42" fill="#f5f0e6" font-family="Georgia, serif" font-size="29" font-style="italic" font-weight="700" letter-spacing="-3">SD</text>
+</svg>

@@ -776,6 +776,66 @@ function validateV9Input(value) {
   ) {
     throw new Error("newsDiagnostics 与候选新闻不一致");
   }
+  const activeRetrieval = requireObject(
+    diagnostics.activeRetrieval,
+    "newsDiagnostics.activeRetrieval",
+  );
+  const coverageByMarket = requireObject(
+    activeRetrieval.coverageByMarket,
+    "newsDiagnostics.activeRetrieval.coverageByMarket",
+  );
+  if (
+    typeof activeRetrieval.attempted !== "boolean" ||
+    !Number.isInteger(activeRetrieval.queryCount) ||
+    activeRetrieval.queryCount < 0 ||
+    activeRetrieval.queryCount > 6 ||
+    !Number.isInteger(activeRetrieval.candidateCount) ||
+    activeRetrieval.candidateCount < 0 ||
+    !Number.isInteger(activeRetrieval.hydratedCount) ||
+    activeRetrieval.hydratedCount < 0 ||
+    !Number.isInteger(activeRetrieval.rejectedDuringHydration) ||
+    activeRetrieval.rejectedDuringHydration < 0 ||
+    !Array.isArray(activeRetrieval.searches) ||
+    activeRetrieval.searches.length > 2 ||
+    activeRetrieval.attempted !== (activeRetrieval.queryCount > 0) ||
+    ["CN", "US"].some((market) => {
+      const coverage = coverageByMarket[market];
+      return (
+        !coverage ||
+        !["adequate", "insufficient"].includes(coverage.status) ||
+        typeof coverage.activeSearchRequired !== "boolean" ||
+        typeof coverage.activeSearchCompleted !== "boolean" ||
+        !Array.isArray(coverage.missingIntentKinds) ||
+        coverage.missingIntentKinds.some(
+          (kind) =>
+            !["market_wrap", "sector_extremes", "ai_extremes"].includes(kind),
+        )
+      );
+    }) ||
+    activeRetrieval.searches.some(
+      (search) =>
+        !["CN", "US"].includes(search?.market) ||
+        !["ok", "error"].includes(search?.status) ||
+        !Array.isArray(search?.intentIds) ||
+        !Array.isArray(search?.intentResults) ||
+        search.intentResults.length !== search.intentIds.length ||
+        search.intentResults.some(
+          (intent) =>
+            !search.intentIds.includes(intent?.id) ||
+            !["market_wrap", "sector_extremes", "ai_extremes"].includes(
+              intent?.kind,
+            ) ||
+            !Number.isInteger(intent?.resultCount) ||
+            intent.resultCount < 0,
+        ) ||
+        !Number.isInteger(search?.resultCount) ||
+        search.resultCount < 0 ||
+        !Number.isInteger(search?.durationMs) ||
+        search.durationMs < 0,
+    )
+  ) {
+    throw new Error("主动检索诊断字段无效");
+  }
   return input;
 }
 
@@ -1768,6 +1828,14 @@ function causalHeadline(value, label, { sectorNames, driverTitles, unattributed,
   return headline;
 }
 
+function insufficientCoverage(input, market, kind) {
+  const coverage = input.newsDiagnostics?.activeRetrieval?.coverageByMarket?.[market];
+  if (coverage?.status !== "insufficient") return false;
+  if (!kind) return true;
+  return coverage.missingIntentKinds?.includes(kind) ||
+    coverage.activeSearchCompleted === false;
+}
+
 function validateV9Report(value, input) {
   const report = requireObject(value, "daily-report");
   const driversValue = Array.isArray(report.drivers) ? report.drivers : null;
@@ -1935,11 +2003,11 @@ function validateV9Report(value, input) {
   for (const market of ["CN", "US"]) {
     const label = `aiChainViews.${market}`;
     const value = requireObject(aiChainViewsValue[market], label);
-    const status = value.driverStatus;
-    if (!["explained", "partial", "unattributed"].includes(status)) {
+    const agentStatus = value.driverStatus;
+    if (!["explained", "partial", "unattributed"].includes(agentStatus)) {
       throw new Error(`${label}.driverStatus 无效`);
     }
-    if ((aiUpdateCounts[market] === 0) !== (status === "unattributed")) {
+    if ((aiUpdateCounts[market] === 0) !== (agentStatus === "unattributed")) {
       throw new Error(`${label}.driverStatus 与 AI 驱动数量不一致`);
     }
     const marketMetrics = input.aiChainPerformance
@@ -1950,15 +2018,22 @@ function validateV9Report(value, input) {
       }))
       .sort((left, right) => right.changeValue - left.changeValue);
     const marketUpdates = aiChainUpdates.filter((item) => item.market === market);
-    const summary = completeSentence(value.summary, `${label}.summary`, 150, 24);
-    if (status === "unattributed" && !/未发现单一消息主导/.test(summary)) {
+    const agentSummary = completeSentence(value.summary, `${label}.summary`, 150, 24);
+    if (agentStatus === "unattributed" && !/未发现单一消息主导/.test(agentSummary)) {
       throw new Error(`${label}.summary 必须明确未发现单一消息主导`);
     }
+    const isInsufficient =
+      aiUpdateCounts[market] === 0 &&
+      insufficientCoverage(input, market, "ai_extremes");
+    const status = isInsufficient ? "insufficient" : agentStatus;
+    const summary = isInsufficient
+      ? "当日可核验的 AI 产业链异动证据覆盖不足，暂不作单一归因。"
+      : agentSummary;
     aiChainViews[market] = {
       headline: causalHeadline(value.headline, `${label}.headline`, {
         sectorNames: marketMetrics.map((item) => item.name),
         driverTitles: marketUpdates.map((item) => item.title),
-        unattributed: status === "unattributed",
+        unattributed: aiUpdateCounts[market] === 0,
       }),
       summary,
       driverStatus: status,
@@ -1972,23 +2047,29 @@ function validateV9Report(value, input) {
   const marketViews = {};
   for (const market of ["CN", "US"]) {
     const value = requireObject(marketViewsValue[market], `marketViews.${market}`);
-    const status = value.driverStatus;
-    if (!["explained", "partial", "unattributed"].includes(status)) {
+    const agentStatus = value.driverStatus;
+    if (!["explained", "partial", "unattributed"].includes(agentStatus)) {
       throw new Error(`marketViews.${market}.driverStatus 无效`);
     }
-    if ((driverCounts[market] === 0) !== (status === "unattributed")) {
+    if ((driverCounts[market] === 0) !== (agentStatus === "unattributed")) {
       throw new Error(`marketViews.${market}.driverStatus 与驱动数量不一致`);
     }
-    const summary = completeSentence(value.summary, `marketViews.${market}.summary`, 120, 20);
-    if (status === "unattributed" && !/未发现单一消息主导/.test(summary)) {
+    const agentSummary = completeSentence(value.summary, `marketViews.${market}.summary`, 120, 20);
+    if (agentStatus === "unattributed" && !/未发现单一消息主导/.test(agentSummary)) {
       throw new Error(`marketViews.${market}.summary 必须明确未发现单一消息主导`);
     }
+    const isInsufficient =
+      driverCounts[market] === 0 && insufficientCoverage(input, market);
+    const status = isInsufficient ? "insufficient" : agentStatus;
+    const summary = isInsufficient
+      ? "当日可核验的本地收盘与异动证据覆盖不足，暂不作单一归因。"
+      : agentSummary;
     const extremes = sectorExtremes(input.sectorPerformance, market);
     const marketDrivers = drivers.filter((item) => item.market === market);
     const headline = causalHeadline(value.headline, `marketViews.${market}.headline`, {
       sectorNames: input.sectorPerformance.filter((item) => item.market === market).map((item) => item.name),
       driverTitles: marketDrivers.map((item) => item.title),
-      unattributed: status === "unattributed",
+      unattributed: driverCounts[market] === 0,
     });
     const tone = marketTone(input, market);
     marketViews[market] = {
@@ -2067,18 +2148,29 @@ function validateV9Report(value, input) {
   for (const market of ["CN", "US"]) {
     const value = requireObject(englishMarketViewsValue[market], `translations.en.marketViews.${market}`);
     const translatedMarketDrivers = translatedDrivers.filter((_, index) => drivers[index].market === market);
+    const isInsufficient = marketViews[market].driverStatus === "insufficient";
+    const translatedSummary = completeSentence(
+      value.summary,
+      `translations.en.marketViews.${market}.summary`,
+      320,
+      18,
+      ".",
+    );
+    const summary = isInsufficient
+      ? "Verified session evidence is incomplete, so no single-cause attribution is made."
+      : translatedSummary;
     englishMarketViews[market] = {
       headline: causalHeadline(value.headline, `translations.en.marketViews.${market}.headline`, {
         sectorNames: input.sectorPerformance.filter((item) => item.market === market).map((item) => item.nameEn),
         driverTitles: translatedMarketDrivers.map((item) => item.title),
-        unattributed: marketViews[market].driverStatus === "unattributed",
+        unattributed: driverCounts[market] === 0,
         english: true,
       }),
-      summary: completeSentence(value.summary, `translations.en.marketViews.${market}.summary`, 320, 18, "."),
+      summary,
       driverStatus: marketViews[market].driverStatus,
       overview: {
         tone: marketViews[market].overview.tone,
-        interpretation: completeSentence(value.summary, `translations.en.marketViews.${market}.summary`, 320, 18, "."),
+        interpretation: summary,
         positive: sectorExtremes(input.sectorPerformance, market).leaders.map((item) => item.nameEn),
         negative: sectorExtremes(input.sectorPerformance, market).laggards.map((item) => item.nameEn),
       },
@@ -2095,16 +2187,19 @@ function validateV9Report(value, input) {
     const translatedMarketUpdates = translatedAiUpdates.filter(
       (_, index) => aiChainUpdates[index].market === market,
     );
+    const isInsufficient = aiChainViews[market].driverStatus === "insufficient";
     englishAiChainViews[market] = {
       headline: causalHeadline(value.headline, `${label}.headline`, {
         sectorNames: input.aiChainPerformance
           .filter((item) => item.market === market)
           .map((item) => item.nameEn),
         driverTitles: translatedMarketUpdates.map((item) => item.title),
-        unattributed: aiChainViews[market].driverStatus === "unattributed",
+        unattributed: aiUpdateCounts[market] === 0,
         english: true,
       }),
-      summary: completeSentence(value.summary, `${label}.summary`, 380, 20, "."),
+      summary: isInsufficient
+        ? "Verified AI-chain evidence is incomplete, so no single-cause attribution is made."
+        : completeSentence(value.summary, `${label}.summary`, 380, 20, "."),
     };
   }
   const allExtremes = ["CN", "US"].flatMap((market) => {

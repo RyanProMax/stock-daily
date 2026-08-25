@@ -20,15 +20,22 @@ import { collectAiChainPerformance } from "./ai-chain.mjs";
 import { collectXIntelligence } from "./x-intelligence.mjs";
 
 export {
+  assessAttributionCoverage,
+  buildActiveRetrievalPlan,
   canonicalizeUrl,
   classifyMarketRegions,
   deduplicateNews,
+  evidenceCoversMetric,
   extractArticleFacts,
+  extractArticlePublishedAt,
   getNewsBudget,
+  includeLocalWrapAnchors,
   normalizeTextKey,
   parseBeaReleases,
   parseFeed,
   relevanceScore,
+  retrieveActiveAttribution,
+  parseActiveSearchResults,
   resolveAuditedNewsDate,
   selectNews,
   shouldHydrateFacts,
@@ -102,6 +109,12 @@ export async function collectDailyInput({
   const cutoffTime = Date.parse(cutoffAt);
   const xIntelligencePromise = collectXIntelligence(cutoffTime);
   const marketPackPromise = fetchDailyMarketPack(cutoffAt);
+  const sectorPerformancePromise = sectorPerformanceOverride
+    ? Promise.resolve(sectorPerformanceOverride)
+    : collectSectorPerformance(cutoffTime);
+  const aiChainPerformancePromise = aiChainPerformanceOverride
+    ? Promise.resolve(aiChainPerformanceOverride)
+    : collectAiChainPerformance(cutoffTime);
   const marketSessionsPromise = marketPackPromise.then((pack) =>
     buildMarketSessions(pack.markets),
   );
@@ -113,18 +126,16 @@ export async function collectDailyInput({
     newsResult,
   ] = await Promise.all([
     marketPackPromise,
-    sectorPerformanceOverride
-      ? Promise.resolve(sectorPerformanceOverride)
-      : collectSectorPerformance(cutoffTime),
-    aiChainPerformanceOverride
-      ? Promise.resolve(aiChainPerformanceOverride)
-      : collectAiChainPerformance(cutoffTime),
+    sectorPerformancePromise,
+    aiChainPerformancePromise,
     xIntelligencePromise,
     collectNews(cutoffTime, reportDate, {
       supplementalCandidatesPromise: xIntelligencePromise.then(
         (result) => result.candidates,
       ),
       marketSessionsPromise,
+      sectorPerformancePromise,
+      aiChainPerformancePromise,
     }),
   ]);
   validateMarketDates(

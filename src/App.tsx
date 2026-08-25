@@ -765,8 +765,15 @@ export default function Document({ data }: { data: PageData }) {
     >
       <head>
         <meta charSet="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta name="theme-color" content="#f5f0e6" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#123b34" />
+        <meta name="application-name" content="Stock Daily" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Stock Daily" />
         <meta name="description" content={metadata.description} />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="Stock Daily" />
@@ -779,7 +786,9 @@ export default function Document({ data }: { data: PageData }) {
         />
         <link rel="canonical" href={canonical} />
         <meta name="twitter:card" content="summary_large_image" />
-        <link rel="icon" href="/og.png" type="image/png" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
         <link rel="stylesheet" href="/static/client.css" />
         <title>{metadata.title}</title>
         <script

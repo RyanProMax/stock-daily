@@ -11,3 +11,9 @@ if (payload?.textContent) {
   const data = JSON.parse(payload.textContent) as PageData;
   hydrateRoot(document, <Document data={data} />);
 }
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+  });
+}
