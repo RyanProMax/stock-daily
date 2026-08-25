@@ -6,6 +6,7 @@ import {
   evidenceCoversMetric,
   extractArticlePublishedAt,
   includeLocalWrapAnchors,
+  parseApMarketHub,
   parseActiveSearchResults,
   relevanceScore,
   retrieveActiveAttribution,
@@ -240,6 +241,66 @@ test("provider failure degrades into diagnostics without throwing", async () => 
   );
   assert.equal(result.candidates.length, 0);
   assert.equal(result.searches[0].status, "error");
+  assert.equal(result.searches[0].attempts.length, 2);
+  assert.ok(result.searches[0].attempts.every((attempt) => attempt.status === "error"));
+});
+
+test("active retrieval falls back to a direct market hub after index failure", async () => {
+  const intents = buildActiveRetrievalPlan({
+    evidence: [],
+    marketSessions: sessions,
+    sectorPerformance,
+    aiChainPerformance,
+  }).filter((intent) => intent.market === "CN");
+  const result = await retrieveActiveAttribution(
+    intents,
+    Date.parse("2026-08-25T01:00:00.000Z"),
+    {
+      fetcher: async (_url, context) => {
+        if (context.provider === "gdelt-doc") throw new Error("HTTP 429");
+        return {
+          body: JSON.stringify({
+            data: {
+              items: [{
+                title: "A股收评：上证指数收涨，原材料与光互连走强",
+                content_text: "A股收盘时上证指数上涨，原材料板块和CPO光互连同步走强。",
+                uri: "https://wallstreetcn.com/livenews/fixture-close",
+                display_time: Date.parse("2026-08-24T07:30:00.000Z") / 1_000,
+              }],
+            },
+          }),
+        };
+      },
+      wait: async () => {},
+    },
+  );
+  assert.equal(result.searches[0].status, "ok");
+  assert.deepEqual(
+    result.searches[0].attempts.map((attempt) => attempt.status),
+    ["error", "ok"],
+  );
+  assert.equal(result.candidates.length, 1);
+  assert.match(result.candidates[0]._sourceId, /^active:direct-hub:/);
+});
+
+test("AP market hub parser exposes direct publisher articles with posted times", () => {
+  const items = parseApMarketHub(
+    `<div class="PagePromo" data-gtm-region="Wall Street closes lower as technology falls"
+      data-posted-date-timestamp="1787602800000">
+      <a href="https://apnews.com/article/market-close-fixture">Story</a>
+    </div>`,
+    {
+      id: "ap-fixture",
+      label: "Associated Press",
+      url: "https://apnews.com/hub/financial-markets",
+      regions: ["US"],
+      tier: "publisher",
+    },
+    Date.parse("2026-08-25T01:00:00.000Z"),
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].url, "https://apnews.com/article/market-close-fixture");
+  assert.equal(items[0]._tier, "publisher");
 });
 
 test("coverage distinguishes completed inconclusive search from missing wrap", () => {

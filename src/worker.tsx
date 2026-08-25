@@ -224,7 +224,7 @@ app.get("/api/reports/:date", async (c) => {
         404,
       );
     }
-    c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+    c.header("Cache-Control", "no-store");
     return c.json({ data });
   } catch {
     return c.json(

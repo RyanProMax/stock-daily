@@ -75,7 +75,7 @@ if [[ "${force_run}" != true && -z "${requested_date}" ]]; then
   beijing_time="$(TZ=Asia/Shanghai /bin/date +%H%M)"
   if [[ -z "${update_kind}" && "${beijing_time}" > "0859" && "${beijing_time}" < "1500" ]]; then
     update_kind="morning"
-  elif [[ -z "${update_kind}" && "${beijing_time}" > "1459" && "${beijing_time}" < "2100" ]]; then
+  elif [[ -z "${update_kind}" && "${beijing_time}" > "1559" && "${beijing_time}" < "2100" ]]; then
     update_kind="close"
   elif [[ -z "${update_kind}" && "${beijing_time}" > "2059" ]]; then
     update_kind="evening"

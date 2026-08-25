@@ -33,6 +33,8 @@ export {
   normalizeTextKey,
   parseBeaReleases,
   parseFeed,
+  parseActiveDirectHubResults,
+  parseApMarketHub,
   relevanceScore,
   retrieveActiveAttribution,
   parseActiveSearchResults,

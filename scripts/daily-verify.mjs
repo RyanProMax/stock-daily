@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { marketAsOfFromInput } from "./daily-policy.mjs";
+import { fetchFreshDailySnapshot } from "./daily-readback.mjs";
 
 const inputPath = resolve(process.argv[2] ?? "work/daily-input.json");
 const input = JSON.parse(await readFile(inputPath, "utf8"));
@@ -14,27 +15,7 @@ const expectedReport = isAttribution
     )
   : null;
 const marketAsOf = marketAsOfFromInput(input);
-const baseUrl = "https://stock-daily-8k4.pages.dev";
-const cacheBust = Date.now();
-
-const [healthResponse, reportResponse] = await Promise.all([
-  fetch(`${baseUrl}/api/health?_=${cacheBust}`, {
-    signal: AbortSignal.timeout(20_000),
-  }),
-  fetch(`${baseUrl}/api/reports/${input.reportDate}?_=${cacheBust}`, {
-    headers: { "Cache-Control": "no-cache" },
-    signal: AbortSignal.timeout(20_000),
-  }),
-]);
-
-if (!healthResponse.ok || !reportResponse.ok) {
-  throw new Error(
-    `线上回读失败：health=${healthResponse.status}, report=${reportResponse.status}`,
-  );
-}
-
-const health = (await healthResponse.json()).data;
-const report = (await reportResponse.json()).data;
+const { health, report } = await fetchFreshDailySnapshot(input);
 const qualifiedStories = report?.stories?.filter(
   (story) => story.importance >= 3,
 ) ?? [];

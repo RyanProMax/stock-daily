@@ -25,6 +25,7 @@ import {
 } from "./signal-intelligence.mjs";
 import {
   buildMarketSessions,
+  causalEventEvidenceMatches,
   driverDirectionMatches,
   evidenceFitsSession,
   localMarketWrapMatches,
@@ -831,7 +832,25 @@ function validateV9Input(value) {
         !Number.isInteger(search?.resultCount) ||
         search.resultCount < 0 ||
         !Number.isInteger(search?.durationMs) ||
-        search.durationMs < 0,
+        search.durationMs < 0 ||
+        (search.attempts !== undefined &&
+          (!Array.isArray(search.attempts) ||
+            search.attempts.length < 1 ||
+            search.attempts.length > 2 ||
+            search.attempts.some(
+              (attempt) =>
+                typeof attempt?.provider !== "string" ||
+                !attempt.provider.trim() ||
+                !["ok", "error"].includes(attempt?.status) ||
+                !Number.isInteger(attempt?.resultCount) ||
+                attempt.resultCount < 0 ||
+                !Number.isInteger(attempt?.durationMs) ||
+                attempt.durationMs < 0,
+            ) ||
+            (search.status === "ok" &&
+              !search.attempts.some((attempt) => attempt.status === "ok")) ||
+            (search.status === "error" &&
+              search.attempts.some((attempt) => attempt.status === "ok")))),
     )
   ) {
     throw new Error("主动检索诊断字段无效");
@@ -1861,8 +1880,8 @@ function validateV9Report(value, input) {
     if (!driverDirectionMatches(driver.direction, sectorSymbols, performance)) {
       throw new Error(`${label} 与行业涨跌方向不一致`);
     }
-    if (!Array.isArray(driver.evidenceIndexes) || driver.evidenceIndexes.length < 1 || driver.evidenceIndexes.length > 3) {
-      throw new Error(`${label}.evidenceIndexes 必须包含 1–3 项`);
+    if (!Array.isArray(driver.evidenceIndexes) || driver.evidenceIndexes.length < 2 || driver.evidenceIndexes.length > 3) {
+      throw new Error(`${label}.evidenceIndexes 必须包含 2–3 项`);
     }
     const evidenceIndexes = [...new Set(driver.evidenceIndexes.map(Number))];
     if (
@@ -1881,8 +1900,25 @@ function validateV9Report(value, input) {
     ) {
       throw new Error(`${label} 引用 X 时必须包含非 X 交叉验证来源`);
     }
-    if (!evidence.some((item) => localMarketWrapMatches(item, driver.market, performance))) {
+    const localWraps = evidence.filter((item) =>
+      localMarketWrapMatches(
+        item,
+        driver.market,
+        performance,
+        marketSessions[driver.market],
+      ),
+    );
+    if (localWraps.length === 0) {
       throw new Error(`${label} 缺少本地收盘归因证据`);
+    }
+    if (
+      !evidence.some(
+        (item) =>
+          causalEventEvidenceMatches(item) &&
+          localWraps.every((wrap) => wrap.url !== item.url),
+      )
+    ) {
+      throw new Error(`${label} 缺少独立的因果事件证据`);
     }
     const sourceFacts = evidence.map((item) => `${item.title} ${item.facts}`).join(" ");
     if (/\p{Script=Han}/u.test(sourceFacts) && !phraseIsGrounded(title, sourceFacts)) {

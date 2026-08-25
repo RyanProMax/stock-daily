@@ -2,7 +2,7 @@ export const DAILY_UPDATE_KINDS = ["morning", "close", "evening"];
 
 const DAILY_CUTOFF_UTC = {
   morning: "01:00",
-  close: "07:00",
+  close: "08:00",
   evening: "13:00",
 };
 

@@ -181,6 +181,14 @@ export const NEWS_SOURCES = Object.freeze([
     tier: "publisher",
   },
   {
+    id: "ap-financial-markets",
+    label: "Associated Press",
+    type: "ap-hub",
+    url: "https://apnews.com/hub/financial-markets",
+    regions: ["US"],
+    tier: "publisher",
+  },
+  {
     id: "wsj-markets",
     label: "The Wall Street Journal",
     type: "rss",
@@ -203,7 +211,14 @@ function delay(milliseconds) {
 }
 
 function safeError(error) {
-  return (error instanceof Error ? error.message : String(error))
+  const primary = error instanceof Error ? error.message : String(error);
+  const cause =
+    error instanceof Error && error.cause
+      ? error.cause instanceof Error
+        ? error.cause.message
+        : String(error.cause)
+      : "";
+  return [primary, cause].filter(Boolean).join(": ")
     .replace(/\s+/g, " ")
     .slice(0, 240);
 }
@@ -529,17 +544,8 @@ export function classifyMarketRegions(value, fallbackRegions = []) {
       );
 }
 
-async function fetchWallstreetCn(source, referenceTime) {
-  const url = new URL(
-    "https://api-one.wallstcn.com/apiv1/content/lives",
-  );
-  url.searchParams.set("channel", source.channel);
-  url.searchParams.set("limit", "100");
-  const response = await fetchText(url, {
-    headers: { Accept: "application/json" },
-    source: source.label,
-  });
-  const payload = JSON.parse(response.body);
+export function parseWallstreetCnResults(body, source, referenceTime) {
+  const payload = typeof body === "string" ? JSON.parse(body) : body;
   const cutoff = referenceTime - DISCOVERY_WINDOW_MS;
 
   return (payload?.data?.items ?? [])
@@ -574,6 +580,84 @@ async function fetchWallstreetCn(source, referenceTime) {
     })
     .filter(Boolean)
     .slice(0, MAX_CANDIDATES_PER_SOURCE);
+}
+
+async function fetchWallstreetCn(source, referenceTime) {
+  const url = new URL(
+    "https://api-one.wallstcn.com/apiv1/content/lives",
+  );
+  url.searchParams.set("channel", source.channel);
+  url.searchParams.set("limit", "100");
+  const response = await fetchText(url, {
+    headers: { Accept: "application/json" },
+    source: source.label,
+  });
+  return parseWallstreetCnResults(response.body, source, referenceTime);
+}
+
+export function parseApMarketHub(
+  html,
+  source,
+  referenceTime = Date.now(),
+) {
+  const cutoff = referenceTime - DISCOVERY_WINDOW_MS;
+  const document = new JSDOM(html, { url: source.url }).window.document;
+  return [...document.querySelectorAll(".PagePromo")]
+    .map((promo) => {
+      const link = promo.querySelector(
+        'a[href*="apnews.com/article/"]',
+      );
+      const title = cleanTitle(
+        promo.getAttribute("data-gtm-region") ||
+          promo.querySelector(".PagePromo-title")?.textContent ||
+          link?.getAttribute("aria-label") ||
+          "",
+        source.id,
+      );
+      const timestamp = Number(
+        promo.getAttribute("data-posted-date-timestamp"),
+      );
+      let url = "";
+      try {
+        url = canonicalizeUrl(
+          new URL(link?.getAttribute("href") ?? "", source.url),
+        );
+      } catch {
+        return null;
+      }
+      if (
+        title.length < 8 ||
+        !url.startsWith("https://apnews.com/article/") ||
+        !Number.isFinite(timestamp) ||
+        timestamp < cutoff ||
+        timestamp > referenceTime
+      ) {
+        return null;
+      }
+      return {
+        title,
+        url,
+        source: source.label,
+        publishedAt: new Date(timestamp).toISOString(),
+        regions: [...source.regions],
+        _sourceId: source.id,
+        _tier: source.tier,
+      };
+    })
+    .filter(Boolean)
+    .filter(
+      (item, index, items) =>
+        items.findIndex((candidate) => candidate.url === item.url) === index,
+    )
+    .slice(0, MAX_CANDIDATES_PER_SOURCE);
+}
+
+async function fetchApMarketHub(source, referenceTime) {
+  const response = await fetchText(source.url, {
+    headers: { Accept: "text/html,application/xhtml+xml" },
+    source: source.label,
+  });
+  return parseApMarketHub(response.body, source, referenceTime);
 }
 
 async function fetchCls(source, referenceTime) {
@@ -712,6 +796,9 @@ async function fetchSource(source, referenceTime) {
   }
   if (source.type === "bea") {
     return fetchBeaReleases(source, referenceTime);
+  }
+  if (source.type === "ap-hub") {
+    return fetchApMarketHub(source, referenceTime);
   }
   const response = await fetchText(source.url, {
     headers: {
@@ -892,7 +979,11 @@ export function buildActiveRetrievalPlan({
     if (!session) continue;
     const sectors = sectorPerformance.filter((item) => item.market === market);
     const marketEvidence = evidence.filter((item) => item.regions?.includes(market));
-    if (!marketEvidence.some((item) => localMarketWrapMatches(item, market, sectors))) {
+    if (
+      !marketEvidence.some((item) =>
+        localMarketWrapMatches(item, market, sectors, session),
+      )
+    ) {
       intents.push({
         id: `${market}:market-wrap`,
         market,
@@ -976,6 +1067,19 @@ function groupedActiveSearchUrl(intents, referenceTime) {
   return url;
 }
 
+function groupedDirectHubUrl(intents) {
+  const market = intents[0]?.market;
+  if (market === "CN") {
+    const url = new URL(
+      "https://api-one.wallstcn.com/apiv1/content/lives",
+    );
+    url.searchParams.set("channel", "a-stock-channel");
+    url.searchParams.set("limit", "100");
+    return url;
+  }
+  return new URL("https://apnews.com/hub/financial-markets");
+}
+
 export function parseActiveSearchResults(body, intents, referenceTime = Date.now()) {
   const payload = typeof body === "string" ? JSON.parse(body) : body;
   const market = intents[0]?.market;
@@ -1023,21 +1127,83 @@ export function parseActiveSearchResults(body, intents, referenceTime = Date.now
     .filter(Boolean);
 }
 
-async function fetchActiveSearch(url) {
-  const response = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": USER_AGENT },
-    redirect: "follow",
-    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+export function parseActiveDirectHubResults(
+  body,
+  intents,
+  referenceTime = Date.now(),
+) {
+  const market = intents[0]?.market;
+  if (!market || intents.some((intent) => intent.market !== market)) {
+    throw new Error("主动检索结果必须对应单一市场");
+  }
+  const source =
+    market === "CN"
+      ? {
+          id: "active-direct-cn",
+          label: "华尔街见闻",
+          regions: ["CN"],
+          tier: "publisher",
+        }
+      : {
+          id: "active-direct-us",
+          label: "Associated Press",
+          url: "https://apnews.com/hub/financial-markets",
+          regions: ["US"],
+          tier: "publisher",
+        };
+  const earliest = Math.min(
+    ...intents.map((intent) => Date.parse(intent.windowStart)),
+  );
+  const latest = Math.min(
+    referenceTime,
+    Math.max(...intents.map((intent) => Date.parse(intent.windowEnd))),
+  );
+  const items =
+    market === "CN"
+      ? parseWallstreetCnResults(body, source, referenceTime)
+      : parseApMarketHub(body, source, referenceTime);
+  return items
+    .filter((item) => {
+      const timestamp = Date.parse(item.publishedAt);
+      return timestamp > earliest && timestamp <= latest;
+    })
+    .map((item) => ({
+      ...item,
+      platform: "web",
+      _sourceId: `active:direct-hub:${market}`,
+      _observedAt: item.publishedAt,
+      _activeIntentIds: intents.map((intent) => intent.id),
+    }));
+}
+
+async function fetchActiveSearch(url, context = {}) {
+  return fetchText(url, {
+    headers: {
+      Accept: context.accept ?? "application/json",
+    },
+    source: `active-${context.provider ?? "search"}`,
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return { body: await response.text(), finalUrl: response.url };
 }
 
 export async function retrieveActiveAttribution(
   intents,
   referenceTime = Date.now(),
-  { fetcher = fetchActiveSearch, wait = delay } = {},
+  { fetcher = fetchActiveSearch, wait = delay, providers } = {},
 ) {
+  const searchProviders = providers ?? [
+    {
+      id: "gdelt-doc",
+      accept: "application/json",
+      buildUrl: groupedActiveSearchUrl,
+      parse: parseActiveSearchResults,
+    },
+    {
+      id: "direct-market-hub",
+      accept: "application/json,text/html,application/xhtml+xml",
+      buildUrl: groupedDirectHubUrl,
+      parse: parseActiveDirectHubResults,
+    },
+  ];
   const groups = ["CN", "US"]
     .map((market) => intents.filter((intent) => intent.market === market))
     .filter((group) => group.length > 0);
@@ -1047,40 +1213,66 @@ export async function retrieveActiveAttribution(
     if (index > 0) await wait(ACTIVE_SEARCH_INTERVAL_MS);
     const group = groups[index];
     const startedAt = Date.now();
-    try {
-      const response = await fetcher(groupedActiveSearchUrl(group, referenceTime), {
-        market: group[0].market,
-        intentIds: group.map((intent) => intent.id),
-      });
-      const items = parseActiveSearchResults(response.body, group, referenceTime);
-      candidates.push(...items);
-      searches.push({
-        market: group[0].market,
-        status: "ok",
-        intentIds: group.map((intent) => intent.id),
-        intentResults: group.map((intent) => ({
-          id: intent.id,
-          kind: intent.kind,
-          resultCount: items.length,
-        })),
-        resultCount: items.length,
-        durationMs: Date.now() - startedAt,
-      });
-    } catch (error) {
-      searches.push({
-        market: group[0].market,
-        status: "error",
-        intentIds: group.map((intent) => intent.id),
-        intentResults: group.map((intent) => ({
-          id: intent.id,
-          kind: intent.kind,
+    const attempts = [];
+    let completed = false;
+    let items = [];
+    for (const provider of searchProviders.slice(0, 2)) {
+      const attemptStartedAt = Date.now();
+      try {
+        const response = await fetcher(
+          provider.buildUrl(group, referenceTime),
+          {
+            market: group[0].market,
+            intentIds: group.map((intent) => intent.id),
+            provider: provider.id,
+            accept: provider.accept,
+          },
+        );
+        const parsed = provider.parse(response.body, group, referenceTime);
+        completed = true;
+        items = deduplicateNews([...items, ...parsed]);
+        attempts.push({
+          provider: provider.id,
+          status: "ok",
+          resultCount: parsed.length,
+          durationMs: Date.now() - attemptStartedAt,
+        });
+        if (parsed.length > 0) break;
+      } catch (error) {
+        attempts.push({
+          provider: provider.id,
+          status: "error",
           resultCount: 0,
-        })),
-        resultCount: 0,
-        durationMs: Date.now() - startedAt,
-        error: safeError(error),
-      });
+          durationMs: Date.now() - attemptStartedAt,
+          error: safeError(error),
+        });
+      }
     }
+    candidates.push(...items);
+    searches.push({
+      market: group[0].market,
+      status: completed ? "ok" : "error",
+      intentIds: group.map((intent) => intent.id),
+      intentResults: group.map((intent) => ({
+        id: intent.id,
+        kind: intent.kind,
+        resultCount: items.filter((item) =>
+          item._activeIntentIds?.includes(intent.id),
+        ).length,
+      })),
+      resultCount: items.length,
+      durationMs: Date.now() - startedAt,
+      attempts,
+      ...(!completed
+        ? {
+            error: attempts
+              .map((attempt) => attempt.error)
+              .filter(Boolean)
+              .join("; ")
+              .slice(0, 240),
+          }
+        : {}),
+    });
   }
   return { candidates, searches };
 }
@@ -1666,6 +1858,7 @@ export function pairCorroboratingXEvidence(candidates) {
 }
 
 export function shouldHydrateFacts(item, existingFacts) {
+  if (item?._sourceId?.startsWith("active:")) return true;
   if (item?.platform === "x" && existingFacts) return false;
   if (!existingFacts) return true;
   if (item?._tier === "official") return true;
@@ -1811,15 +2004,23 @@ export function includeLocalWrapAnchors(
   candidates,
   sectorPerformance = [],
   maximumPerMarket = NEWS_MAX_PER_MARKET,
+  marketSessions = [],
 ) {
   const result = [...selected];
   for (const market of ["CN", "US"]) {
     const sectors = sectorPerformance.filter((item) => item.market === market);
-    if (result.some((item) => localMarketWrapMatches(item, market, sectors))) {
+    const session = marketSessions.find((item) => item.market === market);
+    if (
+      result.some((item) =>
+        localMarketWrapMatches(item, market, sectors, session),
+      )
+    ) {
       continue;
     }
     const anchor = candidates
-      .filter((item) => localMarketWrapMatches(item, market, sectors))
+      .filter((item) =>
+        localMarketWrapMatches(item, market, sectors, session),
+      )
       .sort(
         (left, right) =>
           relevanceScore(right) - relevanceScore(left) ||
@@ -1831,7 +2032,10 @@ export function includeLocalWrapAnchors(
       .filter(({ item }) => item.regions.includes(market));
     if (marketIndexes.length >= maximumPerMarket) {
       const removable = marketIndexes
-        .filter(({ item }) => !localMarketWrapMatches(item, market, sectors))
+        .filter(
+          ({ item }) =>
+            !localMarketWrapMatches(item, market, sectors, session),
+        )
         .sort(
           (left, right) =>
             relevanceScore(left.item) - relevanceScore(right.item),
@@ -2051,6 +2255,7 @@ export async function collectNews(
       allEligibleHydrated,
       sectorPerformance,
       budget.maximumPerMarket,
+      marketSessions,
     ),
     allEligibleHydrated,
   );

@@ -4,9 +4,19 @@ const MARKET_SESSION_CONFIG = {
 };
 
 const WRAP_PATTERN =
-  /收评|收盘|盘后|复盘|market wrap|market recap|stocks? (?:rose|fell|gained|slid|closed)|wall street/i;
+  /收评|收盘|盘后|复盘|market wrap|market recap|(?:stocks?|indexes?|wall street).{0,50}(?:closed|ended|finished)/i;
 const MARKET_MOVE_PATTERN =
   /(?:指数|股指|板块|sector|s&p|nasdaq|dow|创业板|上证|深证).{0,40}(?:[+-]?\d+(?:\.\d+)?%|上涨|下跌|收涨|收跌|走强|走弱|rose|fell|gained|slid)/i;
+const INTRADAY_WRAP_PATTERN =
+  /午间|半日|早盘|盘中|开盘|午盘|morning (?:trade|session)|midday|intraday|opening bell|market open/i;
+const FOREIGN_US_WRAP_PATTERN =
+  /加拿大股市|多伦多证交所|标普\/多伦多|\bcanadian (?:stocks?|shares?|market)\b|\btoronto stock exchange\b|\btsx\b/i;
+const LOCAL_WRAP_PATTERN = {
+  CN: /\ba[- ]?shares?\b|A股|上证|沪指|深证|创业板|科创板|沪深\s*300|中国股市/i,
+  US: /\bu\.?s\.? stocks?\b|美股|华尔街|标普(?:\s*500)?|纳斯达克|道琼斯|\bwall street\b|\bs&p(?: 500)?\b|\bnasdaq\b|\bdow(?: jones)?\b/i,
+};
+const CAUSAL_EVENT_PATTERN =
+  /宣布|公告|发布(?:政策|报告|财报|业绩|数据|决定)|出台|获批|批准|签署|上调|下调|加息|降息|关税|制裁|出口管制|订单|中标|营收|净利润|业绩|指引|预增|预亏|产量|减产|停产|供应|需求|库存|通胀|就业|非农|采购经理|\b(?:announc|report|approv|sign|rais|cut|tariff|sanction|export control|order|contract|revenue|earnings|profit|guidance|output|production|supply|demand|inventory|inflation|payroll|employment|pmi|gdp|cpi|ppi)\w*\b/i;
 
 function newsText(item) {
   const facts = Array.isArray(item.facts) ? item.facts.join(" ") : item.facts ?? "";
@@ -89,10 +99,15 @@ export function evidenceFitsSession(item, session) {
   const publishedAt = Date.parse(item?.publishedAt ?? "");
   if (!Number.isFinite(publishedAt)) return false;
   const start = Date.parse(session.windowStart);
+  const close = Date.parse(session.windowEnd);
   const end = Date.parse(
     item.kind === "market_wrap" ? session.wrapDeadline : session.windowEnd,
   );
-  return publishedAt > start && publishedAt <= end;
+  return (
+    publishedAt > start &&
+    publishedAt <= end &&
+    (item.kind !== "market_wrap" || publishedAt >= close)
+  );
 }
 
 export function filterNewsToMarketSessions(items, sessions) {
@@ -134,19 +149,22 @@ export function driverDirectionMatches(direction, sectorSymbols, performance) {
   });
 }
 
-export function localMarketWrapMatches(item, market, sectors = []) {
+export function localMarketWrapMatches(
+  item,
+  market,
+  _sectors = [],
+  session,
+) {
   if (item.kind !== "market_wrap") return false;
+  const title = String(item.title ?? "");
   const text = newsText(item);
-  const localPattern =
-    market === "CN"
-      ? /A股|上证|深证|创业板|沪指|中国股市|China stocks?/i
-      : /美股|标普|纳斯达克|道琼斯|Wall Street|S&P|Nasdaq|Dow/i;
-  return (
-    localPattern.test(text) ||
-    sectors.some(
-      (sector) =>
-        text.includes(sector.name) ||
-        (sector.nameEn && text.toLocaleLowerCase().includes(sector.nameEn.toLocaleLowerCase())),
-    )
-  );
+  if (INTRADAY_WRAP_PATTERN.test(title)) return false;
+  if (market === "US" && FOREIGN_US_WRAP_PATTERN.test(title)) return false;
+  if (!LOCAL_WRAP_PATTERN[market]?.test(text)) return false;
+  return session ? evidenceFitsSession(item, session) : true;
+}
+
+export function causalEventEvidenceMatches(item) {
+  if (item?.kind !== "event") return false;
+  return CAUSAL_EVENT_PATTERN.test(newsText(item));
 }

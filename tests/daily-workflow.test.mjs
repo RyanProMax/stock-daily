@@ -702,7 +702,7 @@ test("daily policy refreshes three Beijing checkpoints and deduplicates retries"
   );
   assert.equal(
     dailyCutoffAt("2026-07-25", "close"),
-    "2026-07-25T07:00:00.000Z",
+    "2026-07-25T08:00:00.000Z",
   );
   assert.equal(
     dailyCutoffAt("2026-07-25", "evening"),
@@ -721,7 +721,7 @@ test("daily policy refreshes three Beijing checkpoints and deduplicates retries"
 
   const closeInput = structuredClone(input);
   closeInput.updateKind = "close";
-  closeInput.cutoffAt = "2026-07-25T07:00:00.000Z";
+  closeInput.cutoffAt = "2026-07-25T08:00:00.000Z";
   for (const sector of closeInput.sectorHeat) {
     if (sector.market === "CN") sector.asOf = "2026-07-25";
   }
@@ -732,7 +732,7 @@ test("daily policy refreshes three Beijing checkpoints and deduplicates retries"
   const weekendClose = structuredClone(input);
   weekendClose.reportDate = "2026-07-26";
   weekendClose.updateKind = "close";
-  weekendClose.cutoffAt = "2026-07-26T07:00:00.000Z";
+  weekendClose.cutoffAt = "2026-07-26T08:00:00.000Z";
   const weekend = assessDailyFreshness(weekendClose, previous);
   assert.equal(weekend.publish, true);
   assert.equal(weekend.retryable, false);

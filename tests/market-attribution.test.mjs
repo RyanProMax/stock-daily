@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildMarketSessions,
+  causalEventEvidenceMatches,
   classifyNewsKind,
   evidenceFitsSession,
   filterNewsToMarketSessions,
+  localMarketWrapMatches,
   sectorExtremes,
   zonedDateTimeIso,
 } from "../scripts/market-attribution.mjs";
@@ -145,6 +147,24 @@ function fixtureInput() {
       regions: ["CN"],
       kind: "event",
     },
+    {
+      title: "锂供应收紧与金价高位支撑原材料",
+      facts: "行业机构发布供应报告，确认锂矿减产与黄金需求上升，并说明相关变化发生在本次A股交易窗口内。",
+      url: "https://example.com/cn-materials-event",
+      source: "CN Industry Wire",
+      publishedAt: "2026-08-21T05:10:00.000Z",
+      regions: ["CN"],
+      kind: "event",
+    },
+    {
+      title: "Business activity and earnings supported U.S. cyclicals",
+      facts: "S&P Global reported a multi-year high in business activity and Ross Stores raised earnings guidance during the completed U.S. trading session.",
+      url: "https://example.com/us-cyclical-event",
+      source: "US Business Wire",
+      publishedAt: "2026-08-21T15:10:00.000Z",
+      regions: ["US"],
+      kind: "event",
+    },
   ];
   return {
     schemaVersion: 9,
@@ -179,8 +199,8 @@ function fixtureInput() {
     ],
     news,
     newsDiagnostics: {
-      mode: "audited", candidateCount: 3, hydratedCount: 3,
-      rejectedDuringHydration: 0, selectedByMarket: { CN: 2, US: 1 },
+      mode: "audited", candidateCount: 5, hydratedCount: 5,
+      rejectedDuringHydration: 0, selectedByMarket: { CN: 3, US: 2 },
       minimumPerMarket: 0, targetPerMarket: 8, sources: [],
       activeRetrieval: {
         attempted: false,
@@ -242,14 +262,14 @@ function fixtureReport() {
         title: "贵金属与锂矿走强",
         summary: "收盘归因显示贵金属、能源金属与通信设备同步上涨。",
         mechanism: "黄金和锂矿催化抬升原材料行业表现，通信设备走强进一步支撑成长板块。",
-        sectorSymbols: ["932078", "932085"], evidenceIndexes: [0],
+        sectorSymbols: ["932078", "932085"], evidenceIndexes: [0, 3],
       },
       {
         market: "US", role: "primary", direction: "positive",
         title: "矿业股提供结构性支撑",
         summary: "矿业股上涨，是美国主要股指收高的支撑之一。",
         mechanism: "资源股收益改善支撑原材料，但不能单独解释指数涨幅，长端收益率上行也形成反向约束。",
-        sectorSymbols: ["XLB"], evidenceIndexes: [1],
+        sectorSymbols: ["XLB"], evidenceIndexes: [1, 4],
       },
     ],
     aiChainUpdates: [
@@ -318,6 +338,87 @@ test("market sessions use each venue close and allow wraps for two hours", () =>
   assert.equal(evidenceFitsSession(input.news[1], input.marketSessions[1]), true);
   const late = { ...input.news[1], publishedAt: "2026-08-21T22:00:01.000Z" };
   assert.equal(evidenceFitsSession(late, input.marketSessions[1]), false);
+});
+
+test("completed local wraps reject China midday and Canadian market recaps", () => {
+  const input = fixtureInput();
+  const cnMidday = {
+    title: "A股午间收评：创业板半日下跌，消费股走强",
+    facts: "午间收盘时上证指数下跌0.15%，创业板指下跌1.43%。",
+    url: "https://example.com/cn-midday",
+    source: "CN Wire",
+    publishedAt: "2026-08-21T03:30:00.000Z",
+    regions: ["CN"],
+    kind: "market_wrap",
+  };
+  assert.equal(evidenceFitsSession(cnMidday, input.marketSessions[0]), false);
+  assert.equal(
+    localMarketWrapMatches(
+      cnMidday,
+      "CN",
+      input.sectorPerformance,
+      input.marketSessions[0],
+    ),
+    false,
+  );
+
+  const canada = {
+    title: "尽管美加贸易谈判破裂，加拿大股市仍上涨",
+    facts: "标普/多伦多证交所综合指数收涨，材料板块上涨，美国宣布提高加拿大钢铁关税。",
+    url: "https://example.com/canada-close",
+    source: "Canada Wire",
+    publishedAt: "2026-08-21T20:20:00.000Z",
+    regions: ["US"],
+    kind: "market_wrap",
+  };
+  assert.equal(
+    localMarketWrapMatches(
+      canada,
+      "US",
+      input.sectorPerformance,
+      input.marketSessions[1],
+    ),
+    false,
+  );
+
+  const fullClose = {
+    title: "8月21日收评：沪指探底回升涨0.19%",
+    facts:
+      "市场全天震荡分化，贵金属板块下挫，个股盘中跌停。截止收盘沪指涨0.19%。",
+    url: "https://example.com/cn-close",
+    source: "CN Wire",
+    publishedAt: "2026-08-21T07:00:47.000Z",
+    regions: ["CN"],
+    kind: "market_wrap",
+  };
+  assert.equal(
+    localMarketWrapMatches(
+      fullClose,
+      "CN",
+      input.sectorPerformance,
+      input.marketSessions[0],
+    ),
+    true,
+  );
+});
+
+test("causal evidence excludes price, breadth and fund-flow observations", () => {
+  assert.equal(
+    causalEventEvidenceMatches({
+      kind: "event",
+      title: "主力资金监控：有色金属净流出52亿元",
+      facts: "两市成交额缩量，半导体领跌，个股上涨家数仍占多数。",
+    }),
+    false,
+  );
+  assert.equal(
+    causalEventEvidenceMatches({
+      kind: "event",
+      title: "公司上调全年业绩指引",
+      facts: "公司发布财报并宣布新增订单，全年利润指引上调。",
+    }),
+    true,
+  );
 });
 
 test("session filtering happens before ranking so an in-window X source is retained", () => {
@@ -398,6 +499,27 @@ test("V9 keeps all eleven sectors and accepts distinct local drivers", () => {
   assert.notEqual(report.drivers[0].market, report.drivers[1].market);
   assert.equal(report.marketViews.CN.driverIds.length, 1);
   assert.equal(report.aiChainUpdates.length, 1);
+});
+
+test("V9 rejects a driver supported only by descriptive market observations", () => {
+  const rawInput = fixtureInput();
+  rawInput.news.push({
+    title: "主力资金监控：原材料板块净流出",
+    facts: "盘中主力资金从原材料板块净流出，两市成交额缩量，个股上涨家数仍占多数。",
+    url: "https://example.com/cn-fund-flow",
+    source: "CN Flow Monitor",
+    publishedAt: "2026-08-21T06:10:00.000Z",
+    regions: ["CN"],
+    kind: "event",
+  });
+  rawInput.newsDiagnostics.selectedByMarket.CN = 4;
+  const input = validateInput(rawInput);
+  const report = fixtureReport();
+  report.drivers[0].evidenceIndexes = [0, 5];
+  assert.throws(
+    () => validateReport(report, input),
+    /缺少独立的因果事件证据/,
+  );
 });
 
 test("V9 rejects representative baskets without a verified close price", () => {
@@ -513,7 +635,7 @@ test("V9 derives an insufficient-evidence reader state from coverage diagnostics
 test("V9 rejects a pure US item as a CN driver and rejects opposite sector direction", () => {
   const input = validateInput(fixtureInput());
   const crossMarket = fixtureReport();
-  crossMarket.drivers[0].evidenceIndexes = [1];
+  crossMarket.drivers[0].evidenceIndexes = [1, 4];
   assert.throws(() => validateReport(crossMarket, input), /归因窗口之外|缺少本地收盘归因证据/);
 
   const opposite = fixtureReport();
@@ -536,16 +658,16 @@ test("AI attribution requires a non-X source whenever an X post is cited", () =>
     authority: "first_party",
     authorHandle: "NVIDIANetworkng",
   });
-  rawInput.newsDiagnostics.selectedByMarket.CN = 3;
+  rawInput.newsDiagnostics.selectedByMarket.CN = 4;
   const input = validateInput(rawInput);
   const xOnly = fixtureReport();
-  xOnly.aiChainUpdates[0].evidenceIndexes = [3];
+  xOnly.aiChainUpdates[0].evidenceIndexes = [5];
   assert.throws(
     () => validateReport(xOnly, input),
     /必须包含非 X 交叉验证来源/,
   );
 
   const corroborated = fixtureReport();
-  corroborated.aiChainUpdates[0].evidenceIndexes = [2, 3];
+  corroborated.aiChainUpdates[0].evidenceIndexes = [2, 5];
   assert.equal(validateReport(corroborated, input).aiChainUpdates.length, 1);
 });
