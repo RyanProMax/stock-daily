@@ -17,8 +17,8 @@ test("source audit opens every unique external evidence URL", async () => {
     },
   });
   assert.equal(result.status, "audited");
-  assert.equal(result.sourceCount, 3);
-  assert.equal(new Set(visited).size, 3);
+  assert.equal(result.sourceCount, 5);
+  assert.equal(new Set(visited).size, 5);
   assert.ok(visited.every((source) => source.startsWith("https://")));
 });
 

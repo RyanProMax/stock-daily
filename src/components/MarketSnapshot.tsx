@@ -4,9 +4,7 @@ import type {
   AiChainConstituent,
   AiChainMetric,
   AiChainUpdate,
-  AiChainView,
   DriverEvidence,
-  DriverStatus,
   Language,
   MarketDriver,
   MarketDirection,
@@ -33,7 +31,6 @@ interface Props {
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
   aiChainPerformance?: AiChainMetric[];
-  aiChainView?: AiChainView;
   drivers: MarketDriver[];
   aiUpdates: AiChainUpdate[];
   market: MarketRegion;
@@ -52,12 +49,7 @@ interface Props {
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
-    happened: string;
     mechanism: string;
-    causeExplained: string;
-    causePartial: string;
-    causeUnverified: string;
-    causeFallback: string;
   };
 }
 
@@ -138,17 +130,18 @@ function SectorSnapshotItem({
 interface SnapshotEvidenceItem {
   tag: string;
   title: string;
-  summary: string;
   mechanism: string;
-  status: DriverStatus;
-  highRelevance: boolean;
   evidence: DriverEvidence[];
 }
 
-function causeStatusLabel(status: DriverStatus, labels: Props["labels"]) {
-  if (status === "explained") return labels.causeExplained;
-  if (status === "partial") return labels.causePartial;
-  return labels.causeUnverified;
+function hasVerifiedExternalEvidence(evidence: DriverEvidence[]) {
+  return evidence.some(
+    (item) =>
+      item.kind !== "market_data" &&
+      (item.sourceType === "first_party" ||
+        item.sourceType === "publisher" ||
+        item.authority === "first_party"),
+  );
 }
 
 function sourceName(evidence: DriverEvidence) {
@@ -190,10 +183,7 @@ function SnapshotEvidenceList({
   market: MarketRegion;
 }) {
   const evidenceItems = items
-    .filter((item) => item.evidence.length > 0)
-    .sort(
-      (left, right) => Number(right.highRelevance) - Number(left.highRelevance),
-    );
+    .filter((item) => hasVerifiedExternalEvidence(item.evidence));
   if (evidenceItems.length === 0) return null;
 
   const authorityLabels = {
@@ -205,31 +195,19 @@ function SnapshotEvidenceList({
   return (
     <ul className="snapshot-evidence-list">
       {evidenceItems.map(
-        ({ evidence, tag, title, summary, mechanism, status, highRelevance }) => (
+        ({ evidence, tag, title, mechanism }) => (
           <li
-            className={highRelevance ? "snapshot-evidence-high" : undefined}
             key={`${title}:${evidence.map((item) => item.source).join(":")}`}
           >
             <article className="snapshot-evidence-row">
               <header className="snapshot-evidence-header">
                 <span className="snapshot-evidence-tag">{tag}</span>
                 <strong>{title}</strong>
-                <span
-                  className={`snapshot-cause-status snapshot-cause-status-${status}`}
-                >
-                  {causeStatusLabel(status, labels)}
-                </span>
               </header>
-              <div className="snapshot-causal-grid">
-                <section>
-                  <strong>{labels.happened}</strong>
-                  <p>{summary}</p>
-                </section>
-                <section>
-                  <strong>{labels.mechanism}</strong>
-                  <p>{mechanism}</p>
-                </section>
-              </div>
+              <section className="snapshot-causal-reason">
+                <strong>{labels.mechanism}</strong>
+                <p>{mechanism}</p>
+              </section>
               <div className="snapshot-evidence-meta">
                 {[
                   ...new Map(
@@ -313,7 +291,6 @@ export default function MarketSnapshot({
   sectorView,
   sectorPerformance,
   aiChainPerformance,
-  aiChainView,
   drivers,
   aiUpdates,
   market,
@@ -337,10 +314,7 @@ export default function MarketSnapshot({
       evidence: driver.evidence,
       tag: language === "zh" ? "大盘" : "Market",
       title: driver.title,
-      summary: driver.summary,
       mechanism: driver.mechanism,
-      status: driver.basis === "structural" ? "structural" : "explained",
-      highRelevance: true,
     }));
   const sectorEvidence: SnapshotEvidenceItem[] = drivers
     .filter((driver) => driver.role === "secondary")
@@ -348,10 +322,7 @@ export default function MarketSnapshot({
       evidence: driver.evidence,
       tag: language === "zh" ? "行业" : "Sector",
       title: driver.title,
-      summary: driver.summary,
       mechanism: driver.mechanism,
-      status: driver.basis === "structural" ? "structural" : "explained",
-      highRelevance: false,
     }));
   const aiEvidence: SnapshotEvidenceItem[] = aiUpdates.map((update) => ({
     evidence: update.evidence,
@@ -360,10 +331,7 @@ export default function MarketSnapshot({
         language === "en" ? "nameEn" : "name"
       ] ?? (language === "zh" ? "AI" : "AI"),
     title: update.title,
-    summary: update.summary,
     mechanism: update.implication,
-    status: "explained" as const,
-    highRelevance: update.evidence.some((evidence) => evidence.platform !== "x"),
   }));
 
   return (
@@ -472,28 +440,6 @@ export default function MarketSnapshot({
               />
             ))}
           </div>
-          {aiUpdates.length === 0 && aiChainView && (
-            <article className="snapshot-structural-view">
-              <header>
-                <strong>{aiChainView.headline}</strong>
-                <span
-                  className={`snapshot-cause-status snapshot-cause-status-${aiChainView.driverStatus}`}
-                >
-                  {causeStatusLabel(aiChainView.driverStatus, labels)}
-                </span>
-              </header>
-              <div className="snapshot-causal-grid">
-                <section>
-                  <strong>{labels.happened}</strong>
-                  <p>{aiChainView.summary}</p>
-                </section>
-                <section>
-                  <strong>{labels.mechanism}</strong>
-                  <p>{aiChainView.mechanism ?? labels.causeFallback}</p>
-                </section>
-              </div>
-            </article>
-          )}
           <SnapshotEvidenceList
             items={aiEvidence}
             labels={labels}

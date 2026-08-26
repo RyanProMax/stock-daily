@@ -235,7 +235,7 @@ export function fixtureReport(input = fixtureInput()) {
   return {
     contractVersion: "codex-market-research-v11",
     headline: "中美市场行业轮动分化，材料方向获得事件支撑",
-    summary: "两个市场均呈现明显的行业强弱分化；材料方向有同交易窗口的直接信息支持，其余表现更适合按盘面结构理解。",
+    summary: "两个市场均呈现明显的行业强弱分化；材料方向和部分落后行业都有同交易窗口的直接信息支持。",
     marketViews: {
       CN: {
         headline: "原材料走强，防御行业相对承压",
@@ -257,9 +257,8 @@ export function fixtureReport(input = fixtureInput()) {
       },
       US: {
         headline: "智能产业链内部轮动，强弱环节并存",
-        summary: "代表篮子之间方向分化，现有证据更适合描述环节轮动，不足以归结为单一事件。",
-        mechanism: "原因未证实：当前只能确认代表成分股与篮子构成造成环节分化，没有直接证据把当天涨跌归因于同一催化。",
-        driverStatus: "structural",
+        summary: "代表篮子之间方向分化，但当前没有达到发布门槛的直接事件证据。",
+        driverStatus: "insufficient",
       },
     },
     drivers: [
@@ -293,11 +292,11 @@ export function fixtureReport(input = fixtureInput()) {
       {
         market: "CN",
         role: "secondary",
-        basis: "structural",
+        basis: "event",
         direction: "negative",
-        title: "防御行业未能同步跟涨",
-        summary: "公用事业相对落后，显示当天上涨力量集中在部分行业，而非普遍的风险偏好扩张。",
-        mechanism: "原因未证实：公用事业的成分与行业篮子相对落后，只能确认其对市场广度形成拖累，不能证明外部催化。",
+        title: "价格监管消息压制公用事业",
+        summary: "监管机构披露的价格约束与公用事业行业走弱方向一致，为其相对落后提供直接解释。",
+        mechanism: "价格调整受限会压低公用事业企业的盈利预期，并使资金减少对该行业的配置。",
         sectorSymbols: ["932086"],
         evidence: [
           marketEvidence(
@@ -307,6 +306,14 @@ export function fixtureReport(input = fixtureInput()) {
             "公用事业行业收盘表现",
             "公用事业行业代表篮子在本次交易日下跌，明显落后于领先行业。",
           ),
+          externalEvidence({
+            market: "CN",
+            title: "监管机构说明公用事业价格约束",
+            facts: "监管机构披露相关价格调整仍受约束，并要求部分公用事业企业控制终端收费。",
+            source: "https://www.sse.com.cn/disclosure/utilities-pricing",
+            sourceLabel: "上海证券交易所",
+            publishedAt: "2026-08-21T05:24:00.000Z",
+          }),
         ],
       },
       {
@@ -341,11 +348,11 @@ export function fixtureReport(input = fixtureInput()) {
       {
         market: "US",
         role: "secondary",
-        basis: "structural",
+        basis: "event",
         direction: "negative",
-        title: "科技行业落后形成反向约束",
-        summary: "科技行业代表篮子下跌，说明指数内部并非同步改善，周期方向的解释边界较清晰。",
-        mechanism: "原因未证实：科技与材料行业篮子方向相反，只能确认行业轮动对指数内部结构的贡献，不能证明外部催化。",
+        title: "资本开支担忧压制科技行业",
+        summary: "专业媒体报道的资本开支担忧与科技行业下跌方向一致，为其相对落后提供直接解释。",
+        mechanism: "资本开支上升会增加短期利润率压力，从而压低部分科技公司的盈利预期与估值。",
         sectorSymbols: ["XLK"],
         evidence: [
           marketEvidence(
@@ -355,6 +362,16 @@ export function fixtureReport(input = fixtureInput()) {
             "科技行业收盘表现",
             "科技行业代表篮子在本次交易日下跌，与材料行业方向相反。",
           ),
+          externalEvidence({
+            market: "US",
+            title: "Technology spending raised margin concerns",
+            facts: "A professional publisher reported that rising capital expenditure prompted concern about near-term technology-sector margins.",
+            source: "https://www.reuters.com/markets/us/technology-capex",
+            sourceLabel: "Reuters",
+            publishedAt: "2026-08-21T16:20:00.000Z",
+            kind: "event",
+            sourceType: "publisher",
+          }),
         ],
       },
     ],
@@ -387,7 +404,7 @@ export function fixtureReport(input = fixtureInput()) {
     translations: {
       en: {
         headline: "Sector rotation split Chinese and United States markets as materials found event support",
-        summary: "Both markets showed clear sector dispersion. Direct evidence supported materials, while the remaining moves were better understood through market structure.",
+        summary: "Both markets showed clear sector dispersion. Direct evidence supported materials and selected lagging sectors.",
         marketViews: {
           CN: {
             headline: "Materials advanced while defensive sectors lagged",
@@ -406,8 +423,7 @@ export function fixtureReport(input = fixtureInput()) {
           },
           US: {
             headline: "Intelligent-industry layers rotated in different directions",
-            summary: "Representative baskets diverged, so the evidence supports a structural reading rather than one dominant event.",
-            mechanism: "Cause unverified: constituent moves and basket weights explain the layer dispersion mechanically, but no direct evidence ties the session to one catalyst.",
+            summary: "Representative baskets diverged, but no direct event evidence met the publication threshold.",
           },
         },
         drivers: [
@@ -417,9 +433,9 @@ export function fixtureReport(input = fixtureInput()) {
             mechanism: "Tighter supply expectations improved pricing and earnings expectations and attracted capital toward materials.",
           },
           {
-            title: "Defensive sectors did not rise with the leaders",
-            summary: "Utilities lagged, showing that strength was concentrated rather than a broad expansion in risk appetite.",
-            mechanism: "Cause unverified: constituent and sector-basket dispersion confirms a drag on breadth but does not establish an external catalyst.",
+            title: "Pricing constraints weighed on utilities",
+            summary: "Disclosed pricing constraints aligned with utilities weakness and directly explained part of the lag.",
+            mechanism: "Limited price adjustments can weigh on earnings expectations and reduce investor demand for utilities.",
           },
           {
             title: "Business activity supported materials",
@@ -427,9 +443,9 @@ export function fixtureReport(input = fixtureInput()) {
             mechanism: "Better demand expectations can improve orders and earnings expectations for cyclical businesses.",
           },
           {
-            title: "Technology weakness limited the broader explanation",
-            summary: "Technology declined, showing that the market did not improve uniformly and defining the limits of the cyclical explanation.",
-            mechanism: "Cause unverified: opposing technology and materials baskets mechanically explain index dispersion but do not establish an external catalyst.",
+            title: "Capital-spending concerns weighed on technology",
+            summary: "Reported capital-spending concerns aligned with technology weakness and directly explained part of the lag.",
+            mechanism: "Higher capital spending can pressure near-term margins and reduce earnings expectations and valuations for technology companies.",
           },
         ],
         aiChainUpdates: [

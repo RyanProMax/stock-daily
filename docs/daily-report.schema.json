@@ -25,8 +25,7 @@
     "aiChainViews": { "$ref": "#/$defs/aiChainViews" },
     "drivers": {
       "type": "array",
-      "minItems": 2,
-      "maxItems": 6,
+      "maxItems": 4,
       "items": { "$ref": "#/$defs/driver" }
     },
     "aiChainUpdates": {
@@ -59,7 +58,7 @@
     },
     "driverStatus": {
       "type": "string",
-      "enum": ["explained", "partial", "structural"]
+      "enum": ["explained", "partial", "insufficient"]
     },
     "marketView": {
       "type": "object",
@@ -83,7 +82,7 @@
     "aiChainView": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["headline", "summary", "mechanism", "driverStatus"],
+      "required": ["headline", "summary", "driverStatus"],
       "properties": {
         "headline": { "type": "string", "minLength": 5, "maxLength": 90 },
         "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
@@ -162,7 +161,7 @@
         },
         "basis": {
           "type": "string",
-          "enum": ["structural", "event", "macro"]
+          "enum": ["event", "macro"]
         },
         "direction": {
           "type": "string",
@@ -179,7 +178,7 @@
         },
         "evidence": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 2,
           "maxItems": 4,
           "items": { "$ref": "#/$defs/evidence" }
         }
@@ -243,7 +242,7 @@
     "translatedAiChainView": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["headline", "summary", "mechanism"],
+      "required": ["headline", "summary"],
       "properties": {
         "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
         "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
@@ -297,8 +296,7 @@
         "aiChainViews": { "$ref": "#/$defs/translatedAiChainViews" },
         "drivers": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 6,
+          "maxItems": 4,
           "items": { "$ref": "#/$defs/translatedDriver" }
         },
         "aiChainUpdates": {

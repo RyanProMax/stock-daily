@@ -1,5 +1,6 @@
 import type {
   DailyReport,
+  DailyReportTranslation,
   DailyMarketView,
   ImpactTone,
   MarketMetric,
@@ -591,11 +592,104 @@ function readerFacingMarketNote(note: string) {
     .trim();
 }
 
+function hasVerifiedExternalEvidence(
+  evidence: NonNullable<DailyReport["drivers"]>[number]["evidence"],
+) {
+  return evidence.some(
+    (item) =>
+      item.kind !== "market_data" &&
+      (item.sourceType === "first_party" ||
+        item.sourceType === "publisher" ||
+        item.authority === "first_party"),
+  );
+}
+
 function normalizeReport(report: StoredDailyReport): DailyReport {
-  const marketViews =
+  const storedDrivers = report.drivers ?? [];
+  const verifiedDriverIndexes = storedDrivers.flatMap((driver, index) =>
+    (driver.basis === "event" || driver.basis === "macro") &&
+    hasVerifiedExternalEvidence(driver.evidence)
+      ? [index]
+      : [],
+  );
+  const drivers = verifiedDriverIndexes.map((index) => storedDrivers[index]);
+  const storedAiChainUpdates = report.aiChainUpdates ?? [];
+  const verifiedAiUpdateIndexes = storedAiChainUpdates.flatMap((update, index) =>
+    hasVerifiedExternalEvidence(update.evidence) ? [index] : [],
+  );
+  const aiChainUpdates = verifiedAiUpdateIndexes.map(
+    (index) => storedAiChainUpdates[index],
+  );
+  const hasDriver = (market: MarketRegion) =>
+    drivers.some((driver) => driver.market === market);
+  const hasAiUpdate = (market: MarketRegion) =>
+    aiChainUpdates.some((update) => update.market === market);
+  const storedMarketViews =
     report.marketViews?.CN && report.marketViews?.US
       ? report.marketViews
       : fallbackMarketViews(report);
+  const marketViews = Object.fromEntries(
+    (["CN", "US"] as MarketRegion[]).map((market) => [
+      market,
+      {
+        ...storedMarketViews[market],
+        driverStatus: hasDriver(market)
+          ? storedMarketViews[market].driverStatus === "explained"
+            ? "explained"
+            : "partial"
+          : "insufficient",
+        driverIds: drivers
+          .filter((driver) => driver.market === market)
+          .map((driver) => driver.id),
+      },
+    ]),
+  ) as Record<MarketRegion, DailyMarketView>;
+  const aiChainViews = report.aiChainViews
+    ? (Object.fromEntries(
+        (["CN", "US"] as MarketRegion[]).map((market) => {
+          const view = report.aiChainViews?.[market];
+          if (!view) return [market, view];
+          const { mechanism: _mechanism, ...summaryOnly } = view;
+          return [
+            market,
+            hasAiUpdate(market)
+              ? {
+                  ...view,
+                  driverStatus:
+                    view.driverStatus === "explained" ? "explained" : "partial",
+                  driverIds: aiChainUpdates
+                    .filter((update) => update.market === market)
+                    .map((update) => update.id),
+                }
+              : { ...summaryOnly, driverStatus: "insufficient", driverIds: [] },
+          ];
+        }),
+      ) as Record<MarketRegion, NonNullable<DailyReport["aiChainViews"]>[MarketRegion]>)
+    : undefined;
+  const translations = report.translations?.en
+    ? {
+        ...report.translations,
+        en: {
+          ...report.translations.en,
+          drivers: verifiedDriverIndexes.map(
+            (index) => report.translations?.en?.drivers?.[index],
+          ).filter((driver) => driver !== undefined),
+          aiChainUpdates: verifiedAiUpdateIndexes
+            .map((index) => report.translations?.en?.aiChainUpdates?.[index])
+            .filter((update) => update !== undefined),
+          aiChainViews: report.translations.en.aiChainViews
+            ? (Object.fromEntries(
+                (["CN", "US"] as MarketRegion[]).map((market) => {
+                  const view = report.translations?.en?.aiChainViews?.[market];
+                  if (!view || hasAiUpdate(market)) return [market, view];
+                  const { mechanism: _mechanism, ...summaryOnly } = view;
+                  return [market, summaryOnly];
+                }),
+              ) as NonNullable<DailyReportTranslation["aiChainViews"]>)
+            : undefined,
+        },
+      }
+    : report.translations;
   return {
     ...report,
     overview: normalizeOverview(report.overview),
@@ -611,11 +705,12 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
       regions: storyRegions(story),
       ai: story.ai,
     })),
-    drivers: report.drivers ?? [],
+    drivers,
     sectorPerformance: report.sectorPerformance ?? [],
     aiChainPerformance: report.aiChainPerformance ?? [],
-    aiChainViews: report.aiChainViews,
-    aiChainUpdates: report.aiChainUpdates ?? [],
+    aiChainViews,
+    aiChainUpdates,
+    translations,
   };
 }
 

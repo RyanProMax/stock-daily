@@ -304,7 +304,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
     "codex-market-research-v11",
   ].includes(report.contractVersion ?? "");
   const marketDrivers = (report.drivers ?? []).filter(
-    (driver) => driver.market === data.market,
+    (driver) =>
+      driver.market === data.market &&
+      (driver.basis === "event" || driver.basis === "macro"),
   );
   const marketAiUpdates = (report.aiChainUpdates ?? []).filter(
     (update) => update.market === data.market,
@@ -461,7 +463,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
-          aiChainView={report.aiChainViews?.[data.market]}
           drivers={marketDrivers}
           aiUpdates={marketAiUpdates}
           market={data.market}
@@ -485,12 +486,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
             sourceOfficial: t.xSourceOfficial,
             sourceSpecialist: t.xSourceSpecialist,
             sourceExpert: t.xSourceExpert,
-            happened: t.driverEvent,
             mechanism: t.driverMechanism,
-            causeExplained: t.causeExplained,
-            causePartial: t.causePartial,
-            causeUnverified: t.causeUnverified,
-            causeFallback: t.causeFallback,
           }}
         />
       </section>

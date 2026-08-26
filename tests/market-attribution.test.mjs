@@ -98,14 +98,18 @@ test("mixed driver direction requires both rising and falling sectors", () => {
   );
 });
 
-test("V11 accepts evidence-backed event drivers plus explicit causal boundaries", () => {
+test("V11 accepts only evidence-backed event and macro drivers", () => {
   const input = validateInput(fixtureInput());
   const report = validateReport(fixtureReport(input), input);
   assert.equal(report.drivers.length, 4);
   for (const market of ["CN", "US"]) {
     const drivers = report.drivers.filter((driver) => driver.market === market);
     assert.equal(drivers.filter((driver) => driver.role === "primary").length, 1);
-    assert.ok(drivers.some((driver) => driver.basis === "structural"));
+    assert.ok(
+      drivers.every(
+        (driver) => driver.basis === "event" || driver.basis === "macro",
+      ),
+    );
   }
   const stored = JSON.parse(buildReportContent(input, report));
   assert.equal(stored.contractVersion, "codex-market-research-v11");
@@ -115,79 +119,58 @@ test("V11 accepts evidence-backed event drivers plus explicit causal boundaries"
   assert.equal(stored.drivers[0].evidence[0].kind, "market_data");
 });
 
-test("V11 requires one primary and one structural driver per market", () => {
+test("V11 permits no driver when evidence is insufficient and requires one primary otherwise", () => {
   const input = validateInput(fixtureInput());
-  const missingStructural = fixtureReport(input);
-  missingStructural.drivers = missingStructural.drivers.filter(
-    (driver) => !(driver.market === "CN" && driver.basis === "structural"),
+  const noCnDrivers = fixtureReport(input);
+  noCnDrivers.drivers = noCnDrivers.drivers.filter(
+    (driver) => driver.market !== "CN",
   );
-  missingStructural.translations.en.drivers.splice(1, 1);
-  assert.throws(
-    () => validateReport(missingStructural, input),
-    /CN 缺少结构性盘面解释/,
+  noCnDrivers.translations.en.drivers = noCnDrivers.translations.en.drivers.slice(
+    2,
+  );
+  noCnDrivers.marketViews.CN.driverStatus = "insufficient";
+  assert.equal(
+    validateReport(noCnDrivers, input).drivers.filter(
+      (driver) => driver.market === "CN",
+    ).length,
+    0,
   );
 
   const duplicatePrimary = fixtureReport(input);
   duplicatePrimary.drivers[1].role = "primary";
   assert.throws(
     () => validateReport(duplicatePrimary, input),
-    /CN 必须恰好包含一条主驱动/,
+    /CN 有驱动时必须恰好包含一条主驱动/,
   );
 });
 
-test("structural drivers cannot smuggle in external stories", () => {
+test("structural contributions are rejected as publishable attribution", () => {
   const input = validateInput(fixtureInput());
   const report = fixtureReport(input);
-  report.drivers[1].evidence.push(report.drivers[0].evidence[1]);
+  report.drivers[1].basis = "structural";
   assert.throws(
     () => validateReport(report, input),
-    /structural 证据组合不充分/,
+    /分类字段无效/,
   );
 });
 
-test("structural attribution must disclose that the cause is unverified", () => {
-  const input = validateInput(fixtureInput());
-  const circularDriver = fixtureReport(input);
-  circularDriver.drivers[1].mechanism =
-    "公用事业表现落后说明公用事业较弱，因此当天市场呈现行业分化。";
-  assert.throws(
-    () => validateReport(circularDriver, input),
-    /必须明确写明原因未证实/,
-  );
-
-  const circularAiView = fixtureReport(input);
-  circularAiView.aiChainViews.US.mechanism =
-    "上涨环节上涨而下跌环节下跌，因此人工智能产业链呈现分化。";
-  assert.throws(
-    () => validateReport(circularAiView, input),
-    /必须明确写明原因未证实/,
-  );
-
-  const missingEnglishBoundary = fixtureReport(input);
-  missingEnglishBoundary.translations.en.aiChainViews.US.mechanism =
-    "Rising baskets rose while lagging baskets fell, producing dispersion.";
-  assert.throws(
-    () => validateReport(missingEnglishBoundary, input),
-    /必须明确写明原因未证实/,
-  );
-
-  const missingEnglishDriverBoundary = fixtureReport(input);
-  missingEnglishDriverBoundary.translations.en.drivers[1].mechanism =
-    "Utilities lagged and therefore breadth was weaker than the leading sector.";
-  assert.throws(
-    () => validateReport(missingEnglishDriverBoundary, input),
-    /必须明确写明原因未证实/,
-  );
-});
-
-test("structural attribution accepts clear non-boilerplate causal boundaries", () => {
+test("insufficient AI evidence forbids a reader-facing mechanism", () => {
   const input = validateInput(fixtureInput());
   const report = fixtureReport(input);
-  report.drivers[1].mechanism =
-    "公用事业篮子相对落后，只能确认其拖累市场广度，但不能单独证明资金为何轮动。";
-  report.translations.en.drivers[1].mechanism =
-    "The utilities basket lagged and dragged on breadth, but this does not by itself prove why capital rotated.";
-  assert.equal(validateReport(report, input).drivers.length, 4);
+  report.aiChainViews.US.mechanism =
+    "代表篮子的涨跌方向不同，但没有直接事件证据支持原因判断。";
+  assert.throws(
+    () => validateReport(report, input),
+    /证据不足时不得输出 AI 归因机制/,
+  );
+
+  const translated = fixtureReport(input);
+  translated.translations.en.aiChainViews.US.mechanism =
+    "The baskets diverged, but no direct event evidence supports a cause.";
+  assert.throws(
+    () => validateReport(translated, input),
+    /证据不足时不得输出归因机制/,
+  );
 });
 
 test("event and macro drivers require non-expert external evidence", () => {
@@ -199,7 +182,7 @@ test("event and macro drivers require non-expert external evidence", () => {
   );
   assert.throws(
     () => validateReport(missingExternal, input),
-    /event 证据组合不充分/,
+    /evidence 数量必须为 2–4/,
   );
 
   const expertOnly = fixtureReport(input);
@@ -394,10 +377,10 @@ test("a generic AI overview URL cannot prove one exact layer", () => {
 test("AI view status must acknowledge accepted event evidence", () => {
   const input = validateInput(fixtureInput());
   const report = fixtureReport(input);
-  report.aiChainViews.CN.driverStatus = "structural";
+  report.aiChainViews.CN.driverStatus = "insufficient";
   assert.throws(
     () => validateReport(report, input),
-    /有 AI 事件证据时不得标为纯结构性解释/,
+    /有 AI 事件证据时不得标记为证据不足/,
   );
 });
 

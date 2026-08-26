@@ -92,7 +92,7 @@ async function inspect(page, market, language, width) {
         left: Math.round(element.getBoundingClientRect().left),
         right: Math.round(element.getBoundingClientRect().right),
       }));
-    const causalGrids = [...document.querySelectorAll(".snapshot-causal-grid")];
+    const causalReasons = [...document.querySelectorAll(".snapshot-causal-reason")];
     const mainText = document.querySelector("main")?.innerText ?? "";
     return {
       viewportWidth: innerWidth,
@@ -109,18 +109,16 @@ async function inspect(page, market, language, width) {
       aiLayerCount: document.querySelectorAll(".snapshot-item-ai").length,
       evidenceRowCount: document.querySelectorAll(".snapshot-evidence-row").length,
       causeStatusCount: document.querySelectorAll(".snapshot-cause-status").length,
-      causalGridCount: causalGrids.length,
-      causalGridSectionCounts: causalGrids.map(
-        (grid) => grid.querySelectorAll(":scope > section").length,
-      ),
-      causalGridColumnCounts: causalGrids.map(
-        (grid) => getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+      causalGridCount: document.querySelectorAll(".snapshot-causal-grid").length,
+      causalReasonCount: causalReasons.length,
+      causalReasonDisplays: causalReasons.map(
+        (reason) => getComputedStyle(reason).display,
       ),
       happenedLabelCount: [
-        ...document.querySelectorAll(".snapshot-causal-grid section > strong"),
+        ...document.querySelectorAll("main strong"),
       ].filter((element) => /发生了什么|What happened/u.test(element.textContent)).length,
       whyLabelCount: [
-        ...document.querySelectorAll(".snapshot-causal-grid section > strong"),
+        ...document.querySelectorAll(".snapshot-causal-reason > strong"),
       ].filter((element) => /为什么|Why it moved/u.test(element.textContent)).length,
       unverifiedCount: (mainText.match(/原因未证实|Cause unverified/gu) ?? []).length,
       rawTimestamps:
@@ -189,16 +187,13 @@ for (const [key, audit] of Object.entries(result)) {
   assert.equal(layout.indexCount, market === "CN" ? 6 : 4, JSON.stringify(result));
   assert.equal(layout.sectorCount, 11, JSON.stringify(result));
   assert.equal(layout.aiLayerCount, 8, JSON.stringify(result));
-  assert.ok(layout.evidenceRowCount >= 1, JSON.stringify(result));
-  assert.ok(layout.causeStatusCount >= layout.causalGridCount, JSON.stringify(result));
-  assert.ok(layout.causalGridSectionCounts.every((count) => count === 2), JSON.stringify(result));
-  assert.ok(
-    layout.causalGridColumnCounts.every((count) => count === (width === 390 ? 1 : 2)),
-    JSON.stringify(result),
-  );
-  assert.equal(layout.happenedLabelCount, layout.causalGridCount, JSON.stringify(result));
-  assert.equal(layout.whyLabelCount, layout.causalGridCount, JSON.stringify(result));
-  assert.ok(layout.unverifiedCount >= 1, JSON.stringify(result));
+  assert.equal(layout.causeStatusCount, 0, JSON.stringify(result));
+  assert.equal(layout.causalGridCount, 0, JSON.stringify(result));
+  assert.equal(layout.causalReasonCount, layout.evidenceRowCount, JSON.stringify(result));
+  assert.ok(layout.causalReasonDisplays.every((display) => display !== "grid"), JSON.stringify(result));
+  assert.equal(layout.happenedLabelCount, 0, JSON.stringify(result));
+  assert.equal(layout.whyLabelCount, layout.causalReasonCount, JSON.stringify(result));
+  assert.equal(layout.unverifiedCount, 0, JSON.stringify(result));
   assert.deepEqual(layout.rawTimestamps, [], JSON.stringify(result));
   assert.deepEqual(layout.forbiddenCopy, [], JSON.stringify(result));
   assert.deepEqual(layout.clipped, [], JSON.stringify(result));

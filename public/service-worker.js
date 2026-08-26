@@ -1,4 +1,4 @@
-const CACHE_NAME = "stock-daily-shell-v1";
+const CACHE_NAME = "stock-daily-shell-v2";
 const PRECACHE = [
   "/offline",
   "/manifest.webmanifest",
@@ -45,7 +45,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/static/") || PRECACHE.includes(url.pathname)) {
+  if (url.pathname.startsWith("/static/")) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  if (PRECACHE.includes(url.pathname)) {
     event.respondWith(cacheFirst(request));
   }
 });

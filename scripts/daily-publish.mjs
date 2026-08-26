@@ -27,8 +27,8 @@ const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
 const CONTRACT_VERSION = "codex-market-research-v11";
 const MARKETS = ["CN", "US"];
-const DRIVER_STATUSES = new Set(["explained", "partial", "structural"]);
-const DRIVER_BASES = new Set(["structural", "event", "macro"]);
+const DRIVER_STATUSES = new Set(["explained", "partial", "insufficient"]);
+const DRIVER_BASES = new Set(["event", "macro"]);
 const DRIVER_DIRECTIONS = new Set(["positive", "negative", "mixed"]);
 const EVIDENCE_KINDS = new Set([
   "market_data",
@@ -90,10 +90,6 @@ const RAW_DATE_OR_TIMESTAMP =
   /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
-const UNVERIFIED_CAUSE =
-  /(?:原因|催化)(?:尚未|仍未|未能|无法|没有得到|未)(?:证实|确认|验证)|未找到.{0,24}(?:同日|直接|可验证).{0,24}(?:原因|催化|证据)|(?:不能|无法|没有|并未|不)(?:单独)?(?:证明|证实|确认|验证).{0,32}(?:为何|原因|催化)|(?:cause|catalyst).{0,18}(?:unverified|not verified|not established)|no (?:verified|direct|same-session).{0,18}(?:cause|catalyst|evidence)|(?:does not|cannot|did not).{0,24}(?:prove|establish|verify|confirm).{0,32}(?:why|cause|catalyst)/iu;
-const STRUCTURAL_TRANSMISSION =
-  /(?:权重|成分|篮子|指数|贡献|拖累|支撑|轮动|分化|配置|传导|weight|constituent|basket|index|contribut|drag|support|rotation|dispersion|allocation|transmission)/iu;
 
 function hostnameMatches(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -147,14 +143,6 @@ function readerText(value, label, maxLength, minLength = 2) {
     throw new Error(`${label} 包含未本地化的时间戳或日期`);
   }
   return text;
-}
-
-function assertStructuralCausalBoundary(value, label) {
-  if (!UNVERIFIED_CAUSE.test(value) || !STRUCTURAL_TRANSMISSION.test(value)) {
-    throw new Error(
-      `${label} 必须明确写明原因未证实，并且只能解释权重、成分或行业结构如何贡献涨跌`,
-    );
-  }
 }
 
 function stringArray(value, label, minItems, maxItems, maxLength = 80) {
@@ -954,9 +942,6 @@ function validateDriver(value, input, index) {
   const title = readerText(driver.title, `${label}.title`, 80, 5);
   const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
   const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 20);
-  if (driver.basis === "structural") {
-    assertStructuralCausalBoundary(mechanism, `${label}.mechanism`);
-  }
   const sectorSymbols = stringArray(
     driver.sectorSymbols,
     `${label}.sectorSymbols`,
@@ -980,8 +965,8 @@ function validateDriver(value, input, index) {
   ) {
     throw new Error(`${label} 与行业涨跌方向不一致`);
   }
-  if (!Array.isArray(driver.evidence) || driver.evidence.length < 1 || driver.evidence.length > 4) {
-    throw new Error(`${label}.evidence 数量必须为 1–4`);
+  if (!Array.isArray(driver.evidence) || driver.evidence.length < 2 || driver.evidence.length > 4) {
+    throw new Error(`${label}.evidence 数量必须为 2–4`);
   }
   const evidence = driver.evidence.map((item, evidenceIndex) =>
     validateEvidence(item, input, driver.market, `${label}.evidence[${evidenceIndex}]`),
@@ -1006,11 +991,8 @@ function validateDriver(value, input, index) {
     throw new Error(`${label} 的行情证据与驱动行业不匹配`);
   }
   if (
-    (driver.basis === "structural" &&
-      (marketData.length < 1 || external.length > 0)) ||
-    (driver.basis !== "structural" &&
-      (marketData.length < 1 ||
-        !external.some((item) => item.sourceType !== "expert")))
+    marketData.length < 1 ||
+    !external.some((item) => item.sourceType !== "expert")
   ) {
     throw new Error(`${label} 的 ${driver.basis} 证据组合不充分`);
   }
@@ -1099,7 +1081,7 @@ function validateAiUpdate(value, input, index) {
   };
 }
 
-function validateViews(value, label, { requireMechanism = false } = {}) {
+function validateViews(value, label, { optionalMechanism = false } = {}) {
   const views = requireObject(value, label);
   return Object.fromEntries(
     MARKETS.map((market) => {
@@ -1122,7 +1104,7 @@ function validateViews(value, label, { requireMechanism = false } = {}) {
         ),
         driverStatus: view.driverStatus,
       };
-      if (requireMechanism) {
+      if (optionalMechanism && view.mechanism !== undefined) {
         result.mechanism = readerText(
           view.mechanism,
           `${label}.${market}.mechanism`,
@@ -1210,12 +1192,6 @@ function validateTranslation(
           20,
         ),
       };
-      if (drivers[index].basis === "structural") {
-        assertStructuralCausalBoundary(
-          translatedDriver.mechanism,
-          `translations.en.drivers[${index}].mechanism`,
-        );
-      }
       return translatedDriver;
     }),
     aiChainUpdates: translatedAiUpdates.map((value, index) => {
@@ -1255,7 +1231,7 @@ function validateTranslation(
         20,
       ),
     };
-    result.aiChainViews[market] = {
+    const translatedAiView = {
       headline: readerText(
         aiView.headline,
         `translations.en.aiChainViews.${market}.headline`,
@@ -1268,19 +1244,20 @@ function validateTranslation(
         600,
         20,
       ),
-      mechanism: readerText(
+    };
+    if (validatedAiChainViews[market].driverStatus !== "insufficient") {
+      translatedAiView.mechanism = readerText(
         aiView.mechanism,
         `translations.en.aiChainViews.${market}.mechanism`,
         700,
         20,
-      ),
-    };
-    if (validatedAiChainViews[market].driverStatus === "structural") {
-      assertStructuralCausalBoundary(
-        result.aiChainViews[market].mechanism,
-        `translations.en.aiChainViews.${market}.mechanism`,
+      );
+    } else if (aiView.mechanism !== undefined) {
+      throw new Error(
+        `translations.en.aiChainViews.${market} 证据不足时不得输出归因机制`,
       );
     }
+    result.aiChainViews[market] = translatedAiView;
 
     const marketDriverEvidence = drivers
       .filter((item) => item.market === market)
@@ -1303,7 +1280,7 @@ function validateTranslation(
         market,
         marketAiEvidence,
       )}`,
-      `${result.aiChainViews[market].headline} ${result.aiChainViews[market].summary} ${result.aiChainViews[market].mechanism}`,
+      `${result.aiChainViews[market].headline} ${result.aiChainViews[market].summary} ${result.aiChainViews[market].mechanism ?? ""}`,
       `translations.en.aiChainViews.${market}`,
     );
   }
@@ -1339,22 +1316,19 @@ function validateTranslation(
 function validateDriverSets(drivers, marketViews) {
   for (const market of MARKETS) {
     const rows = drivers.filter((driver) => driver.market === market);
-    if (rows.length < 1 || rows.length > 3) {
-      throw new Error(`${market} 必须包含一至三条驱动`);
+    if (rows.length > 2) {
+      throw new Error(`${market} 最多包含两条已核验驱动`);
     }
-    if (rows.filter((driver) => driver.role === "primary").length !== 1) {
-      throw new Error(`${market} 必须恰好包含一条主驱动`);
+    if (
+      rows.filter((driver) => driver.role === "primary").length !==
+      (rows.length > 0 ? 1 : 0)
+    ) {
+      throw new Error(`${market} 有驱动时必须恰好包含一条主驱动`);
     }
-    if (!rows.some((driver) => driver.basis === "structural")) {
-      throw new Error(`${market} 缺少结构性盘面解释`);
-    }
-    const primary = rows.find((driver) => driver.role === "primary");
-    const nonStructural = rows.some((driver) => driver.basis !== "structural");
     const status = marketViews[market].driverStatus;
     if (
-      (status === "explained" && primary.basis === "structural") ||
-      (status === "structural" && nonStructural) ||
-      (status === "partial" && !nonStructural)
+      (rows.length === 0 && status !== "insufficient") ||
+      (rows.length > 0 && status === "insufficient")
     ) {
       throw new Error(`${market} driverStatus 与证据类型不一致`);
     }
@@ -1370,7 +1344,7 @@ export function validateReport(value, input) {
   const summary = readerText(report.summary, "summary", 420, 30);
   const marketViews = validateViews(report.marketViews, "marketViews");
   const aiChainViews = validateViews(report.aiChainViews, "aiChainViews", {
-    requireMechanism: true,
+    optionalMechanism: true,
   });
   if (!Array.isArray(report.drivers)) throw new Error("drivers 必须是数组");
   const drivers = report.drivers.map((item, index) =>
@@ -1391,17 +1365,17 @@ export function validateReport(value, input) {
     ) {
       throw new Error(`${market} AI 动态数量或环节重复`);
     }
-    if (rows.length === 0 && aiChainViews[market].driverStatus !== "structural") {
-      throw new Error(`${market} 无 AI 事件证据时必须使用结构性解释`);
+    if (rows.length === 0 && aiChainViews[market].driverStatus !== "insufficient") {
+      throw new Error(`${market} 无 AI 事件证据时必须标记为证据不足`);
     }
-    if (rows.length > 0 && aiChainViews[market].driverStatus === "structural") {
-      throw new Error(`${market} 有 AI 事件证据时不得标为纯结构性解释`);
+    if (rows.length > 0 && aiChainViews[market].driverStatus === "insufficient") {
+      throw new Error(`${market} 有 AI 事件证据时不得标记为证据不足`);
     }
-    if (aiChainViews[market].driverStatus === "structural") {
-      assertStructuralCausalBoundary(
-        aiChainViews[market].mechanism,
-        `aiChainViews.${market}.mechanism`,
-      );
+    if (rows.length > 0 && !aiChainViews[market].mechanism) {
+      throw new Error(`${market} 有 AI 事件证据时必须提供归因机制`);
+    }
+    if (rows.length === 0 && aiChainViews[market].mechanism !== undefined) {
+      throw new Error(`${market} 证据不足时不得输出 AI 归因机制`);
     }
   }
   const researchAudit = validateResearchAudit(report.researchAudit);
@@ -1434,7 +1408,7 @@ export function validateReport(value, input) {
         market,
         marketAiEvidence,
       )}`,
-      `${aiChainViews[market].headline} ${aiChainViews[market].summary} ${aiChainViews[market].mechanism}`,
+      `${aiChainViews[market].headline} ${aiChainViews[market].summary} ${aiChainViews[market].mechanism ?? ""}`,
       `aiChainViews.${market}`,
     );
   }

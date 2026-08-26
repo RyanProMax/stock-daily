@@ -104,7 +104,9 @@ test("daily task uses market results as search leads instead of a news pool", as
   ]);
   assert.match(prompt, /实时网页搜索/);
   assert.match(prompt, /至少执行四类独立的窄搜索/);
-  assert.match(prompt, /原因未证实/);
+  assert.match(prompt, /找不到充分证据时[^\n]*输出空的驱动数组/);
+  assert.match(prompt, /不得生成“原因未证实”/);
+  assert.match(prompt, /必须省略\s*`mechanism`/);
   assert.doesNotMatch(prompt, /不要联网/);
   assert.match(task, /主动(?:研究|检索)/);
   assert.doesNotMatch(collector, /news-pipeline|x-intelligence/);

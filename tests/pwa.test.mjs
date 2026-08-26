@@ -36,8 +36,19 @@ test("service worker never caches report navigations or dynamic data", async () 
   assert.match(worker, /request\.mode === "navigate"/);
   assert.match(worker, /fetch\(request\)\.catch\(\(\) => caches\.match\("\/offline"\)\)/);
   assert.match(worker, /url\.pathname\.startsWith\("\/static\/"\)/);
+  assert.match(worker, /url\.pathname\.startsWith\("\/static\/"\)[\s\S]*event\.respondWith\(fetch\(request\)\)/);
+  assert.doesNotMatch(worker, /url\.pathname\.startsWith\("\/static\/"\)\s*\|\|\s*PRECACHE/);
   assert.doesNotMatch(worker, /cache\.put\([^\n]*navigate/);
   assert.doesNotMatch(worker, /PRECACHE[^;]*["']\/["']/s);
+});
+
+test("local preview removes stale PWA caches instead of registering a worker", async () => {
+  const client = await readFile(new URL("src/client.tsx", root), "utf8");
+  assert.match(client, /location\.hostname === "localhost"/);
+  assert.match(client, /location\.hostname === "127\.0\.0\.1"/);
+  assert.match(client, /getRegistrations\(\)/);
+  assert.match(client, /registration\.unregister\(\)/);
+  assert.match(client, /key\.startsWith\("stock-daily-"\)/);
 });
 
 test("PWA assets bypass the report worker and update-sensitive files revalidate", async () => {
