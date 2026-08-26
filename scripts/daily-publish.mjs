@@ -497,17 +497,58 @@ function marketDataBindings(input, market, source) {
   );
 }
 
+function canonicalSectorEvidence(input, market, source) {
+  if (marketDataSourceSet(input, market).has(source)) return null;
+  let quoteSymbol = "";
+  try {
+    const url = new URL(source);
+    const match =
+      url.hostname === "finance.yahoo.com"
+        ? /^\/quote\/([^/]+)\/history\/?$/iu.exec(url.pathname)
+        : null;
+    quoteSymbol = match ? decodeURIComponent(match[1]).toUpperCase() : "";
+  } catch {
+    return null;
+  }
+  const matches = marketDataRecords(input, market).filter((record) => {
+    if (record.scope !== "sector") return false;
+    const symbol = String(record.sectorSymbol).toUpperCase();
+    return quoteSymbol === symbol || quoteSymbol === `${symbol}.SS`;
+  });
+  if (matches.length !== 1) return null;
+  const canonicalSource = matches[0].source;
+  const hostname = new URL(canonicalSource).hostname.toLowerCase();
+  return {
+    source: canonicalSource,
+    sourceLabel: hostname.endsWith("csindex.com.cn")
+      ? "中证指数有限公司"
+      : hostname.endsWith("nasdaq.com")
+        ? "Nasdaq"
+        : "市场行情",
+    sourceType: verifiedExternalSourceType(canonicalSource, "web"),
+  };
+}
+
 function validateEvidence(value, input, market, label) {
   const evidence = requireObject(value, label);
   const title = readerText(evidence.title, `${label}.title`, 220, 4);
   const facts = readerText(evidence.facts, `${label}.facts`, 1600, 20);
-  const source = requireText(evidence.source, `${label}.source`, 1200, 12);
-  const sourceLabel = readerText(
+  let source = requireText(evidence.source, `${label}.source`, 1200, 12);
+  let sourceLabel = readerText(
     evidence.sourceLabel,
     `${label}.sourceLabel`,
     80,
     2,
   );
+  let sourceType = evidence.sourceType;
+  if (evidence.kind === "market_data") {
+    const canonical = canonicalSectorEvidence(input, market, source);
+    if (canonical) {
+      source = canonical.source;
+      sourceLabel = canonical.sourceLabel;
+      sourceType = canonical.sourceType;
+    }
+  }
   const publishedAt = requireText(
     evidence.publishedAt,
     `${label}.publishedAt`,
@@ -519,7 +560,7 @@ function validateEvidence(value, input, market, label) {
     !source.startsWith("https://") ||
     SEARCH_RESULT_URL.test(source) ||
     !EVIDENCE_KINDS.has(evidence.kind) ||
-    !SOURCE_TYPES.has(evidence.sourceType) ||
+    !SOURCE_TYPES.has(sourceType) ||
     !["web", "x"].includes(evidence.platform) ||
     typeof evidence.authorHandle !== "string" ||
     !Number.isFinite(publishedTime) ||
@@ -544,11 +585,11 @@ function validateEvidence(value, input, market, label) {
 
   const verifiedSourceType =
     evidence.kind === "market_data"
-      ? evidence.sourceType
+      ? sourceType
       : verifiedExternalSourceType(source, evidence.platform);
   if (
     evidence.kind !== "market_data" &&
-    evidence.sourceType !== verifiedSourceType
+    sourceType !== verifiedSourceType
   ) {
     throw new Error(`${label} 来源层级与 URL 不一致`);
   }
@@ -559,7 +600,7 @@ function validateEvidence(value, input, market, label) {
     const bindings = marketDataBindings(input, market, source);
     if (
       !dataSources.has(source) ||
-      evidence.sourceType === "expert" ||
+      sourceType === "expert" ||
       evidence.platform !== "web" ||
       publishedAt !== session.windowEnd
     ) {
@@ -602,6 +643,7 @@ const COUNT_GROUNDING_FIELDS = {
   declining: "declining count sectors down",
   flat: "flat count sectors flat",
   marketCount: "market indicator total count",
+  equityIndexCount: "equity index total count",
   sectorCount: "sector total count",
   aiLayerCount: "AI layer total count",
 };
@@ -629,6 +671,8 @@ export function approvedGroundingText(value) {
           ? "layers"
           : field === "marketCount"
             ? "indicators"
+            : field === "equityIndexCount"
+              ? "indices"
             : "sectors";
         facts.push(`${prefix} ${item[field]} ${unit}`);
       }
@@ -654,6 +698,7 @@ function groundingEnvelope(input, market) {
   const coveredMarkets = market ? [market] : MARKETS;
   return {
     marketCount: markets.length,
+    equityIndexCount: markets.filter((item) => item.symbol !== "DGS10").length,
     sectorCount: sectors.length,
     aiLayerCount: aiLayers.length,
     markets,
@@ -663,6 +708,9 @@ function groundingEnvelope(input, market) {
     marketCoverage: coveredMarkets.map((coveredMarket) => ({
       marketCount: input.markets.filter(
         (item) => item.region === coveredMarket,
+      ).length,
+      equityIndexCount: input.markets.filter(
+        (item) => item.region === coveredMarket && item.symbol !== "DGS10",
       ).length,
       sectorCount: input.sectorPerformance.filter(
         (item) => item.market === coveredMarket,
@@ -677,6 +725,27 @@ function groundingEnvelope(input, market) {
   };
 }
 
+function chineseInteger(value) {
+  const digits = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (/^[零〇一二两三四五六七八九]$/u.test(value)) return digits[value];
+  let total = 0;
+  let current = 0;
+  for (const character of value) {
+    if (Object.hasOwn(digits, character)) {
+      current = digits[character];
+    } else if (character === "十") {
+      total += (current || 1) * 10;
+      current = 0;
+    } else if (character === "百") {
+      total += (current || 1) * 100;
+      current = 0;
+    } else {
+      return value;
+    }
+  }
+  return total + current;
+}
+
 function sanitizeNumericText(value) {
   return String(value)
     .normalize("NFC")
@@ -688,7 +757,17 @@ function sanitizeNumericText(value) {
       /\b\d{4}-\d{1,2}-\d{1,2}(?:t\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:z|[+-]\d{2}:\d{2})?)?\b/giu,
       " ",
     )
+    .replace(
+      /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b/giu,
+      " ",
+    )
     .replace(/\b\d{4}年\d{1,2}月\d{1,2}日/gu, " ")
+    .replace(/\b\d{1,2}月\d{1,2}日/gu, " ")
+    .replace(/[零〇一二两三四五六七八九十百]{1,4}月[零〇一二两三四五六七八九十百]{1,4}日/gu, " ")
+    .replace(
+      /[零〇一二两三四五六七八九十百]{1,6}(?=(?:个)?(?:月|年|点|基点|百分点|只|项|层|家|条|次|种|行业|板块|环节))/gu,
+      (match) => String(chineseInteger(match)),
+    )
     .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/gu, " ");
 }
 
@@ -704,11 +783,14 @@ function claimUnit(before, after) {
   if (/^(?:点|points?\b)/iu.test(tail) || /(?:level|收于|报于|报)\s*$/iu.test(head)) {
     return "level";
   }
+  if (/^(?:-?months?\b|个?月\b)/iu.test(tail)) {
+    return "count";
+  }
   if (/^(?:-?year\b|years?\b|年期|年\b|y\b)/iu.test(tail)) {
     return "tenor";
   }
   if (
-    /^(?:个|只|项|层|家|条|次|种|行业|板块|环节|涨|跌|平|sectors?\b|layers?\b|indicators?\b|stocks?\b|companies?\b|items?\b)/iu.test(
+    /^(?:个|只|项|层|家|条|次|种|行业|板块|环节|股指|涨|跌|平|sectors?\b|layers?\b|indicators?\b|indices\b|indexes\b|stocks?\b|companies?\b|items?\b)/iu.test(
       tail,
     )
   ) {
@@ -750,7 +832,7 @@ function claimPolarity(raw, before, after, unit) {
     /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|下跌|下降|收跌|跌幅|减少|降低|回落|走低|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|持平|\bflat\b|\bunchanged\b)\s*(?:约|了|为)?\s*$/iu,
   )?.[0];
   const suffix = after.match(
-    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|sectors?\b|layers?\b|indicators?\b|stocks?\b|companies?\b|items?\b))*\s*(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|涨|下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|持平|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bflat\b|\bunchanged\b)/iu,
+    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|股指|sectors?\b|layers?\b|indicators?\b|indices\b|indexes\b|stocks?\b|companies?\b|items?\b))*\s*(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|涨|下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|持平|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bflat\b|\bunchanged\b)/iu,
   )?.[0];
   const word = directionWord(`${prefix ?? ""} ${suffix ?? ""}`);
   if (sign !== "neutral" && word !== "neutral" && sign !== word) {

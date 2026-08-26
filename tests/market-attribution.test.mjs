@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildReportContent,
+  numericClaims,
   validateInput,
   validateReport,
 } from "../scripts/daily-publish.mjs";
@@ -11,6 +12,7 @@ import {
   driverDirectionMatches,
   zonedDateTimeIso,
 } from "../scripts/market-attribution.mjs";
+import { metricAtCutoff } from "../scripts/sector-heat.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
 
 test("V10 accepts deterministic market input without a preselected news pool", () => {
@@ -36,6 +38,52 @@ test("market sessions use the completed close of each venue", () => {
     buildMarketSessions(fixtureInput().markets),
     fixtureInput().marketSessions,
   );
+});
+
+test("numeric grounding ignores localized calendar dates", () => {
+  assert.deepEqual(numericClaims("On Aug. 24, the market rose 0.59%."), [
+    {
+      raw: "0.59",
+      number: "0.59",
+      unit: "percent",
+      polarity: "positive",
+    },
+  ]);
+  assert.deepEqual(numericClaims("8月24日，市场上涨0.59%。"), [
+    {
+      raw: "0.59",
+      number: "0.59",
+      unit: "percent",
+      polarity: "positive",
+    },
+  ]);
+  assert.deepEqual(numericClaims("商业活动升至五十二个月高位。"), [
+    {
+      raw: "52",
+      number: "52",
+      unit: "count",
+      polarity: "neutral",
+    },
+  ]);
+  assert.deepEqual(numericClaims("Activity reached a 52-month high."), [
+    {
+      raw: "52",
+      number: "52",
+      unit: "count",
+      polarity: "neutral",
+    },
+  ]);
+});
+
+test("historical sector replay selects each venue's completed session", () => {
+  const sector = { symbol: "sector", name: "行业", nameEn: "Sector" };
+  const points = [
+    { date: "2026-08-21", change: 1 },
+    { date: "2026-08-24", change: 2 },
+  ];
+  const cutoff = Date.parse("2026-08-24T13:00:00.000Z");
+  assert.equal(metricAtCutoff(sector, "CN", points, cutoff).asOf, "2026-08-24");
+  assert.equal(metricAtCutoff(sector, "US", points, cutoff).asOf, "2026-08-21");
 });
 
 test("mixed driver direction requires both rising and falling sectors", () => {
@@ -218,6 +266,25 @@ test("market evidence facts and driver sectors must match the exact input source
     () => validateReport(aiOnlySource, input),
     /行情证据与驱动行业不匹配/,
   );
+});
+
+test("sector evidence canonicalizes a model-invented Yahoo quote URL", () => {
+  const rawInput = fixtureInput();
+  const sector = rawInput.sectorPerformance.find(
+    (item) => item.market === "CN" && item.symbol === "932078",
+  );
+  sector.source =
+    "https://www.csindex.com.cn/#/indices/family/detail?indexCode=932078";
+  const input = validateInput(rawInput);
+  const report = fixtureReport(input);
+  report.drivers[0].evidence[0].source =
+    "https://finance.yahoo.com/quote/932078.SS/history";
+  report.drivers[0].evidence[0].sourceLabel = "Yahoo Finance";
+  report.drivers[0].evidence[0].sourceType = "publisher";
+  const evidence = validateReport(report, input).drivers[0].evidence[0];
+  assert.equal(evidence.source, sector.source);
+  assert.equal(evidence.sourceLabel, "中证指数有限公司");
+  assert.equal(evidence.sourceType, "first_party");
 });
 
 test("numeric grounding ignores dates and enforces the reported direction", () => {

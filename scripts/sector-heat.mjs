@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fetchEquityConstituent } from "./ai-chain.mjs";
+import { zonedDateTimeIso } from "./market-attribution.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -487,10 +488,17 @@ function fetchHistoricalSectorPoints(
     : fetchUsSectorPoints(sector, firstCutoffTime, lastCutoffTime);
 }
 
-function metricAtCutoff(sector, market, points, cutoffTime) {
+export function metricAtCutoff(sector, market, points, cutoffTime) {
+  const session =
+    market === "CN"
+      ? { closeHour: 15, timeZone: "Asia/Shanghai" }
+      : { closeHour: 16, timeZone: "America/New_York" };
   const latest = points
     .filter(
-      (point) => Date.parse(`${point.date}T23:59:59Z`) <= cutoffTime,
+      (point) =>
+        Date.parse(
+          zonedDateTimeIso(point.date, session.closeHour, session.timeZone),
+        ) <= cutoffTime,
     )
     .at(-1);
   if (!latest) throw new Error(`${sector.symbol}: no historical close`);

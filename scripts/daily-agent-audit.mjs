@@ -130,7 +130,14 @@ export function auditCodexRun(eventsText, report) {
     ) {
       throw new Error(`${market} 研究审计声明了未实际执行的查询`);
     }
-    if (declared.queries.some((query) => queryMarket(query) !== market)) {
+    const declaredQueryMarkets = declared.queries.map(queryMarket);
+    if (
+      declaredQueryMarkets.some(
+        (declaredMarket) => declaredMarket && declaredMarket !== market,
+      ) ||
+      declaredQueryMarkets.filter((declaredMarket) => declaredMarket === market)
+        .length < 3
+    ) {
       throw new Error(`${market} 研究审计查询缺少唯一、明确的市场标记`);
     }
     if (declared.sourcesReviewed < marketsWithExternalEvidence[market].size) {

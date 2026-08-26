@@ -115,3 +115,12 @@ test("declared research queries must carry the declared market marker", () => {
     /US 研究审计查询缺少唯一、明确的市场标记/,
   );
 });
+
+test("declared research permits unclassified source follow-ups after market coverage", () => {
+  const sourceFollowUp = '"market wrap" publication time';
+  const report = fixtureReport(fixtureInput());
+  report.researchAudit.US.queries.push(sourceFollowUp);
+  const result = auditCodexRun(eventsFor([...queries, sourceFollowUp]), report);
+  assert.equal(result.status, "audited");
+  assert.equal(result.coverage.US, 3);
+});
