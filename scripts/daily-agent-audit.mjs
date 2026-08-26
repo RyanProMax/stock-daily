@@ -6,6 +6,10 @@ const MARKET_QUERY_PATTERNS = {
   CN: /(?:A股|上证|深证|沪深|创业板|科创|中国股市|China(?:ese)? stocks?)/iu,
   US: /(?:美股|美国股市|华尔街|标普|纳斯达克|道琼斯|Wall Street|U\.?S\.? stocks?|S&P|Nasdaq|Dow Jones|NYSE)/iu,
 };
+const AI_QUERY_PATTERN =
+  /(?:AI|人工智能|智能产业链|算力|芯片|存储|服务器|光互连|数据中心|云计算|应用软件|机器人|artificial intelligence|semiconductor|memory|server|interconnect|data cent(?:er|re)|cloud|software|robot)/iu;
+const CAUSE_QUERY_PATTERN =
+  /(?:原因|催化|公告|财报|订单|供需|政策|业绩|why|reason|catalyst|filing|earnings|order|demand|supply|policy)/iu;
 
 function queryMarket(query) {
   const matches = Object.entries(MARKET_QUERY_PATTERNS)
@@ -86,7 +90,7 @@ export function auditCodexRun(eventsText, report) {
     .map((event) => event.item);
   const queryBatches = searchItems.map(searchQueries).filter((items) => items.length);
   const queries = [...new Set(queryBatches.flat())];
-  if (queryBatches.length < 2 || queries.length < 6) {
+  if (queryBatches.length < 2 || queries.length < 8) {
     throw new Error("Codex 未执行足够的原生网页搜索");
   }
 
@@ -100,8 +104,21 @@ export function auditCodexRun(eventsText, report) {
       classifiedQueries.filter((item) => item.market === market).length,
     ]),
   );
-  if (coverageCounts.CN < 3 || coverageCounts.US < 3) {
-    throw new Error("Codex 原生网页搜索必须分别执行至少三条 CN 与 US 查询");
+  if (coverageCounts.CN < 4 || coverageCounts.US < 4) {
+    throw new Error("Codex 原生网页搜索必须分别执行至少四条 CN 与 US 查询");
+  }
+  for (const market of ["CN", "US"]) {
+    const aiCauseQueries = classifiedQueries.filter(
+      (item) =>
+        item.market === market &&
+        AI_QUERY_PATTERN.test(item.query) &&
+        CAUSE_QUERY_PATTERN.test(item.query),
+    );
+    if (aiCauseQueries.length < 2) {
+      throw new Error(
+        `${market} 必须至少执行两条同时包含 AI 对象与原因线索的主动归因查询`,
+      );
+    }
   }
 
   const normalizedQueries = new Set(queries.map(normalizedQuery));
@@ -116,7 +133,7 @@ export function auditCodexRun(eventsText, report) {
     if (
       !declared ||
       !Array.isArray(declared.queries) ||
-      declared.queries.length < 3 ||
+      declared.queries.length < 4 ||
       !Number.isInteger(declared.sourcesReviewed) ||
       declared.sourcesReviewed < 1 ||
       !["sufficient", "limited"].includes(declared.outcome)
@@ -136,7 +153,7 @@ export function auditCodexRun(eventsText, report) {
         (declaredMarket) => declaredMarket && declaredMarket !== market,
       ) ||
       declaredQueryMarkets.filter((declaredMarket) => declaredMarket === market)
-        .length < 3
+        .length < 4
     ) {
       throw new Error(`${market} 研究审计查询缺少唯一、明确的市场标记`);
     }

@@ -85,7 +85,11 @@ async function buildDailyPageData(
     ];
   }
   const [weekEvents, thesisLedger, thesisHistory] =
-    ["market-attribution-v9", "codex-market-research-v10"].includes(
+    [
+      "market-attribution-v9",
+      "codex-market-research-v10",
+      "codex-market-research-v11",
+    ].includes(
       report.contractVersion ?? "",
     )
       ? [null, [], []]

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Stock Daily Codex Market Research V10",
+  "title": "Stock Daily Codex Market Research V11",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,12 +17,12 @@
   "properties": {
     "contractVersion": {
       "type": "string",
-      "const": "codex-market-research-v10"
+      "const": "codex-market-research-v11"
     },
     "headline": { "type": "string", "minLength": 8, "maxLength": 100 },
     "summary": { "type": "string", "minLength": 30, "maxLength": 420 },
     "marketViews": { "$ref": "#/$defs/marketViews" },
-    "aiChainViews": { "$ref": "#/$defs/marketViews" },
+    "aiChainViews": { "$ref": "#/$defs/aiChainViews" },
     "drivers": {
       "type": "array",
       "minItems": 2,
@@ -78,6 +78,26 @@
       "properties": {
         "CN": { "$ref": "#/$defs/marketView" },
         "US": { "$ref": "#/$defs/marketView" }
+      }
+    },
+    "aiChainView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary", "mechanism", "driverStatus"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 90 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
+        "mechanism": { "type": "string", "minLength": 20, "maxLength": 460 },
+        "driverStatus": { "$ref": "#/$defs/driverStatus" }
+      }
+    },
+    "aiChainViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CN", "US"],
+      "properties": {
+        "CN": { "$ref": "#/$defs/aiChainView" },
+        "US": { "$ref": "#/$defs/aiChainView" }
       }
     },
     "evidence": {
@@ -220,6 +240,25 @@
         "US": { "$ref": "#/$defs/translatedMarketView" }
       }
     },
+    "translatedAiChainView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary", "mechanism"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "mechanism": { "type": "string", "minLength": 20, "maxLength": 700 }
+      }
+    },
+    "translatedAiChainViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CN", "US"],
+      "properties": {
+        "CN": { "$ref": "#/$defs/translatedAiChainView" },
+        "US": { "$ref": "#/$defs/translatedAiChainView" }
+      }
+    },
     "translatedDriver": {
       "type": "object",
       "additionalProperties": false,
@@ -255,7 +294,7 @@
         "headline": { "type": "string", "minLength": 5, "maxLength": 140 },
         "summary": { "type": "string", "minLength": 20, "maxLength": 500 },
         "marketViews": { "$ref": "#/$defs/translatedMarketViews" },
-        "aiChainViews": { "$ref": "#/$defs/translatedMarketViews" },
+        "aiChainViews": { "$ref": "#/$defs/translatedAiChainViews" },
         "drivers": {
           "type": "array",
           "minItems": 2,
@@ -276,7 +315,7 @@
       "properties": {
         "queries": {
           "type": "array",
-          "minItems": 3,
+          "minItems": 4,
           "maxItems": 12,
           "items": { "type": "string", "minLength": 1, "maxLength": 220 }
         },

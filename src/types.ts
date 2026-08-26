@@ -107,6 +107,7 @@ export interface AiChainConstituent {
 export interface AiChainView {
   headline: string;
   summary: string;
+  mechanism?: string;
   driverStatus: DriverStatus;
   leaderLayers: AiChainLayer[];
   laggardLayers: AiChainLayer[];
@@ -342,7 +343,10 @@ export interface DailyReportTranslation {
       overview: Omit<MarketOverview, "tone">;
     }
   >;
-  aiChainViews?: Record<MarketRegion, Pick<AiChainView, "headline" | "summary">>;
+  aiChainViews?: Record<
+    MarketRegion,
+    Pick<AiChainView, "headline" | "summary" | "mechanism">
+  >;
   stories: Array<{
     title: string;
     summary: string;

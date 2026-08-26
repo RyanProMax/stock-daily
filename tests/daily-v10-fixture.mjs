@@ -149,7 +149,7 @@ export function fixtureInput() {
   const marketSessions = buildMarketSessions(markets);
   const input = {
     schemaVersion: 10,
-    contractVersion: "codex-market-research-v10",
+    contractVersion: "codex-market-research-v11",
     runId: "test-v10-run",
     reportDate: "2026-08-22",
     updateKind: "morning",
@@ -233,7 +233,7 @@ export function fixtureReport(input = fixtureInput()) {
     (item) => item.market === "CN" && item.layer === "interconnect",
   );
   return {
-    contractVersion: "codex-market-research-v10",
+    contractVersion: "codex-market-research-v11",
     headline: "中美市场行业轮动分化，材料方向获得事件支撑",
     summary: "两个市场均呈现明显的行业强弱分化；材料方向有同交易窗口的直接信息支持，其余表现更适合按盘面结构理解。",
     marketViews: {
@@ -252,11 +252,13 @@ export function fixtureReport(input = fixtureInput()) {
       CN: {
         headline: "光互连相对走弱，订单信息提供局部解释",
         summary: "光互连代表篮子落后，同时公司披露的订单变化只解释该环节的一部分表现。",
+        mechanism: "公司披露的订单确认节奏放缓可能压低短期收入预期，因此能局部解释光互连环节承压。",
         driverStatus: "partial",
       },
       US: {
         headline: "智能产业链内部轮动，强弱环节并存",
         summary: "代表篮子之间方向分化，现有证据更适合描述环节轮动，不足以归结为单一事件。",
+        mechanism: "原因未证实：当前只能确认代表成分股与篮子构成造成环节分化，没有直接证据把当天涨跌归因于同一催化。",
         driverStatus: "structural",
       },
     },
@@ -295,7 +297,7 @@ export function fixtureReport(input = fixtureInput()) {
         direction: "negative",
         title: "防御行业未能同步跟涨",
         summary: "公用事业相对落后，显示当天上涨力量集中在部分行业，而非普遍的风险偏好扩张。",
-        mechanism: "行业强弱差异表明资金发生轮动，领先行业的表现不能外推为全市场一致上行。",
+        mechanism: "原因未证实：公用事业的成分与行业篮子相对落后，只能确认其对市场广度形成拖累，不能证明外部催化。",
         sectorSymbols: ["932086"],
         evidence: [
           marketEvidence(
@@ -343,7 +345,7 @@ export function fixtureReport(input = fixtureInput()) {
         direction: "negative",
         title: "科技行业落后形成反向约束",
         summary: "科技行业代表篮子下跌，说明指数内部并非同步改善，周期方向的解释边界较清晰。",
-        mechanism: "科技与材料方向相反，反映资金在行业间重新分配，而不是所有风险资产共同上涨。",
+        mechanism: "原因未证实：科技与材料行业篮子方向相反，只能确认行业轮动对指数内部结构的贡献，不能证明外部催化。",
         sectorSymbols: ["XLK"],
         evidence: [
           marketEvidence(
@@ -400,10 +402,12 @@ export function fixtureReport(input = fixtureInput()) {
           CN: {
             headline: "Optical interconnects lagged as order news offered a partial explanation",
             summary: "The representative basket lagged, while disclosed order changes explained only part of the move.",
+            mechanism: "Slower disclosed order timing could weigh on near-term revenue expectations and therefore partially explains pressure in optical interconnects.",
           },
           US: {
             headline: "Intelligent-industry layers rotated in different directions",
             summary: "Representative baskets diverged, so the evidence supports a structural reading rather than one dominant event.",
+            mechanism: "Cause unverified: constituent moves and basket weights explain the layer dispersion mechanically, but no direct evidence ties the session to one catalyst.",
           },
         },
         drivers: [
@@ -415,7 +419,7 @@ export function fixtureReport(input = fixtureInput()) {
           {
             title: "Defensive sectors did not rise with the leaders",
             summary: "Utilities lagged, showing that strength was concentrated rather than a broad expansion in risk appetite.",
-            mechanism: "Sector dispersion points to rotation and prevents the leading industries from representing the whole market.",
+            mechanism: "Cause unverified: constituent and sector-basket dispersion confirms a drag on breadth but does not establish an external catalyst.",
           },
           {
             title: "Business activity supported materials",
@@ -425,7 +429,7 @@ export function fixtureReport(input = fixtureInput()) {
           {
             title: "Technology weakness limited the broader explanation",
             summary: "Technology declined, showing that the market did not improve uniformly and defining the limits of the cyclical explanation.",
-            mechanism: "Opposing moves in technology and materials reflect reallocation across sectors rather than a uniform rally.",
+            mechanism: "Cause unverified: opposing technology and materials baskets mechanically explain index dispersion but do not establish an external catalyst.",
           },
         ],
         aiChainUpdates: [
@@ -442,7 +446,8 @@ export function fixtureReport(input = fixtureInput()) {
         queries: [
           "A股 收盘 复盘",
           "A股 原材料 供应 原因",
-          "A股 光互连 订单 公告",
+          "A股 AI 光互连 订单 公告",
+          "A股 AI 机器人 原因 业绩",
         ],
         sourcesReviewed: 5,
         outcome: "sufficient",
@@ -451,7 +456,8 @@ export function fixtureReport(input = fixtureInput()) {
         queries: [
           "US stocks close market wrap",
           "US stocks materials business activity reason",
-          "US stocks artificial intelligence company filing",
+          "US stocks artificial intelligence chips filing reason",
+          "US stocks artificial intelligence cloud earnings catalyst",
         ],
         sourcesReviewed: 4,
         outcome: "sufficient",

@@ -25,7 +25,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
-const CONTRACT_VERSION = "codex-market-research-v10";
+const CONTRACT_VERSION = "codex-market-research-v11";
 const MARKETS = ["CN", "US"];
 const DRIVER_STATUSES = new Set(["explained", "partial", "structural"]);
 const DRIVER_BASES = new Set(["structural", "event", "macro"]);
@@ -90,6 +90,10 @@ const RAW_DATE_OR_TIMESTAMP =
   /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
+const UNVERIFIED_CAUSE =
+  /(?:原因|催化)(?:尚未|仍未|未能|无法|没有得到|未)(?:证实|确认|验证)|未找到.{0,24}(?:同日|直接|可验证).{0,24}(?:原因|催化|证据)|(?:cause|catalyst).{0,18}(?:unverified|not verified|not established)|no (?:verified|direct|same-session).{0,18}(?:cause|catalyst|evidence)/iu;
+const STRUCTURAL_TRANSMISSION =
+  /(?:权重|成分|篮子|指数|贡献|拖累|支撑|轮动|分化|配置|传导|weight|constituent|basket|index|contribut|drag|support|rotation|dispersion|allocation|transmission)/iu;
 
 function hostnameMatches(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -143,6 +147,14 @@ function readerText(value, label, maxLength, minLength = 2) {
     throw new Error(`${label} 包含未本地化的时间戳或日期`);
   }
   return text;
+}
+
+function assertStructuralCausalBoundary(value, label) {
+  if (!UNVERIFIED_CAUSE.test(value) || !STRUCTURAL_TRANSMISSION.test(value)) {
+    throw new Error(
+      `${label} 必须明确写明原因未证实，并且只能解释权重、成分或行业结构如何贡献涨跌`,
+    );
+  }
 }
 
 function stringArray(value, label, minItems, maxItems, maxLength = 80) {
@@ -942,6 +954,9 @@ function validateDriver(value, input, index) {
   const title = readerText(driver.title, `${label}.title`, 80, 5);
   const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
   const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 20);
+  if (driver.basis === "structural") {
+    assertStructuralCausalBoundary(mechanism, `${label}.mechanism`);
+  }
   const sectorSymbols = stringArray(
     driver.sectorSymbols,
     `${label}.sectorSymbols`,
@@ -1084,7 +1099,7 @@ function validateAiUpdate(value, input, index) {
   };
 }
 
-function validateViews(value, label) {
+function validateViews(value, label, { requireMechanism = false } = {}) {
   const views = requireObject(value, label);
   return Object.fromEntries(
     MARKETS.map((market) => {
@@ -1092,24 +1107,30 @@ function validateViews(value, label) {
       if (!DRIVER_STATUSES.has(view.driverStatus)) {
         throw new Error(`${label}.${market}.driverStatus 无效`);
       }
-      return [
-        market,
-        {
-          headline: readerText(
-            view.headline,
-            `${label}.${market}.headline`,
-            90,
-            5,
-          ),
-          summary: readerText(
-            view.summary,
-            `${label}.${market}.summary`,
-            360,
-            20,
-          ),
-          driverStatus: view.driverStatus,
-        },
-      ];
+      const result = {
+        headline: readerText(
+          view.headline,
+          `${label}.${market}.headline`,
+          90,
+          5,
+        ),
+        summary: readerText(
+          view.summary,
+          `${label}.${market}.summary`,
+          360,
+          20,
+        ),
+        driverStatus: view.driverStatus,
+      };
+      if (requireMechanism) {
+        result.mechanism = readerText(
+          view.mechanism,
+          `${label}.${market}.mechanism`,
+          460,
+          20,
+        );
+      }
+      return [market, result];
     }),
   );
 }
@@ -1122,7 +1143,7 @@ function validateResearchAudit(value) {
       const queries = stringArray(
         item.queries,
         `researchAudit.${market}.queries`,
-        3,
+        4,
         12,
         220,
       );
@@ -1145,7 +1166,13 @@ function validateResearchAudit(value) {
   );
 }
 
-function validateTranslation(value, drivers, aiUpdates, input) {
+function validateTranslation(
+  value,
+  drivers,
+  aiUpdates,
+  validatedAiChainViews,
+  input,
+) {
   const translations = requireObject(value, "translations");
   const en = requireObject(translations.en, "translations.en");
   const marketViews = requireObject(
@@ -1173,7 +1200,7 @@ function validateTranslation(value, drivers, aiUpdates, input) {
     aiChainViews: {},
     drivers: translatedDrivers.map((value, index) => {
       const item = requireObject(value, `translations.en.drivers[${index}]`);
-      return {
+      const translatedDriver = {
         title: readerText(item.title, `translations.en.drivers[${index}].title`, 140, 5),
         summary: readerText(item.summary, `translations.en.drivers[${index}].summary`, 500, 20),
         mechanism: readerText(
@@ -1183,6 +1210,13 @@ function validateTranslation(value, drivers, aiUpdates, input) {
           20,
         ),
       };
+      if (drivers[index].basis === "structural") {
+        assertStructuralCausalBoundary(
+          translatedDriver.mechanism,
+          `translations.en.drivers[${index}].mechanism`,
+        );
+      }
+      return translatedDriver;
     }),
     aiChainUpdates: translatedAiUpdates.map((value, index) => {
       const item = requireObject(value, `translations.en.aiChainUpdates[${index}]`);
@@ -1234,7 +1268,19 @@ function validateTranslation(value, drivers, aiUpdates, input) {
         600,
         20,
       ),
+      mechanism: readerText(
+        aiView.mechanism,
+        `translations.en.aiChainViews.${market}.mechanism`,
+        700,
+        20,
+      ),
     };
+    if (validatedAiChainViews[market].driverStatus === "structural") {
+      assertStructuralCausalBoundary(
+        result.aiChainViews[market].mechanism,
+        `translations.en.aiChainViews.${market}.mechanism`,
+      );
+    }
 
     const marketDriverEvidence = drivers
       .filter((item) => item.market === market)
@@ -1257,7 +1303,7 @@ function validateTranslation(value, drivers, aiUpdates, input) {
         market,
         marketAiEvidence,
       )}`,
-      `${result.aiChainViews[market].headline} ${result.aiChainViews[market].summary}`,
+      `${result.aiChainViews[market].headline} ${result.aiChainViews[market].summary} ${result.aiChainViews[market].mechanism}`,
       `translations.en.aiChainViews.${market}`,
     );
   }
@@ -1323,7 +1369,9 @@ export function validateReport(value, input) {
   const headline = readerText(report.headline, "headline", 100, 8);
   const summary = readerText(report.summary, "summary", 420, 30);
   const marketViews = validateViews(report.marketViews, "marketViews");
-  const aiChainViews = validateViews(report.aiChainViews, "aiChainViews");
+  const aiChainViews = validateViews(report.aiChainViews, "aiChainViews", {
+    requireMechanism: true,
+  });
   if (!Array.isArray(report.drivers)) throw new Error("drivers 必须是数组");
   const drivers = report.drivers.map((item, index) =>
     validateDriver(item, input, index),
@@ -1349,12 +1397,19 @@ export function validateReport(value, input) {
     if (rows.length > 0 && aiChainViews[market].driverStatus === "structural") {
       throw new Error(`${market} 有 AI 事件证据时不得标为纯结构性解释`);
     }
+    if (aiChainViews[market].driverStatus === "structural") {
+      assertStructuralCausalBoundary(
+        aiChainViews[market].mechanism,
+        `aiChainViews.${market}.mechanism`,
+      );
+    }
   }
   const researchAudit = validateResearchAudit(report.researchAudit);
   const translations = validateTranslation(
     report.translations,
     drivers,
     aiChainUpdates,
+    aiChainViews,
     input,
   );
   for (const market of MARKETS) {
@@ -1379,7 +1434,7 @@ export function validateReport(value, input) {
         market,
         marketAiEvidence,
       )}`,
-      `${aiChainViews[market].headline} ${aiChainViews[market].summary}`,
+      `${aiChainViews[market].headline} ${aiChainViews[market].summary} ${aiChainViews[market].mechanism}`,
       `aiChainViews.${market}`,
     );
   }

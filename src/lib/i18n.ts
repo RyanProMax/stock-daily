@@ -140,7 +140,12 @@ export const copy = {
     marketAttribution: "盘面归因",
     aiChainNews: "AI Alpha 归因",
     driverEvent: "发生了什么",
-    driverMechanism: "如何影响盘面",
+    driverMechanism: "为什么",
+    causeExplained: "原因已验证",
+    causePartial: "部分解释",
+    causeUnverified: "原因未证实",
+    causeFallback:
+      "原因未证实：当前报告只确认了涨跌结构，未找到能够解释当天走势的直接证据。",
     driverSectors: "对应行业",
     driverEvidence: "核验来源",
     aiChainImplication: "产业链影响",
@@ -278,7 +283,12 @@ export const copy = {
     marketAttribution: "Market Attribution",
     aiChainNews: "AI Alpha Attribution",
     driverEvent: "What happened",
-    driverMechanism: "Market transmission",
+    driverMechanism: "Why it moved",
+    causeExplained: "Cause verified",
+    causePartial: "Partial explanation",
+    causeUnverified: "Cause unverified",
+    causeFallback:
+      "Cause unverified: this report confirms the price structure but found no direct evidence explaining the session's move.",
     driverSectors: "Affected sectors",
     driverEvidence: "Verified sources",
     aiChainImplication: "Supply-chain impact",
@@ -403,6 +413,8 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
                   ...view,
                   headline: translatedView?.headline ?? view.headline,
                   summary: translatedView?.summary ?? view.summary,
+                  mechanism:
+                    translatedView?.mechanism ?? view.mechanism,
                 }
               : view,
           ];

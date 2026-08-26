@@ -6,6 +6,7 @@ import type {
   AiChainUpdate,
   AiChainView,
   DriverEvidence,
+  DriverStatus,
   Language,
   MarketDriver,
   MarketDirection,
@@ -51,6 +52,12 @@ interface Props {
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
+    happened: string;
+    mechanism: string;
+    causeExplained: string;
+    causePartial: string;
+    causeUnverified: string;
+    causeFallback: string;
   };
 }
 
@@ -132,8 +139,16 @@ interface SnapshotEvidenceItem {
   tag: string;
   title: string;
   summary: string;
+  mechanism: string;
+  status: DriverStatus;
   highRelevance: boolean;
   evidence: DriverEvidence[];
+}
+
+function causeStatusLabel(status: DriverStatus, labels: Props["labels"]) {
+  if (status === "explained") return labels.causeExplained;
+  if (status === "partial") return labels.causePartial;
+  return labels.causeUnverified;
 }
 
 function sourceName(evidence: DriverEvidence) {
@@ -189,45 +204,61 @@ function SnapshotEvidenceList({
 
   return (
     <ul className="snapshot-evidence-list">
-      {evidenceItems.map(({ evidence, tag, title, summary, highRelevance }) => (
-        <li
-          className={highRelevance ? "snapshot-evidence-high" : undefined}
-          key={`${title}:${evidence.map((item) => item.source).join(":")}`}
-        >
-          <article className="snapshot-evidence-row">
-            <p>
-              <strong>{title}</strong>
-              <span>：{summary}</span>
-            </p>
-            <div className="snapshot-evidence-meta">
-              <span className="snapshot-evidence-tag">{tag}</span>
-              {[
-                ...new Map(
-                  evidence.map((item) => [item.source, item]),
-                ).values(),
-              ].map((item) => (
-                <a
-                  className="snapshot-evidence-source"
-                  href={item.source}
-                  key={item.source}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={sourceTitle(item)}
+      {evidenceItems.map(
+        ({ evidence, tag, title, summary, mechanism, status, highRelevance }) => (
+          <li
+            className={highRelevance ? "snapshot-evidence-high" : undefined}
+            key={`${title}:${evidence.map((item) => item.source).join(":")}`}
+          >
+            <article className="snapshot-evidence-row">
+              <header className="snapshot-evidence-header">
+                <span className="snapshot-evidence-tag">{tag}</span>
+                <strong>{title}</strong>
+                <span
+                  className={`snapshot-cause-status snapshot-cause-status-${status}`}
                 >
-                  <strong>{sourceName(item)}</strong>
-                  <time dateTime={item.publishedAt}>
-                    {evidenceTime(item.publishedAt, language, market)}
-                  </time>
-                  {item.platform === "x" && item.authority && (
-                    <small>{authorityLabels[item.authority]}</small>
-                  )}
-                  <ExternalLink aria-hidden="true" />
-                </a>
-              ))}
-            </div>
-          </article>
-        </li>
-      ))}
+                  {causeStatusLabel(status, labels)}
+                </span>
+              </header>
+              <div className="snapshot-causal-grid">
+                <section>
+                  <strong>{labels.happened}</strong>
+                  <p>{summary}</p>
+                </section>
+                <section>
+                  <strong>{labels.mechanism}</strong>
+                  <p>{mechanism}</p>
+                </section>
+              </div>
+              <div className="snapshot-evidence-meta">
+                {[
+                  ...new Map(
+                    evidence.map((item) => [item.source, item]),
+                  ).values(),
+                ].map((item) => (
+                  <a
+                    className="snapshot-evidence-source"
+                    href={item.source}
+                    key={item.source}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={sourceTitle(item)}
+                  >
+                    <strong>{sourceName(item)}</strong>
+                    <time dateTime={item.publishedAt}>
+                      {evidenceTime(item.publishedAt, language, market)}
+                    </time>
+                    {item.platform === "x" && item.authority && (
+                      <small>{authorityLabels[item.authority]}</small>
+                    )}
+                    <ExternalLink aria-hidden="true" />
+                  </a>
+                ))}
+              </div>
+            </article>
+          </li>
+        ),
+      )}
     </ul>
   );
 }
@@ -300,21 +331,29 @@ export default function MarketSnapshot({
   const aiChain = aiChainPerformance?.filter(
     (metric) => metric.market === market,
   );
-  const marketEvidence = drivers.filter((driver) => driver.role === "primary").map((driver) => ({
-    evidence: driver.evidence,
-    tag: language === "zh" ? "大盘" : "Market",
-    title: driver.title,
-    summary: driver.summary,
-    highRelevance: true,
-  }));
-  const sectorEvidence = drivers.filter((driver) => driver.role === "secondary").map((driver) => ({
-    evidence: driver.evidence,
-    tag: language === "zh" ? "行业" : "Sector",
-    title: driver.title,
-    summary: driver.summary,
-    highRelevance: false,
-  }));
-  const aiEvidence = aiUpdates.map((update) => ({
+  const marketEvidence: SnapshotEvidenceItem[] = drivers
+    .filter((driver) => driver.role === "primary")
+    .map((driver) => ({
+      evidence: driver.evidence,
+      tag: language === "zh" ? "大盘" : "Market",
+      title: driver.title,
+      summary: driver.summary,
+      mechanism: driver.mechanism,
+      status: driver.basis === "structural" ? "structural" : "explained",
+      highRelevance: true,
+    }));
+  const sectorEvidence: SnapshotEvidenceItem[] = drivers
+    .filter((driver) => driver.role === "secondary")
+    .map((driver) => ({
+      evidence: driver.evidence,
+      tag: language === "zh" ? "行业" : "Sector",
+      title: driver.title,
+      summary: driver.summary,
+      mechanism: driver.mechanism,
+      status: driver.basis === "structural" ? "structural" : "explained",
+      highRelevance: false,
+    }));
+  const aiEvidence: SnapshotEvidenceItem[] = aiUpdates.map((update) => ({
     evidence: update.evidence,
     tag:
       aiChain?.find((metric) => metric.layer === update.layer)?.[
@@ -322,6 +361,8 @@ export default function MarketSnapshot({
       ] ?? (language === "zh" ? "AI" : "AI"),
     title: update.title,
     summary: update.summary,
+    mechanism: update.implication,
+    status: "explained" as const,
     highRelevance: update.evidence.some((evidence) => evidence.platform !== "x"),
   }));
 
@@ -433,8 +474,24 @@ export default function MarketSnapshot({
           </div>
           {aiUpdates.length === 0 && aiChainView && (
             <article className="snapshot-structural-view">
-              <strong>{aiChainView.headline}</strong>
-              <p>{aiChainView.summary}</p>
+              <header>
+                <strong>{aiChainView.headline}</strong>
+                <span
+                  className={`snapshot-cause-status snapshot-cause-status-${aiChainView.driverStatus}`}
+                >
+                  {causeStatusLabel(aiChainView.driverStatus, labels)}
+                </span>
+              </header>
+              <div className="snapshot-causal-grid">
+                <section>
+                  <strong>{labels.happened}</strong>
+                  <p>{aiChainView.summary}</p>
+                </section>
+                <section>
+                  <strong>{labels.mechanism}</strong>
+                  <p>{aiChainView.mechanism ?? labels.causeFallback}</p>
+                </section>
+              </div>
             </article>
           )}
           <SnapshotEvidenceList

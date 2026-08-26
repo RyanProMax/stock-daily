@@ -48,11 +48,11 @@ async function main() {
   await auditReportSources(report);
   const marketAsOf = marketAsOfFromInput(input);
   if (
-    input.contractVersion !== "codex-market-research-v10" ||
+    input.contractVersion !== "codex-market-research-v11" ||
     !marketAsOf.CN ||
     !marketAsOf.US
   ) {
-    throw new Error("替换脚本只接受已完整校验的 V10 日报");
+    throw new Error("替换脚本只接受已完整校验的 V11 日报");
   }
 
   const generatedAt = new Date().toISOString();

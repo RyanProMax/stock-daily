@@ -95,6 +95,7 @@ function props(aiUpdates = []) {
     aiChainView: {
       headline: "人工智能产业链呈现结构性轮动",
       summary: "八个环节涨跌分化，当前没有足以解释整组行情的直接事件证据。",
+      mechanism: "原因未证实：当前只能确认代表成分股和篮子权重造成环节分化。",
       driverStatus: "structural",
       leaderLayers: ["chips"],
       laggardLayers: ["memory"],
@@ -149,6 +150,12 @@ function props(aiUpdates = []) {
       sourceOfficial: "官方",
       sourceSpecialist: "专业研究",
       sourceExpert: "行业专家",
+      happened: "发生了什么",
+      mechanism: "为什么",
+      causeExplained: "原因已验证",
+      causePartial: "部分解释",
+      causeUnverified: "原因未证实",
+      causeFallback: "原因未证实：当前报告只确认涨跌结构，未找到直接证据。",
     },
   };
 }
@@ -170,6 +177,10 @@ test("market snapshot renders unique compact evidence rows for market and sector
     document.querySelector(".snapshot-structural-view").textContent,
     /当前没有足以解释整组行情的直接事件证据/,
   );
+  assert.match(
+    document.querySelector(".snapshot-structural-view").textContent,
+    /当前只能确认代表成分股和篮子权重造成环节分化/,
+  );
   assert.equal(
     document.querySelectorAll(
       ".snapshot-sector-complete > .snapshot-heading > span, .snapshot-group-ai > .snapshot-heading > span",
@@ -186,13 +197,17 @@ test("market snapshot renders unique compact evidence rows for market and sector
   assert.match(marketItem.textContent, /大盘/);
   assert.match(marketItem.textContent, /原材料供给变化支撑市场/);
   assert.match(marketItem.textContent, /供给变化支撑原材料并影响大盘/);
+  assert.match(marketItem.textContent, /供给收紧抬升原材料价格，并传导到行业表现/);
+  assert.match(marketItem.textContent, /发生了什么/);
+  assert.match(marketItem.textContent, /为什么/);
+  assert.match(marketItem.textContent, /原因已验证/);
   assert.match(marketItem.textContent, /市场收评/);
   assert.match(marketItem.textContent, /X · @example_research/);
   assert.match(marketItem.textContent, /专业研究/);
-  assert.ok(marketItem.querySelector(".snapshot-evidence-row > p"));
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-grid > section").length, 2);
   assert.ok(
     marketItem.querySelector(
-      ".snapshot-evidence-row > .snapshot-evidence-meta > .snapshot-evidence-tag",
+      ".snapshot-evidence-row > .snapshot-evidence-header > .snapshot-evidence-tag",
     ),
   );
   assert.equal(
@@ -245,6 +260,8 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
   assert.match(item.textContent, /AI层4/);
   assert.match(item.textContent, /光互连订单与技术路线得到验证/);
   assert.match(item.textContent, /企业订单和行业研究共同指向光互连需求/);
+  assert.match(item.textContent, /带宽需求支撑光互连链条/);
+  assert.match(item.textContent, /原因已验证/);
   assert.match(item.textContent, /市场收评/);
   assert.equal(
     item.querySelectorAll(
@@ -254,4 +271,19 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
   );
   assert.ok(item.querySelector('a[href="https://example.com/ai-evidence"]'));
   assert.equal(document.querySelectorAll(".snapshot-structural-view").length, 0);
+});
+
+test("legacy AI views disclose an unverified cause instead of repeating price facts", async () => {
+  const { default: MarketSnapshot } = await vite.ssrLoadModule(
+    "/src/components/MarketSnapshot.tsx",
+  );
+  const legacyProps = props();
+  delete legacyProps.aiChainView.mechanism;
+  const html = renderToStaticMarkup(
+    React.createElement(MarketSnapshot, legacyProps),
+  );
+  const document = new JSDOM(html).window.document;
+  const view = document.querySelector(".snapshot-structural-view");
+  assert.match(view.textContent, /原因未证实/);
+  assert.match(view.textContent, /未找到直接证据/);
 });

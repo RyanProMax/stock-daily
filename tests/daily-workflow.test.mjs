@@ -103,15 +103,15 @@ test("daily task uses market results as search leads instead of a news pool", as
     ).then(JSON.parse),
   ]);
   assert.match(prompt, /实时网页搜索/);
-  assert.match(prompt, /至少执行三类独立的窄搜索/);
-  assert.match(prompt, /结构性轮动作为主因/);
+  assert.match(prompt, /至少执行四类独立的窄搜索/);
+  assert.match(prompt, /原因未证实/);
   assert.doesNotMatch(prompt, /不要联网/);
   assert.match(task, /主动(?:研究|检索)/);
   assert.doesNotMatch(collector, /news-pipeline|x-intelligence/);
   assert.match(collector, /marketBriefs/);
   assert.equal(
     schema.properties.contractVersion.const,
-    "codex-market-research-v10",
+    "codex-market-research-v11",
   );
   assert.ok(schema.required.includes("researchAudit"));
 });

@@ -301,6 +301,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const isAttribution = [
     "market-attribution-v9",
     "codex-market-research-v10",
+    "codex-market-research-v11",
   ].includes(report.contractVersion ?? "");
   const marketDrivers = (report.drivers ?? []).filter(
     (driver) => driver.market === data.market,
@@ -484,6 +485,12 @@ function DailyPage({ data }: { data: DailyPageData }) {
             sourceOfficial: t.xSourceOfficial,
             sourceSpecialist: t.xSourceSpecialist,
             sourceExpert: t.xSourceExpert,
+            happened: t.driverEvent,
+            mechanism: t.driverMechanism,
+            causeExplained: t.causeExplained,
+            causePartial: t.causePartial,
+            causeUnverified: t.causeUnverified,
+            causeFallback: t.causeFallback,
           }}
         />
       </section>

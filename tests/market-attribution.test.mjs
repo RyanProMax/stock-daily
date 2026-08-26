@@ -15,9 +15,9 @@ import {
 import { metricAtCutoff } from "../scripts/sector-heat.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
 
-test("V10 accepts deterministic market input without a preselected news pool", () => {
+test("V11 accepts deterministic market input without a preselected news pool", () => {
   const input = validateInput(fixtureInput());
-  assert.equal(input.contractVersion, "codex-market-research-v10");
+  assert.equal(input.contractVersion, "codex-market-research-v11");
   assert.equal(Object.hasOwn(input, "news"), false);
   assert.equal(input.markets.length, 10);
   assert.equal(input.sectorPerformance.length, 22);
@@ -98,7 +98,7 @@ test("mixed driver direction requires both rising and falling sectors", () => {
   );
 });
 
-test("V10 accepts evidence-backed event drivers plus structural fallback", () => {
+test("V11 accepts evidence-backed event drivers plus explicit causal boundaries", () => {
   const input = validateInput(fixtureInput());
   const report = validateReport(fixtureReport(input), input);
   assert.equal(report.drivers.length, 4);
@@ -108,14 +108,14 @@ test("V10 accepts evidence-backed event drivers plus structural fallback", () =>
     assert.ok(drivers.some((driver) => driver.basis === "structural"));
   }
   const stored = JSON.parse(buildReportContent(input, report));
-  assert.equal(stored.contractVersion, "codex-market-research-v10");
+  assert.equal(stored.contractVersion, "codex-market-research-v11");
   assert.equal(Object.hasOwn(stored, "researchAudit"), false);
   assert.equal(stored.stories.length, 0);
   assert.equal(stored.drivers[0].basis, "event");
   assert.equal(stored.drivers[0].evidence[0].kind, "market_data");
 });
 
-test("V10 requires one primary and one structural driver per market", () => {
+test("V11 requires one primary and one structural driver per market", () => {
   const input = validateInput(fixtureInput());
   const missingStructural = fixtureReport(input);
   missingStructural.drivers = missingStructural.drivers.filter(
@@ -142,6 +142,41 @@ test("structural drivers cannot smuggle in external stories", () => {
   assert.throws(
     () => validateReport(report, input),
     /structural 证据组合不充分/,
+  );
+});
+
+test("structural attribution must disclose that the cause is unverified", () => {
+  const input = validateInput(fixtureInput());
+  const circularDriver = fixtureReport(input);
+  circularDriver.drivers[1].mechanism =
+    "公用事业表现落后说明公用事业较弱，因此当天市场呈现行业分化。";
+  assert.throws(
+    () => validateReport(circularDriver, input),
+    /必须明确写明原因未证实/,
+  );
+
+  const circularAiView = fixtureReport(input);
+  circularAiView.aiChainViews.US.mechanism =
+    "上涨环节上涨而下跌环节下跌，因此人工智能产业链呈现分化。";
+  assert.throws(
+    () => validateReport(circularAiView, input),
+    /必须明确写明原因未证实/,
+  );
+
+  const missingEnglishBoundary = fixtureReport(input);
+  missingEnglishBoundary.translations.en.aiChainViews.US.mechanism =
+    "Rising baskets rose while lagging baskets fell, producing dispersion.";
+  assert.throws(
+    () => validateReport(missingEnglishBoundary, input),
+    /必须明确写明原因未证实/,
+  );
+
+  const missingEnglishDriverBoundary = fixtureReport(input);
+  missingEnglishDriverBoundary.translations.en.drivers[1].mechanism =
+    "Utilities lagged and therefore breadth was weaker than the leading sector.";
+  assert.throws(
+    () => validateReport(missingEnglishDriverBoundary, input),
+    /必须明确写明原因未证实/,
   );
 });
 
@@ -490,7 +525,7 @@ test("input rejects legacy news fields and recomputed brief mismatches", () => {
   legacy.news = [];
   assert.throws(
     () => validateInput(legacy),
-    /daily-input 不符合 codex-market-research-v10/,
+    /daily-input 不符合 codex-market-research-v11/,
   );
 
   const altered = fixtureInput();

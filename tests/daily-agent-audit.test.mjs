@@ -6,10 +6,12 @@ import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
 const queries = [
   "A股 收盘 复盘",
   "A股 原材料 供应 原因",
-  "A股 光互连 订单 公告",
+  "A股 AI 光互连 订单 公告",
+  "A股 AI 机器人 原因 业绩",
   "US stocks close market wrap",
   "US stocks materials business activity reason",
-  "US stocks artificial intelligence company filing",
+  "US stocks artificial intelligence chips filing reason",
+  "US stocks artificial intelligence cloud earnings catalyst",
 ];
 
 function eventsFor(searchQueries = queries) {
@@ -28,8 +30,8 @@ test("Codex run audit proves native search covered both markets", () => {
   const report = fixtureReport(fixtureInput());
   const result = auditCodexRun(eventsFor(), report);
   assert.equal(result.status, "audited");
-  assert.equal(result.queryCount, 6);
-  assert.deepEqual(result.coverage, { CN: 3, US: 3 });
+  assert.equal(result.queryCount, 8);
+  assert.deepEqual(result.coverage, { CN: 4, US: 4 });
 });
 
 test("declared source review count cannot be smaller than cited sources", () => {
@@ -72,11 +74,11 @@ test("Codex run audit rejects malformed JSONL records", () => {
   );
 });
 
-test("Codex run audit requires three actual searches for each market", () => {
+test("Codex run audit requires four actual searches for each market", () => {
   const report = fixtureReport(fixtureInput());
   assert.throws(
-    () => auditCodexRun(eventsFor(queries.slice(0, 5)), report),
-    /足够的原生网页搜索|至少三条 CN 与 US 查询/,
+    () => auditCodexRun(eventsFor(queries.slice(0, 7)), report),
+    /足够的原生网页搜索|至少四条 CN 与 US 查询/,
   );
 });
 
@@ -93,17 +95,19 @@ test("Codex run audit does not count ambiguous CN queries as US research", () =>
   const ambiguousQueries = [
     "A股 Nvidia 收盘",
     "A股 Micron 行业",
-    "A股 Broadcom 人工智能",
+    "A股 AI Broadcom 原因",
+    "A股 AI Seagate 公告",
     "A股 Nvidia 复盘",
     "A股 Micron 原因",
-    "A股 Seagate 公告",
+    "A股 AI Palantir 原因",
+    "A股 AI CoreWeave 公告",
   ];
   const report = fixtureReport(fixtureInput());
-  report.researchAudit.CN.queries = ambiguousQueries.slice(0, 3);
-  report.researchAudit.US.queries = ambiguousQueries.slice(3);
+  report.researchAudit.CN.queries = ambiguousQueries.slice(0, 4);
+  report.researchAudit.US.queries = ambiguousQueries.slice(4);
   assert.throws(
     () => auditCodexRun(eventsFor(ambiguousQueries), report),
-    /至少三条 CN 与 US 查询/,
+    /至少四条 CN 与 US 查询/,
   );
 });
 
@@ -122,5 +126,23 @@ test("declared research permits unclassified source follow-ups after market cove
   report.researchAudit.US.queries.push(sourceFollowUp);
   const result = auditCodexRun(eventsFor([...queries, sourceFollowUp]), report);
   assert.equal(result.status, "audited");
-  assert.equal(result.coverage.US, 3);
+  assert.equal(result.coverage.US, 4);
+});
+
+test("Codex run audit requires active AI cause searches for both markets", () => {
+  const report = fixtureReport(fixtureInput());
+  const passiveQueries = queries.map((query) =>
+    query.includes("AI") || query.includes("artificial intelligence")
+      ? query.replace(
+          /原因|催化|公告|财报|订单|供需|政策|业绩|why|reason|catalyst|filing|earnings|order|demand|supply|policy/giu,
+          "走势",
+        )
+      : query,
+  );
+  report.researchAudit.CN.queries = passiveQueries.slice(0, 4);
+  report.researchAudit.US.queries = passiveQueries.slice(4);
+  assert.throws(
+    () => auditCodexRun(eventsFor(passiveQueries), report),
+    /AI 对象与原因线索的主动归因查询/,
+  );
 });

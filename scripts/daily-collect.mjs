@@ -187,7 +187,7 @@ export async function collectDailyInput({
   });
   return {
     schemaVersion: 10,
-    contractVersion: "codex-market-research-v10",
+    contractVersion: "codex-market-research-v11",
     runId: randomUUID(),
     reportDate,
     updateKind,
