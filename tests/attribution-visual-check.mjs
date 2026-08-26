@@ -30,9 +30,9 @@ async function inspect(page, market, language, width) {
   });
   await page.goto(
     `${baseUrl}/?market=${market.toLowerCase()}&lang=${language}&visual=${runToken}`,
-    { waitUntil: "networkidle" },
+    { waitUntil: "domcontentloaded", timeout: 60_000 },
   );
-  await page.waitForSelector(".market-snapshot");
+  await page.waitForSelector(".market-snapshot", { timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
   await page.addStyleTag({
     content:
@@ -148,10 +148,14 @@ async function inspect(page, market, language, width) {
   return { layout, consoleErrors, httpErrors };
 }
 
+const browserArgs = ["--disable-dev-shm-usage"];
+if (/localhost|127\.0\.0\.1|localtest\.me/u.test(baseUrl)) {
+  browserArgs.push("--no-proxy-server");
+}
 const browser = await chromium.launch({
   headless: true,
   executablePath: chromePath,
-  args: ["--disable-dev-shm-usage", "--no-proxy-server"],
+  args: browserArgs,
 });
 const result = {};
 for (const language of ["zh", "en"]) {
