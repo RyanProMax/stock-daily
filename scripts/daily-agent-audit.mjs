@@ -7,7 +7,7 @@ const MARKET_QUERY_PATTERNS = {
   US: /(?:美股|美国股市|华尔街|标普|纳斯达克|道琼斯|Wall Street|U\.?S\.? stocks?|S&P|Nasdaq|Dow Jones|NYSE)/iu,
 };
 const AI_QUERY_PATTERN =
-  /(?:AI|人工智能|智能产业链|算力|芯片|存储|服务器|光互连|数据中心|云计算|应用软件|机器人|artificial intelligence|semiconductor|memory|server|interconnect|data cent(?:er|re)|cloud|software|robot)/iu;
+  /(?:AI|人工智能|智能产业链|算力|芯片|存储|服务器|CPO|光互连|数据中心|云计算|NeoCloud|应用软件|机器人|artificial intelligence|semiconductor|memory|server|interconnect|data cent(?:er|re)|cloud|software|robot)/iu;
 const CAUSE_QUERY_PATTERN =
   /(?:原因|催化|公告|财报|订单|供需|政策|业绩|why|reason|catalyst|filing|earnings|order|demand|supply|policy)/iu;
 

@@ -446,7 +446,7 @@ export function fixtureReport(input = fixtureInput()) {
         queries: [
           "A股 收盘 复盘",
           "A股 原材料 供应 原因",
-          "A股 AI 光互连 订单 公告",
+          "A股 CPO 光互连 订单 公告",
           "A股 AI 机器人 原因 业绩",
         ],
         sourcesReviewed: 5,
