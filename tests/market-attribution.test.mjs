@@ -180,6 +180,16 @@ test("structural attribution must disclose that the cause is unverified", () => 
   );
 });
 
+test("structural attribution accepts clear non-boilerplate causal boundaries", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  report.drivers[1].mechanism =
+    "公用事业篮子相对落后，只能确认其拖累市场广度，但不能单独证明资金为何轮动。";
+  report.translations.en.drivers[1].mechanism =
+    "The utilities basket lagged and dragged on breadth, but this does not by itself prove why capital rotated.";
+  assert.equal(validateReport(report, input).drivers.length, 4);
+});
+
 test("event and macro drivers require non-expert external evidence", () => {
   const input = validateInput(fixtureInput());
   const missingExternal = fixtureReport(input);

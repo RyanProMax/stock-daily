@@ -91,7 +91,7 @@ const RAW_DATE_OR_TIMESTAMP =
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const UNVERIFIED_CAUSE =
-  /(?:原因|催化)(?:尚未|仍未|未能|无法|没有得到|未)(?:证实|确认|验证)|未找到.{0,24}(?:同日|直接|可验证).{0,24}(?:原因|催化|证据)|(?:cause|catalyst).{0,18}(?:unverified|not verified|not established)|no (?:verified|direct|same-session).{0,18}(?:cause|catalyst|evidence)/iu;
+  /(?:原因|催化)(?:尚未|仍未|未能|无法|没有得到|未)(?:证实|确认|验证)|未找到.{0,24}(?:同日|直接|可验证).{0,24}(?:原因|催化|证据)|(?:不能|无法|没有|并未|不)(?:单独)?(?:证明|证实|确认|验证).{0,32}(?:为何|原因|催化)|(?:cause|catalyst).{0,18}(?:unverified|not verified|not established)|no (?:verified|direct|same-session).{0,18}(?:cause|catalyst|evidence)|(?:does not|cannot|did not).{0,24}(?:prove|establish|verify|confirm).{0,32}(?:why|cause|catalyst)/iu;
 const STRUCTURAL_TRANSMISSION =
   /(?:权重|成分|篮子|指数|贡献|拖累|支撑|轮动|分化|配置|传导|weight|constituent|basket|index|contribut|drag|support|rotation|dispersion|allocation|transmission)/iu;
 
