@@ -22,7 +22,8 @@ import {
 } from "./server/reports";
 
 type Bindings = {
-  DB: D1Database;
+  DB?: D1Database;
+  REMOTE_DATA_ORIGIN?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -44,6 +45,61 @@ function canonicalUrl(requestUrl: string, pathname: string) {
 
 function resolveMarket(value: string | null): MarketRegion {
   return value?.toUpperCase() === "US" ? "US" : "CN";
+}
+
+function remoteDataOrigin(env: Bindings) {
+  const configured = env.REMOTE_DATA_ORIGIN?.trim();
+  if (!configured) return null;
+  const url = new URL(configured);
+  if (url.protocol !== "https:") {
+    throw new Error("REMOTE_DATA_ORIGIN must use HTTPS.");
+  }
+  return url.origin;
+}
+
+function database(env: Bindings) {
+  if (!env.DB) throw new Error("Production D1 binding is unavailable.");
+  return env.DB;
+}
+
+function remoteUrl(origin: string, requestUrl: string, pathname?: string) {
+  const request = new URL(requestUrl);
+  const target = new URL(pathname ?? request.pathname, origin);
+  target.search = request.search;
+  return target;
+}
+
+async function fetchRemotePageData<T>(
+  origin: string,
+  pathname: string,
+  requestUrl: string,
+): Promise<T> {
+  const response = await fetch(remoteUrl(origin, requestUrl, pathname), {
+    headers: { Accept: "application/json" },
+    redirect: "follow",
+  });
+  if (!response.ok) {
+    throw new Error(`${pathname} returned HTTP ${response.status}.`);
+  }
+  const payload = (await response.json()) as { data?: T };
+  if (!Object.prototype.hasOwnProperty.call(payload, "data")) {
+    throw new Error(`${pathname} returned an invalid payload.`);
+  }
+  return payload.data as T;
+}
+
+async function proxyRemoteApi(request: Request, origin: string) {
+  const response = await fetch(remoteUrl(origin, request.url), {
+    headers: { Accept: request.headers.get("Accept") ?? "application/json" },
+    redirect: "follow",
+  });
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "no-store");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 async function renderPage(data: PageData) {
@@ -135,9 +191,16 @@ async function buildWeeklyPageData(
   };
 }
 
-async function dailyPage(requestUrl: string, db: D1Database) {
+async function dailyPage(requestUrl: string, env: Bindings) {
   try {
-    const data = await buildDailyPageData(requestUrl, db);
+    const origin = remoteDataOrigin(env);
+    const data = origin
+      ? await fetchRemotePageData<DailyPageData>(
+          origin,
+          "/api/page/daily",
+          requestUrl,
+        )
+      : await buildDailyPageData(requestUrl, database(env));
     if (!data) {
       return new Response("No daily report is available.", { status: 503 });
     }
@@ -148,9 +211,16 @@ async function dailyPage(requestUrl: string, db: D1Database) {
   }
 }
 
-async function weeklyPage(requestUrl: string, db: D1Database) {
+async function weeklyPage(requestUrl: string, env: Bindings) {
   try {
-    const data = await buildWeeklyPageData(requestUrl, db);
+    const origin = remoteDataOrigin(env);
+    const data = origin
+      ? await fetchRemotePageData<WeeklyPageData>(
+          origin,
+          "/api/page/weekly",
+          requestUrl,
+        )
+      : await buildWeeklyPageData(requestUrl, database(env));
     return renderPage(data);
   } catch (error) {
     console.error("Weekly page data read failed", error);
@@ -158,19 +228,64 @@ async function weeklyPage(requestUrl: string, db: D1Database) {
   }
 }
 
+app.use("/api/*", async (c, next) => {
+  const origin = remoteDataOrigin(c.env);
+  if (!origin) return next();
+  if (c.req.method !== "GET") {
+    return c.json(
+      { error: { message: "Local API access is read-only.", status: 405 } },
+      405,
+    );
+  }
+  return proxyRemoteApi(c.req.raw, origin);
+});
+
+app.get("/api/page/daily", async (c) => {
+  try {
+    const data = await buildDailyPageData(c.req.url, database(c.env));
+    if (!data) {
+      return c.json(
+        { error: { message: "Daily report not found.", status: 404 } },
+        404,
+      );
+    }
+    c.header("Cache-Control", "no-store");
+    return c.json({ data });
+  } catch {
+    return c.json(
+      { error: { message: "Daily page data is unavailable.", status: 503 } },
+      503,
+    );
+  }
+});
+
+app.get("/api/page/weekly", async (c) => {
+  try {
+    const data = await buildWeeklyPageData(c.req.url, database(c.env));
+    c.header("Cache-Control", "no-store");
+    return c.json({ data });
+  } catch {
+    return c.json(
+      { error: { message: "Weekly page data is unavailable.", status: 503 } },
+      503,
+    );
+  }
+});
+
 app.get("/api/health", async (c) => {
   try {
+    const db = database(c.env);
     const [row, latestRun, latestWeekly] = await Promise.all([
-      c.env.DB.prepare(
+      db.prepare(
         "SELECT COUNT(*) AS reportCount FROM daily_reports",
       ).first<{ reportCount: number }>(),
-      c.env.DB.prepare(
+      db.prepare(
         `SELECT report_date AS reportDate, finished_at AS finishedAt, status
          FROM ingestion_runs
          ORDER BY finished_at DESC, started_at DESC
          LIMIT 1`,
       ).first(),
-      c.env.DB.prepare(
+      db.prepare(
         `SELECT week_end AS weekEnd, generated_at AS generatedAt
          FROM weekly_reports
          ORDER BY week_end DESC
@@ -203,7 +318,7 @@ app.get("/api/reports", async (c) => {
     ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
     : 30;
   try {
-    const data = await getDailyArchive(c.env.DB, limit);
+    const data = await getDailyArchive(database(c.env), limit);
     c.header("Cache-Control", "public, max-age=60, s-maxage=300");
     return c.json({ data, meta: { total: data.length, limit } });
   } catch {
@@ -223,7 +338,7 @@ app.get("/api/reports/:date", async (c) => {
     );
   }
   try {
-    const data = await getDailyReport(c.env.DB, date);
+    const data = await getDailyReport(database(c.env), date);
     if (!data) {
       return c.json(
         { error: { message: "Daily report not found.", status: 404 } },
@@ -248,7 +363,7 @@ app.get("/api/weekly/:weekEnd", async (c) => {
       400,
     );
   }
-  const data = await getWeeklyReport(c.env.DB, weekEnd);
+  const data = await getWeeklyReport(database(c.env), weekEnd);
   if (!data) {
     return c.json(
       { error: { message: "Weekly report not found.", status: 404 } },
@@ -259,9 +374,9 @@ app.get("/api/weekly/:weekEnd", async (c) => {
   return c.json({ data });
 });
 
-app.get("/", (c) => dailyPage(c.req.url, c.env.DB));
-app.get("/weekly", (c) => weeklyPage(c.req.url, c.env.DB));
-app.get("/weekly/", (c) => weeklyPage(c.req.url, c.env.DB));
+app.get("/", (c) => dailyPage(c.req.url, c.env));
+app.get("/weekly", (c) => weeklyPage(c.req.url, c.env));
+app.get("/weekly/", (c) => weeklyPage(c.req.url, c.env));
 
 app.notFound((c) =>
   c.json({ error: { message: "Not found.", status: 404 } }, 404),

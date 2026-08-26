@@ -17,7 +17,7 @@ through markets, and what future observation would confirm or invalidate the vie
 - Daily collection, ranking, analysis contract, validation, persistence and SSR.
 - Weekly event baselines and verified outcomes.
 - A compact thesis ledger derived from daily core signals.
-- Chinese and English rendering, legacy-report compatibility and local fallback.
+- Chinese and English rendering, legacy-report compatibility and production read-through during local development.
 - Production migration, current-report refresh and responsive verification.
 
 ## Non-goals

@@ -4,12 +4,25 @@
   "pages_build_output_dir": "./dist",
   "compatibility_date": "2026-07-25",
   "compatibility_flags": ["nodejs_compat"],
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "stock-daily-db",
-      "database_id": "4c748c0b-58c3-4525-ba47-5a436ba01e75",
-      "migrations_dir": "migrations"
+  "vars": {
+    "REMOTE_DATA_ORIGIN": "https://stock-daily-8k4.pages.dev"
+  },
+  "env": {
+    "production": {
+      "vars": {},
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "stock-daily-db",
+          "database_id": "4c748c0b-58c3-4525-ba47-5a436ba01e75",
+          "migrations_dir": "migrations"
+        }
+      ]
+    },
+    "preview": {
+      "vars": {
+        "REMOTE_DATA_ORIGIN": "https://stock-daily-8k4.pages.dev"
+      }
     }
-  ]
+  }
 }

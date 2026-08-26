@@ -24,10 +24,9 @@ function argumentValue(args, name, fallback) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const local = args.includes("--local");
   const remote = args.includes("--remote");
-  if (local === remote) throw new Error("必须且只能指定 --local 或 --remote");
-  if (remote && !args.includes("--confirm-delete-all-daily")) {
+  if (!remote) throw new Error("替换仅允许显式指定 --remote");
+  if (!args.includes("--confirm-delete-all-daily")) {
     throw new Error("远程替换必须显式传入 --confirm-delete-all-daily");
   }
 
@@ -36,7 +35,6 @@ async function main() {
   const eventsPath = resolve(
     argumentValue(args, "--events", "work/daily-agent-events.jsonl"),
   );
-  const persistTo = argumentValue(args, "--persist-to", "");
   const [inputValue, reportValue, eventsText] = await Promise.all([
     readFile(inputPath, "utf8").then(JSON.parse),
     readFile(reportPath, "utf8").then(JSON.parse),
@@ -108,13 +106,12 @@ ON CONFLICT(run_id) DO UPDATE SET
     "d1",
     "execute",
     "stock-daily-db",
-    local ? "--local" : "--remote",
+    "--remote",
     "--yes",
     "--json",
     "--command",
     sql,
   ];
-  if (local && persistTo) wranglerArgs.push("--persist-to", resolve(persistTo));
   const result = await execFileAsync(
     wranglerPath,
     wranglerArgs,
@@ -122,7 +119,7 @@ ON CONFLICT(run_id) DO UPDATE SET
   );
   console.log(JSON.stringify({
     status: "replaced",
-    target: local ? "local" : "remote",
+    target: "remote",
     reportDate: input.reportDate,
     edition: 1,
     driverCount: report.drivers.length,

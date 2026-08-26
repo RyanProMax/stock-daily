@@ -138,6 +138,109 @@ function outcomeReports() {
   ];
 }
 
+function dailyFixture() {
+  const markets = [
+    ["US", "S&P 500", "SPX", "7,500.00", "+0.50%", "up"],
+    ["US", "NASDAQ", "IXIC", "25,000.00", "+0.80%", "up"],
+    ["US", "DOW", "DJI", "52,000.00", "+0.20%", "up"],
+    ["US", "美国 10Y", "DGS10", "4.50%", "-3 bp", "down"],
+    ["CN", "上证指数", "SSE", "3,800.00", "+0.30%", "up"],
+    ["CN", "沪深 300", "CSI300", "4,600.00", "+0.40%", "up"],
+  ].map(([region, name, symbol, value, change, direction]) => ({
+    region,
+    name,
+    symbol,
+    value,
+    change,
+    direction,
+    note: "收盘",
+    source: `https://example.com/market/${symbol}`,
+  }));
+  const sectorHeat = [
+    ["CN", "932084", "信息技术", "Information Technology"],
+    ["CN", "932083", "金融", "Financials"],
+    ["CN", "932078", "原材料", "Materials"],
+    ["US", "XLK", "信息技术", "Information Technology"],
+    ["US", "XLF", "金融", "Financials"],
+    ["US", "XLE", "能源", "Energy"],
+  ].map(([market, symbol, name, nameEn], index) => ({
+    market,
+    symbol,
+    name,
+    nameEn,
+    score: 80 - index,
+    change: index === 5 ? "-0.50%" : "+0.50%",
+    direction: index === 5 ? "down" : "up",
+    asOf: "2026-07-26",
+    source: `https://example.com/sector/${symbol}`,
+  }));
+  const story = {
+    id: "verified-us-update",
+    regions: ["US"],
+    category: "公司",
+    importance: 5,
+    title: "公司上调收入指引",
+    summary: "公司上调收入和现金流指引。",
+    evidence: "公司公告确认最新指引。",
+    source: "https://example.com/company/update",
+    sourceLabel: "Company",
+    publishedAt: "2026-07-26T12:00:00.000Z",
+    ai: {
+      tone: "positive",
+      interpretation: "更高指引改善收入和现金流预期。",
+      sectors: ["信息技术"],
+      tickers: ["TEST"],
+    },
+  };
+  const overview = {
+    tone: "mixed",
+    interpretation: "中美市场上涨，但行业表现仍有分化。",
+    positive: ["信息技术"],
+    negative: ["能源"],
+  };
+  return {
+    reportDate: "2026-07-26",
+    edition: 1,
+    generatedAt: "2026-07-26T13:00:00.000Z",
+    dataCut: "CN 2026-07-26 · US 2026-07-25",
+    headline: "市场上涨但行业分化",
+    summary: "主要指数上涨，信息技术强于能源。",
+    overview,
+    marketViews: {
+      CN: { headline: "A股上涨", summary: "主要指数上涨。", overview },
+      US: { headline: "美股上涨", summary: "主要指数上涨。", overview },
+    },
+    markets,
+    sectorHeat,
+    stories: [story],
+    agentModel: "test-fixture",
+    isSample: false,
+    translations: {
+      en: {
+        headline: "Markets rose with sector divergence",
+        summary: "Major indexes rose as technology outpaced energy.",
+        overview: {
+          interpretation: "Markets advanced while sectors diverged.",
+          positive: ["Technology"],
+          negative: ["Energy"],
+        },
+        marketViews: {
+          CN: { headline: "China rose", summary: "Major indexes advanced." },
+          US: { headline: "U.S. rose", summary: "Major indexes advanced." },
+        },
+        stories: [
+          {
+            title: "Company raises revenue guidance",
+            summary: "The company raised revenue and cash-flow guidance.",
+            interpretation: "Higher guidance supports revenue expectations.",
+            sectors: ["Technology"],
+          },
+        ],
+      },
+    },
+  };
+}
+
 test("market close labels are relative to the selected report date", async () => {
   const { formatMarketAsOfLabel } = await vite.ssrLoadModule(
     "/src/lib/i18n.ts",
@@ -356,10 +459,7 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
       vite.ssrLoadModule("/src/App.tsx"),
       vite.ssrLoadModule("/src/server/reports.ts"),
     ]);
-  const reports = JSON.parse(
-    await readFile(new URL("../data/reports.json", import.meta.url), "utf8"),
-  );
-  const report = structuredClone(reports[0]);
+  const report = dailyFixture();
   const ledgerStory = report.stories.find((story) =>
     story.regions.includes("US"),
   );
@@ -596,19 +696,28 @@ test("daily SSR merges weekly events and analysis into the hotspot board", async
   );
 });
 
-test("local SSR and read APIs use D1 without bundled report fallbacks", async () => {
-  const [workerSource, reportSource] = await Promise.all([
+test("local SSR and read APIs use production read-through without local D1", async () => {
+  const [workerSource, reportSource, devConfig] = await Promise.all([
     readFile("src/worker.tsx", "utf8"),
     readFile("src/server/reports.ts", "utf8"),
+    readFile("wrangler.jsonc", "utf8"),
   ]);
   assert.match(
     workerSource,
-    /const data = await buildDailyPageData\(requestUrl, db\)/,
+    /REMOTE_DATA_ORIGIN/,
   );
-  assert.doesNotMatch(
+  assert.match(
     workerSource,
-    /fetchProductionDailyPageData|fetchProductionWeeklyPageData|app\.use\("\/api\/\*"/,
+    /fetchRemotePageData<DailyPageData>/,
   );
+  assert.match(workerSource, /app\.use\("\/api\/\*"/);
+  const wranglerConfig = JSON.parse(devConfig);
+  assert.equal(
+    wranglerConfig.vars.REMOTE_DATA_ORIGIN,
+    "https://stock-daily-8k4.pages.dev",
+  );
+  assert.equal(wranglerConfig.d1_databases, undefined);
+  assert.equal(wranglerConfig.env.production.d1_databases[0].binding, "DB");
   assert.doesNotMatch(workerSource, /getDailyReport\(undefined\)|bundled fallback/);
   assert.doesNotMatch(
     reportSource,

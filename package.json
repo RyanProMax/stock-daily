@@ -13,9 +13,6 @@
     "build": "npm run check && vite build && vite build --mode client",
     "preview": "npm run build && wrangler pages dev dist",
     "pages:dev": "npm run preview",
-    "data:compact": "node scripts/compact-reports.mjs",
-    "data:sync": "node scripts/sync-reports.mjs",
-    "storage:estimate": "node scripts/estimate-storage.mjs",
     "security:check": "node scripts/check-public-repo.mjs",
     "daily:collect": "node scripts/daily-collect.mjs",
     "daily:freshness": "node scripts/daily-freshness.mjs",
@@ -34,7 +31,6 @@
     "weekly:publish": "node scripts/weekly-publish.mjs",
     "weekly:verify": "node scripts/weekly-verify.mjs",
     "weekly:run": "scripts/run-codex-weekly.sh --force",
-    "db:migrate:local": "wrangler d1 migrations apply stock-daily-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply stock-daily-db --remote",
     "deploy": "npm run build && wrangler pages deploy dist --project-name stock-daily --branch main --commit-dirty=true",
     "test": "npm run build && python3 -m unittest tests/test_x_intelligence.py && node --test tests/*.test.mjs"

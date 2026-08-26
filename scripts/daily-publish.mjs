@@ -1775,7 +1775,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 `;
 }
 
-async function executeSql(sql, { local = false } = {}) {
+async function executeSql(sql) {
   const wranglerPath = resolve(
     "node_modules",
     ".bin",
@@ -1787,7 +1787,7 @@ async function executeSql(sql, { local = false } = {}) {
       "d1",
       "execute",
       "stock-daily-db",
-      local ? "--local" : "--remote",
+      "--remote",
       "--yes",
       "--json",
       "--command",
@@ -1804,10 +1804,9 @@ async function executeSql(sql, { local = false } = {}) {
 
 async function main() {
   const checkOnly = process.argv.includes("--check");
-  const local = process.argv.includes("--local");
   const paths = process.argv
     .slice(2)
-    .filter((argument) => !["--check", "--local"].includes(argument));
+    .filter((argument) => argument !== "--check");
   const inputPath = resolve(paths[0] ?? "work/daily-input.json");
   const reportPath = resolve(paths[1] ?? "work/daily-report.json");
   const eventsPath = resolve(paths[2] ?? "work/daily-agent-events.jsonl");
@@ -1834,12 +1833,12 @@ async function main() {
   await auditReportSources(report);
 
   try {
-    const output = await executeSql(completedSql(input, report), { local });
+    const output = await executeSql(completedSql(input, report));
     console.log(
       JSON.stringify(
         {
           ...result,
-          database: local ? "stock-daily-db (local)" : "stock-daily-db",
+          database: "stock-daily-db",
           wrangler: output,
         },
         null,
@@ -1848,7 +1847,7 @@ async function main() {
     );
   } catch (error) {
     try {
-      await executeSql(failedSql(input, error), { local });
+      await executeSql(failedSql(input, error));
     } catch {
       // Preserve the publication failure as the primary error.
     }

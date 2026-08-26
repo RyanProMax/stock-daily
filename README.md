@@ -11,7 +11,7 @@
 - `/api/reports` 返回日报归档
 - `/api/reports/:date` 返回指定日期完整日报
 - 首页使用单一日期入口切换期次，并通过归档列表回溯
-- 本地 SSR 与本地 API 读取线上只读数据，不使用本地样刊或空数据库降级
+- 本地 SSR 与本地 API 直接读取线上只读数据，不创建本地 D1 或报告镜像
 - Agent 每日解读重点新闻，标注利好/利空、受影响板块与可验证个股
 - 采集器按本期期数计算 CN/US 各 6 个一级行业价格热度，SSR 按交易日识别连续高热板块
 - 日报顶部按格子展示本周关键事件；只有兑现结果、同一官方来源和核验时间齐全时才标绿打勾
@@ -28,7 +28,7 @@ npm install
 npm run pages:dev
 ```
 
-`npm run dev` 会先构建 Pages Advanced Mode worker，再启动本地 Wrangler。Cloudflare Pages 本地模式不支持直接绑定远程 D1，因此本地 SSR 和 `/api/*` 均通过线上只读 API 读取生产数据；线上页面仍直接读取 D1。线上数据不可用时本地会返回明确错误，不会回退到仓库内的历史样刊。
+`npm run dev` 会使用 `wrangler.jsonc` 中不含 D1 绑定的本地配置启动 Worker。本地 SSR 和 `/api/*` 均通过线上只读 API 获取生产数据，不创建、迁移或同步本地数据库；只有生产环境配置保留 D1 绑定。线上数据不可用时本地会返回明确错误。
 
 ## 数据更新
 
@@ -80,7 +80,6 @@ npm run weekly:run
 
 ```bash
 npm test
-npm run storage:estimate
 npm run security:check
 ```
 
