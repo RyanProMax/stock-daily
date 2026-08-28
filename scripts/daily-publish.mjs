@@ -13,6 +13,8 @@ import {
   marketAsOfFromInput,
 } from "./daily-policy.mjs";
 import { auditReportSources } from "./daily-source-audit.mjs";
+import { auditIndependentReview } from "./daily-review-audit.mjs";
+import { assertReviewPassed } from "./daily-review-check.mjs";
 import {
   buildMarketSessions,
   driverDirectionMatches,
@@ -68,6 +70,7 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
   "finance.eastmoney.com",
   "finance.yahoo.com",
   "ft.com",
+  "latimes.com",
   "marketwatch.com",
   "m.nbd.com.cn",
   "nbd.com.cn",
@@ -90,6 +93,16 @@ const RAW_DATE_OR_TIMESTAMP =
   /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
+const MARKET_TARGET_ALIASES = {
+  CN: new Set(["cn", "a股", "中国股市"]),
+  US: new Set(["us", "u.s. stocks", "us stocks", "美股", "美国股市"]),
+};
+
+function marketTargetMatches(market, target) {
+  return MARKET_TARGET_ALIASES[market]?.has(
+    String(target).trim().toLocaleLowerCase(),
+  );
+}
 
 function hostnameMatches(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -436,7 +449,10 @@ function marketDataRecords(input, market) {
         source: metric.source,
         scope: "index",
         symbol: metric.symbol,
-        data: metric,
+        data:
+          metric.symbol === "DGS10"
+            ? { ...metric, tenor: 10 }
+            : metric,
       });
     }
   }
@@ -602,7 +618,7 @@ function validateEvidence(value, input, market, label) {
       !dataSources.has(source) ||
       sourceType === "expert" ||
       evidence.platform !== "web" ||
-      publishedAt !== session.windowEnd
+      publishedTime !== Date.parse(session.windowEnd)
     ) {
       throw new Error(`${label} 行情证据必须逐字引用本次输入`);
     }
@@ -882,7 +898,10 @@ function assertNumbersBounded(sourceFacts, generatedText, label) {
         source.number === claim.number && source.unit === claim.unit,
     );
     if (sameNumberAndUnit.length === 0) {
-      throw new Error(`${label} 引用了证据未提供的数字 ${claim.raw}`);
+      const excerpt = String(generatedText).replace(/\s+/gu, " ").trim().slice(0, 260);
+      throw new Error(
+        `${label} 引用了证据未提供的数字 ${claim.raw}；请删除该数字或在对应 facts 中记录同值同单位。原文：${excerpt}`,
+      );
     }
     if (
       claim.polarity === "conflict" ||
@@ -942,6 +961,16 @@ function validateDriver(value, input, index) {
   const title = readerText(driver.title, `${label}.title`, 80, 5);
   const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
   const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 20);
+  if (!["market", "sector", "subsector", "company"].includes(driver.attributionScope)) {
+    throw new Error(`${label}.attributionScope 无效`);
+  }
+  const attributionTargets = stringArray(
+    driver.attributionTargets,
+    `${label}.attributionTargets`,
+    1,
+    4,
+    40,
+  );
   const sectorSymbols = stringArray(
     driver.sectorSymbols,
     `${label}.sectorSymbols`,
@@ -957,12 +986,20 @@ function validateDriver(value, input, index) {
     throw new Error(`${label} 引用了其他市场或不存在的行业`);
   }
   if (
-    !driverDirectionMatches(
-      driver.direction,
-      sectorSymbols,
-      input.sectorPerformance,
-    )
+    (driver.attributionScope === "market" &&
+      (attributionTargets.length !== 1 ||
+        !marketTargetMatches(driver.market, attributionTargets[0]))) ||
+    (driver.attributionScope === "sector" &&
+      attributionTargets.some((target) => !sectorSymbols.includes(target)))
   ) {
+    throw new Error(`${label} 归因范围与目标不一致`);
+  }
+  const sectorDirectionMatches = driverDirectionMatches(
+    driver.direction,
+    sectorSymbols,
+    input.sectorPerformance,
+  );
+  if (driver.direction !== "mixed" && !sectorDirectionMatches) {
     throw new Error(`${label} 与行业涨跌方向不一致`);
   }
   if (!Array.isArray(driver.evidence) || driver.evidence.length < 2 || driver.evidence.length > 4) {
@@ -976,6 +1013,19 @@ function validateDriver(value, input, index) {
   }
   const marketData = evidence.filter((item) => item.kind === "market_data");
   const external = evidence.filter((item) => item.kind !== "market_data");
+  if (driver.direction === "mixed" && !sectorDirectionMatches) {
+    const evidenceDirections = new Set(
+      marketData
+        .flatMap((item) => marketDataBindings(input, driver.market, item.source))
+        .map((binding) =>
+          binding.data?.direction ?? binding.data?.constituent?.direction,
+        )
+        .filter((direction) => direction === "up" || direction === "down"),
+    );
+    if (!evidenceDirections.has("up") || !evidenceDirections.has("down")) {
+      throw new Error(`${label} 与行业涨跌方向不一致`);
+    }
+  }
   if (
     marketData.some((item) =>
       marketDataBindings(input, driver.market, item.source).every(
@@ -1011,6 +1061,8 @@ function validateDriver(value, input, index) {
     role: driver.role,
     basis: driver.basis,
     direction: driver.direction,
+    attributionScope: driver.attributionScope,
+    attributionTargets,
     title,
     summary,
     mechanism,
@@ -1104,22 +1156,269 @@ function validateViews(value, label, { optionalMechanism = false } = {}) {
         ),
         driverStatus: view.driverStatus,
       };
-      if (optionalMechanism && view.mechanism !== undefined) {
+      if (optionalMechanism && typeof view.mechanism === "string") {
         result.mechanism = readerText(
           view.mechanism,
           `${label}.${market}.mechanism`,
           460,
           20,
         );
+      } else if (
+        optionalMechanism &&
+        view.mechanism !== undefined &&
+        view.mechanism !== null
+      ) {
+        throw new Error(`${label}.${market}.mechanism 无效`);
       }
       return [market, result];
     }),
   );
 }
 
-function validateResearchAudit(value) {
+function validateHypothesis(value, market, index) {
+  const label = `researchAudit.${market}.hypotheses[${index}]`;
+  const hypothesis = requireObject(value, label);
+  const id = requireText(hypothesis.id, `${label}.id`, 24, 3);
+  if (!new RegExp(`^${market}-H[1-9][0-9]*$`, "u").test(id)) {
+    throw new Error(`${label}.id 与市场不一致`);
+  }
+  const claim = requireText(hypothesis.claim, `${label}.claim`, 300, 12);
+  if (
+    !["macro", "policy", "industry", "company", "positioning"].includes(
+      hypothesis.category,
+    ) ||
+    !["accepted", "rejected", "unresolved"].includes(hypothesis.verdict) ||
+    !["market_driver", "ai_update", "none"].includes(hypothesis.publishedAs)
+  ) {
+    throw new Error(`${label} 分类字段无效`);
+  }
+  const targets = stringArray(hypothesis.targets, `${label}.targets`, 1, 8, 40);
+  if (!Array.isArray(hypothesis.supportingSources)) {
+    throw new Error(`${label}.supportingSources 必须是数组`);
+  }
+  const supportingSources = hypothesis.supportingSources.map((source, sourceIndex) => {
+    const normalized = requireText(
+      source,
+      `${label}.supportingSources[${sourceIndex}]`,
+      1200,
+      12,
+    );
+    let parsed;
+    try {
+      parsed = new URL(normalized);
+    } catch {
+      throw new Error(`${label}.supportingSources[${sourceIndex}] URL 无效`);
+    }
+    if (parsed.protocol !== "https:") {
+      throw new Error(`${label}.supportingSources 必须使用 HTTPS`);
+    }
+    return parsed.toString();
+  });
+  if (supportingSources.length > 4 || new Set(supportingSources).size !== supportingSources.length) {
+    throw new Error(`${label}.supportingSources 数量或重复项无效`);
+  }
+  if (!Array.isArray(hypothesis.causalEvidence)) {
+    throw new Error(`${label}.causalEvidence 必须是数组`);
+  }
+  const causalEvidence = hypothesis.causalEvidence.map((value, evidenceIndex) => {
+    const evidenceLabel = `${label}.causalEvidence[${evidenceIndex}]`;
+    const evidence = requireObject(value, evidenceLabel);
+    const rawSource = requireText(
+      evidence.source,
+      `${evidenceLabel}.source`,
+      1200,
+      12,
+    );
+    let source;
+    try {
+      source = new URL(rawSource).toString();
+    } catch {
+      throw new Error(`${evidenceLabel}.source URL 无效`);
+    }
+    if (
+      hypothesis.verdict === "accepted" &&
+      !supportingSources.includes(source)
+    ) {
+      throw new Error(`${evidenceLabel}.source 不在 supportingSources 中`);
+    }
+    if (!['market', 'sector', 'subsector', 'ai_layer', 'company'].includes(evidence.scope)) {
+      throw new Error(`${evidenceLabel}.scope 无效`);
+    }
+    return {
+      source,
+      supports: requireText(
+        evidence.supports,
+        `${evidenceLabel}.supports`,
+        500,
+        20,
+      ),
+      scope: evidence.scope,
+      targets: stringArray(
+        evidence.targets,
+        `${evidenceLabel}.targets`,
+        1,
+        8,
+        40,
+      ),
+    };
+  });
+  if (causalEvidence.length > 4) {
+    throw new Error(`${label}.causalEvidence 最多四项`);
+  }
+  const counterEvidence = requireText(
+    hypothesis.counterEvidence,
+    `${label}.counterEvidence`,
+    500,
+    12,
+  );
+  const verdictReason = requireText(
+    hypothesis.verdictReason,
+    `${label}.verdictReason`,
+    500,
+    12,
+  );
+  if (/^(?:无|没有|none|n\/a|not applicable)[。.!]?$/iu.test(counterEvidence)) {
+    throw new Error(`${label}.counterEvidence 必须记录实际反证或缺失环节`);
+  }
+  if (typeof hypothesis.publishedTitle !== "string") {
+    throw new Error(`${label}.publishedTitle 缺失`);
+  }
+  const publishedTitle = hypothesis.publishedTitle
+    .normalize("NFC")
+    .replace(/\p{Cf}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (publishedTitle.length > 90) {
+    throw new Error(`${label}.publishedTitle 超过 90 字`);
+  }
+  if (typeof hypothesis.publishedClaim !== "string") {
+    throw new Error(`${label}.publishedClaim 缺失`);
+  }
+  const publishedClaim = hypothesis.publishedClaim
+    .normalize("NFC")
+    .replace(/\p{Cf}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (publishedClaim.length > 460) {
+    throw new Error(`${label}.publishedClaim 超过 460 字`);
+  }
+  if (
+    hypothesis.verdict === "accepted" &&
+    (hypothesis.publishedAs === "none" ||
+      !publishedTitle ||
+      !publishedClaim ||
+      supportingSources.length === 0 ||
+      causalEvidence.length === 0)
+  ) {
+    throw new Error(`${label} 接受的候选原因缺少发布映射或逐条因果证据`);
+  }
+  if (
+    hypothesis.verdict === "accepted" &&
+    !causalEvidence.some((evidence) => evidence.supports === publishedClaim)
+  ) {
+    throw new Error(`${label} 没有来源级证据完整支持 publishedClaim`);
+  }
+  if (hypothesis.verdict === "accepted" && claim !== publishedClaim) {
+    throw new Error(`${label} 接受命题必须逐字等于最终发布机制`);
+  }
+  if (
+    hypothesis.verdict !== "accepted" &&
+    (hypothesis.publishedAs !== "none" || publishedTitle || publishedClaim)
+  ) {
+    throw new Error(`${label} 未接受的候选原因不得进入读者报告`);
+  }
+  return {
+    id,
+    claim,
+    category: hypothesis.category,
+    targets,
+    supportingSources,
+    causalEvidence,
+    counterEvidence,
+    verdict: hypothesis.verdict,
+    verdictReason,
+    publishedAs: hypothesis.publishedAs,
+    publishedTitle,
+    publishedClaim,
+  };
+}
+
+function validateHypothesisTraceability(researchAudit, drivers, aiChainUpdates, input) {
+  for (const market of MARKETS) {
+    const accepted = researchAudit[market].hypotheses.filter(
+      (hypothesis) => hypothesis.verdict === "accepted",
+    );
+    const published = [
+      ...drivers
+        .filter((item) => item.market === market)
+        .map((item) => ({ item, publishedAs: "market_driver" })),
+      ...aiChainUpdates
+        .filter((item) => item.market === market)
+        .map((item) => ({ item, publishedAs: "ai_update" })),
+    ];
+    if (accepted.length !== published.length) {
+      throw new Error(`${market} 接受的候选原因与发布归因数量不一致`);
+    }
+    for (const { item, publishedAs } of published) {
+      const matches = accepted.filter(
+        (hypothesis) =>
+          hypothesis.publishedAs === publishedAs &&
+          hypothesis.publishedTitle === item.title,
+      );
+      if (matches.length !== 1) {
+        throw new Error(`${market} 发布归因未唯一映射到接受的候选原因：${item.title}`);
+      }
+      const externalSources = new Set(
+        item.evidence
+          .filter((evidence) => evidence.kind !== "market_data")
+          .map((evidence) => new URL(evidence.source).toString()),
+      );
+      if (!matches[0].supportingSources.some((source) => externalSources.has(source))) {
+        throw new Error(`${market} 候选原因与发布归因没有共享外部证据：${item.title}`);
+      }
+      const publishedClaim =
+        publishedAs === "market_driver" ? item.mechanism : item.implication;
+      if (matches[0].publishedClaim !== publishedClaim) {
+        throw new Error(`${market} 候选原因与发布归因的因果命题不一致：${item.title}`);
+      }
+      const itemCompanySymbols = new Set(
+        item.evidence
+          .filter((evidence) => evidence.kind === "market_data")
+          .flatMap((evidence) =>
+            marketDataBindings(input, market, evidence.source),
+          )
+          .map((binding) => binding.data?.constituent?.symbol)
+          .filter(Boolean),
+      );
+      const hasScopedCausalEvidence = matches[0].causalEvidence.some(
+        (evidence) => {
+          if (!externalSources.has(evidence.source)) return false;
+          if (publishedAs === "market_driver") {
+            return (
+              evidence.scope === item.attributionScope &&
+              evidence.targets.some((target) =>
+                item.attributionTargets.includes(target),
+              )
+            );
+          }
+          return (
+            (evidence.scope === "ai_layer" &&
+              evidence.targets.includes(item.layer)) ||
+            (evidence.scope === "company" &&
+              evidence.targets.some((target) => itemCompanySymbols.has(target)))
+          );
+        },
+      );
+      if (!hasScopedCausalEvidence) {
+        throw new Error(`${market} 发布归因缺少范围匹配的逐条因果证据：${item.title}`);
+      }
+    }
+  }
+}
+
+function validateResearchAudit(value, drivers, aiChainUpdates, input) {
   const audit = requireObject(value, "researchAudit");
-  return Object.fromEntries(
+  const result = Object.fromEntries(
     MARKETS.map((market) => {
       const item = requireObject(audit[market], `researchAudit.${market}`);
       const queries = stringArray(
@@ -1136,16 +1435,31 @@ function validateResearchAudit(value) {
       ) {
         throw new Error(`researchAudit.${market} 字段无效`);
       }
+      if (!Array.isArray(item.hypotheses) || item.hypotheses.length < 3 || item.hypotheses.length > 8) {
+        throw new Error(`researchAudit.${market}.hypotheses 数量必须为 3–8`);
+      }
+      const hypotheses = item.hypotheses.map((hypothesis, index) =>
+        validateHypothesis(hypothesis, market, index),
+      );
+      if (new Set(hypotheses.map((hypothesis) => hypothesis.id)).size !== hypotheses.length) {
+        throw new Error(`researchAudit.${market}.hypotheses id 不得重复`);
+      }
+      if (!hypotheses.some((hypothesis) => hypothesis.verdict !== "accepted")) {
+        throw new Error(`${market} 必须记录至少一个被拒绝或未决的替代原因`);
+      }
       return [
         market,
         {
           queries,
           sourcesReviewed: item.sourcesReviewed,
           outcome: item.outcome,
+          hypotheses,
         },
       ];
     }),
   );
+  validateHypothesisTraceability(result, drivers, aiChainUpdates, input);
+  return result;
 }
 
 function validateTranslation(
@@ -1252,7 +1566,7 @@ function validateTranslation(
         700,
         20,
       );
-    } else if (aiView.mechanism !== undefined) {
+    } else if (aiView.mechanism !== undefined && aiView.mechanism !== null) {
       throw new Error(
         `translations.en.aiChainViews.${market} 证据不足时不得输出归因机制`,
       );
@@ -1378,7 +1692,12 @@ export function validateReport(value, input) {
       throw new Error(`${market} 证据不足时不得输出 AI 归因机制`);
     }
   }
-  const researchAudit = validateResearchAudit(report.researchAudit);
+  const researchAudit = validateResearchAudit(
+    report.researchAudit,
+    drivers,
+    aiChainUpdates,
+    input,
+  );
   const translations = validateTranslation(
     report.translations,
     drivers,
@@ -1508,6 +1827,8 @@ export function buildReportContent(input, report) {
     role: driver.role,
     basis: driver.basis,
     direction: driver.direction,
+    attributionScope: driver.attributionScope,
+    attributionTargets: driver.attributionTargets,
     title: driver.title,
     summary: driver.summary,
     mechanism: driver.mechanism,
@@ -1784,6 +2105,10 @@ async function main() {
   const inputPath = resolve(paths[0] ?? "work/daily-input.json");
   const reportPath = resolve(paths[1] ?? "work/daily-report.json");
   const eventsPath = resolve(paths[2] ?? "work/daily-agent-events.jsonl");
+  const reviewPath = resolve(paths[3] ?? "work/daily-review.json");
+  const reviewEventsPath = resolve(
+    paths[4] ?? "work/daily-review-events.jsonl",
+  );
   const input = validateInput(JSON.parse(await readFile(inputPath, "utf8")));
   const report = validateReport(
     JSON.parse(await readFile(reportPath, "utf8")),
@@ -1803,8 +2128,14 @@ async function main() {
   }
 
   const eventsText = await readFile(eventsPath, "utf8");
-  auditCodexRun(eventsText, report);
+  auditCodexRun(eventsText, report, input);
   await auditReportSources(report);
+  const [review, reviewEventsText] = await Promise.all([
+    readFile(reviewPath, "utf8").then(JSON.parse),
+    readFile(reviewEventsPath, "utf8"),
+  ]);
+  auditIndependentReview(reviewEventsText, review, report);
+  assertReviewPassed(review, report);
 
   try {
     const output = await executeSql(completedSql(input, report));

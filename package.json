@@ -19,6 +19,8 @@
     "daily:audit": "node scripts/daily-agent-audit.mjs",
     "daily:sources": "node scripts/daily-source-audit.mjs",
     "daily:check": "node scripts/daily-publish.mjs --check",
+    "daily:review-audit": "node scripts/daily-review-audit.mjs",
+    "daily:review-check": "node scripts/daily-review-check.mjs",
     "daily:publish": "node scripts/daily-publish.mjs",
     "daily:verify": "node scripts/daily-verify.mjs",
     "daily:replace": "node scripts/replace-daily-reports.mjs",

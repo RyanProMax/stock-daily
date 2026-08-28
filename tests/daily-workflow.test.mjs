@@ -7,6 +7,7 @@ import {
   dailyCutoffAt,
 } from "../scripts/daily-policy.mjs";
 import { yahooSectorPoint } from "../scripts/sector-heat.mjs";
+import { auditStructuredOutputSchema } from "../scripts/structured-output-schema-audit.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 
 test("daily scheduler runs native search in read-only mode before validation and publication", async () => {
@@ -14,7 +15,21 @@ test("daily scheduler runs native search in read-only mode before validation and
     new URL("../scripts/run-codex-daily.sh", import.meta.url),
     "utf8",
   );
-  assert.match(scheduler, /"\$\{CODEX_BIN\}" --search exec/);
+  assert.match(scheduler, /"\$\{CODEX_BIN\}"[\s\\]*--disable plugins/);
+  assert.equal((scheduler.match(/--disable remote_plugin/g) ?? []).length, 2);
+  assert.equal((scheduler.match(/--disable recommended_plugins/g) ?? []).length, 2);
+  assert.equal((scheduler.match(/--disable apps/g) ?? []).length, 2);
+  assert.equal(
+    (scheduler.match(/--disable unbounded_connection_retries/g) ?? []).length,
+    2,
+  );
+  assert.equal((scheduler.match(/--disable in_app_updates/g) ?? []).length, 2);
+  assert.equal((scheduler.match(/--disable tui_app_server/g) ?? []).length, 2);
+  assert.equal((scheduler.match(/--search exec/g) ?? []).length, 2);
+  assert.match(
+    scheduler,
+    /\/Applications\/ChatGPT\.app\/Contents\/Resources\/codex/,
+  );
   assert.match(scheduler, /--sandbox read-only/);
   assert.match(scheduler, /--json/);
   assert.match(scheduler, /--output-schema "\$\{REPORT_SCHEMA_FILE\}"/);
@@ -24,19 +39,50 @@ test("daily scheduler runs native search in read-only mode before validation and
   );
 
   const collect = scheduler.indexOf("npm run daily:collect");
-  const codex = scheduler.indexOf('"${CODEX_BIN}" --search exec');
+  const codex = scheduler.indexOf('"${CODEX_BIN}"');
   const audit = scheduler.indexOf("node scripts/daily-agent-audit.mjs");
   const sourceAudit = scheduler.indexOf("node scripts/daily-source-audit.mjs");
   const check = scheduler.indexOf("npm run daily:check");
+  const independentReview = scheduler.indexOf(
+    '--output-schema "${REVIEW_SCHEMA_FILE}"',
+  );
+  const reviewAudit = scheduler.indexOf("node scripts/daily-review-audit.mjs");
+  const reviewCheck = scheduler.indexOf("node scripts/daily-review-check.mjs");
   const publish = scheduler.indexOf("npm run daily:publish");
   const verify = scheduler.indexOf("node scripts/daily-verify.mjs");
   assert.ok(
     collect < codex &&
       codex < audit &&
       audit < sourceAudit &&
-      sourceAudit < check,
+      sourceAudit < check &&
+      check < independentReview &&
+      independentReview < reviewAudit &&
+      reviewAudit < reviewCheck,
   );
-  assert.ok(check < publish && publish < verify);
+  assert.ok(reviewCheck < publish && publish < verify);
+  assert.match(scheduler, /MAX_RESEARCH_ATTEMPTS="\$\{STOCK_DAILY_MAX_RESEARCH_ATTEMPTS:-3\}"/);
+  assert.match(scheduler, /STOCK_DAILY_RESEARCH_TIMEOUT_SECONDS:-900/);
+  assert.match(scheduler, /STOCK_DAILY_REVIEW_TIMEOUT_SECONDS:-600/);
+  assert.match(scheduler, /STOCK_DAILY_RESEARCH_IDLE_TIMEOUT_SECONDS:-300/);
+  assert.match(scheduler, /STOCK_DAILY_REVIEW_IDLE_TIMEOUT_SECONDS:-240/);
+  assert.match(scheduler, /STOCK_DAILY_RESEARCH_REASONING_EFFORT:-low/);
+  assert.equal(
+    (scheduler.match(/model_reasoning_effort=\\"\$\{RESEARCH_REASONING_EFFORT\}\\"/g) ?? []).length,
+    1,
+  );
+  assert.equal(
+    (scheduler.match(/model_reasoning_effort="medium"/g) ?? []).length,
+    1,
+  );
+  assert.equal((scheduler.match(/run-with-timeout\.mjs/g) ?? []).length, 1);
+  assert.equal((scheduler.match(/--timeout-ms/g) ?? []).length, 2);
+  assert.equal((scheduler.match(/--idle-timeout-ms/g) ?? []).length, 2);
+  assert.match(scheduler, /research_exit == 124/);
+  assert.match(scheduler, /review_exit == 124/);
+  assert.match(scheduler, /while \(\( attempt <= MAX_RESEARCH_ATTEMPTS \)\)/);
+  assert.match(scheduler, /Research review failed after \$\{MAX_RESEARCH_ATTEMPTS\} attempts; publication skipped/);
+  assert.match(scheduler, /kill -0 "\$\{stale_lock_pid\}"/);
+  assert.match(scheduler, /printf "%s\\n" "\$\$" > "\$\{LOCK_PID_FILE\}"/);
 });
 
 test("destructive report replacement requires search and source audits", async () => {
@@ -44,7 +90,7 @@ test("destructive report replacement requires search and source audits", async (
     new URL("../scripts/replace-daily-reports.mjs", import.meta.url),
     "utf8",
   );
-  const searchAudit = replacement.indexOf("auditCodexRun(eventsText, report)");
+  const searchAudit = replacement.indexOf("auditCodexRun(eventsText, report, input)");
   const sourceAudit = replacement.indexOf("await auditReportSources(report)");
   const deleteSql = replacement.indexOf("DELETE FROM daily_reports");
   assert.ok(searchAudit >= 0 && sourceAudit > searchAudit);
@@ -58,15 +104,21 @@ test("the publication boundary cannot bypass search or source audits", async () 
     "utf8",
   );
   const reportValidation = publisher.lastIndexOf("const report = validateReport(");
-  const searchAudit = publisher.lastIndexOf("auditCodexRun(eventsText, report)");
+  const searchAudit = publisher.lastIndexOf("auditCodexRun(eventsText, report, input)");
   const sourceAudit = publisher.lastIndexOf("await auditReportSources(report)");
+  const reviewAudit = publisher.lastIndexOf(
+    "auditIndependentReview(reviewEventsText, review, report)",
+  );
+  const reviewCheck = publisher.lastIndexOf("assertReviewPassed(review, report)");
   const publication = publisher.lastIndexOf(
     "executeSql(completedSql(input, report)",
   );
   assert.ok(reportValidation >= 0);
   assert.ok(searchAudit > reportValidation);
   assert.ok(sourceAudit > searchAudit);
-  assert.ok(publication > sourceAudit);
+  assert.ok(reviewAudit > sourceAudit);
+  assert.ok(reviewCheck > reviewAudit);
+  assert.ok(publication > reviewCheck);
 });
 
 test("shadow mode validates a real report without writing Cloudflare state", async () => {
@@ -106,7 +158,9 @@ test("daily task uses market results as search leads instead of a news pool", as
   assert.match(prompt, /至少执行四类独立的窄搜索/);
   assert.match(prompt, /找不到充分证据时[^\n]*输出空的驱动数组/);
   assert.match(prompt, /不得生成“原因未证实”/);
-  assert.match(prompt, /必须省略\s*`mechanism`/);
+  assert.match(prompt, /至少三个彼此不同的候选原因/);
+  assert.match(prompt, /支持证据和反证/);
+  assert.match(prompt, /`mechanism` 必须为 `null`/);
   assert.doesNotMatch(prompt, /不要联网/);
   assert.match(task, /主动(?:研究|检索)/);
   assert.doesNotMatch(collector, /news-pipeline|x-intelligence/);
@@ -116,6 +170,34 @@ test("daily task uses market results as search leads instead of a news pool", as
     "codex-market-research-v11",
   );
   assert.ok(schema.required.includes("researchAudit"));
+  assert.equal(schema.$defs.researchMarket.properties.hypotheses.minItems, 3);
+});
+
+test("each retry reads the previous validation failure", async () => {
+  const prompt = await readFile(
+    new URL("../docs/codex-daily-agent-prompt.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(prompt, /work\/daily-attempt-error\.txt/);
+  assert.match(prompt, /不得重复使用其中打不开的 URL/);
+});
+
+test("Codex output schemas satisfy strict structured-output requirements", async () => {
+  const [reportSchema, reviewSchema] = await Promise.all([
+    readFile(new URL("../docs/daily-report.schema.json", import.meta.url), "utf8").then(JSON.parse),
+    readFile(new URL("../docs/daily-review.schema.json", import.meta.url), "utf8").then(JSON.parse),
+  ]);
+  assert.equal(auditStructuredOutputSchema(reportSchema).status, "valid");
+  assert.equal(auditStructuredOutputSchema(reviewSchema).status, "valid");
+
+  const invalid = structuredClone(reportSchema);
+  invalid.$defs.aiChainView.required = invalid.$defs.aiChainView.required.filter(
+    (key) => key !== "mechanism",
+  );
+  assert.throws(
+    () => auditStructuredOutputSchema(invalid),
+    /required 缺少 mechanism/,
+  );
 });
 
 test("daily policy refreshes scheduled checkpoints without news-pool state", () => {
