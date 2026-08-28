@@ -623,7 +623,7 @@ function validateEvidence(value, input, market, label) {
       throw new Error(`${label} 行情证据必须逐字引用本次输入`);
     }
     assertNumbersBounded(
-      approvedGroundingText(bindings.map((binding) => binding.data)),
+      marketBindingGroundingText(bindings),
       `${title} ${facts}`,
       `${label}.facts`,
     );
@@ -662,6 +662,7 @@ const COUNT_GROUNDING_FIELDS = {
   equityIndexCount: "equity index total count",
   sectorCount: "sector total count",
   aiLayerCount: "AI layer total count",
+  companyCount: "bound company total count",
 };
 
 export function approvedGroundingText(value) {
@@ -685,6 +686,8 @@ export function approvedGroundingText(value) {
       if (Number.isInteger(item[field]) && item[field] >= 0) {
         const unit = field === "aiLayerCount"
           ? "layers"
+          : field === "companyCount"
+            ? "companies"
           : field === "marketCount"
             ? "indicators"
             : field === "equityIndexCount"
@@ -699,6 +702,18 @@ export function approvedGroundingText(value) {
   }
   visit(value);
   return facts.join("\n");
+}
+
+function marketBindingGroundingText(bindings) {
+  const companySymbols = new Set(
+    bindings
+      .map((binding) => binding.data?.constituent?.symbol)
+      .filter(Boolean),
+  );
+  return approvedGroundingText({
+    companyCount: companySymbols.size || undefined,
+    bindings: bindings.map((binding) => binding.data),
+  });
 }
 
 function groundingEnvelope(input, market) {
@@ -940,9 +955,8 @@ function aiGroundingText(input, market) {
 function evidenceGroundingText(input, market, evidence) {
   const marketBindings = evidence
     .filter((item) => item.kind === "market_data")
-    .flatMap((item) => marketDataBindings(input, market, item.source))
-    .map((binding) => binding.data);
-  return `${approvedGroundingText(marketBindings)} ${evidence
+    .flatMap((item) => marketDataBindings(input, market, item.source));
+  return `${marketBindingGroundingText(marketBindings)} ${evidence
     .map((item) => `${item.title} ${item.facts}`)
     .join(" ")}`;
 }

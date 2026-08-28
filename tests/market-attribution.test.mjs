@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  approvedGroundingText,
   buildReportContent,
   numericClaims,
   validateInput,
@@ -74,6 +75,30 @@ test("numeric grounding ignores localized calendar dates", () => {
       polarity: "neutral",
     },
   ]);
+  assert.deepEqual(
+    numericClaims(approvedGroundingText({ companyCount: 2 })),
+    [{ raw: "2", number: "2", unit: "count", polarity: "neutral" }],
+  );
+});
+
+test("market evidence grounds the deterministic bound-company count", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const materialSector = input.sectorPerformance.find(
+    (item) => item.market === "CN" && item.symbol === "932078",
+  );
+  const constituent = materialSector.constituents[0];
+  report.drivers[0].evidence[0] = {
+    ...report.drivers[0].evidence[0],
+    title: `${constituent.name}收盘表现`,
+    facts: `${constituent.name}在本次交易日${constituent.change}。该链接仅绑定这一只成分股。`,
+    source: constituent.source,
+    sourceLabel: "Yahoo Finance",
+  };
+  assert.equal(
+    validateReport(report, input).drivers[0].evidence[0].source,
+    constituent.source,
+  );
 });
 
 test("numeric grounding accepts the deterministic ten-year Treasury tenor", () => {
