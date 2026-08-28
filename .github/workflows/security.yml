@@ -16,6 +16,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          # Pull-request workflows otherwise check GitHub's synthetic merge
+          # commit, whose author email comes from account metadata rather than
+          # repository history. Scan the submitted head commit itself.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Check repository privacy rules
         run: npm run security:check
