@@ -484,6 +484,8 @@ async function publish(input, report) {
       "d1",
       "execute",
       "stock-daily-db",
+      "--env",
+      "production",
       "--remote",
       "--yes",
       "--json",

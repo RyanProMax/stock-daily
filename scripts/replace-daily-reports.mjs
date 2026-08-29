@@ -106,6 +106,8 @@ ON CONFLICT(run_id) DO UPDATE SET
     "d1",
     "execute",
     "stock-daily-db",
+    "--env",
+    "production",
     "--remote",
     "--yes",
     "--json",

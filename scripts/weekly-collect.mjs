@@ -80,6 +80,8 @@ async function queryDailyReports(weekStart, weekEnd) {
       "d1",
       "execute",
       "stock-daily-db",
+      "--env",
+      "production",
       "--remote",
       "--command",
       sql,
