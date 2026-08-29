@@ -35,6 +35,10 @@ interface Props {
   aiUpdates: AiChainUpdate[];
   market: MarketRegion;
   language: Language;
+  emptyMarketAttribution?: {
+    title: string;
+    detail: string;
+  };
   labels: {
     indices: string;
     sectors: string;
@@ -153,6 +157,37 @@ function sourceTitle(evidence: DriverEvidence) {
   return evidence.platform === "x" ? evidence.facts : evidence.title;
 }
 
+function causalSummaryParts(mechanism: string, language: Language) {
+  const boundaryMarkers =
+    language === "zh"
+      ? ["该来源", "该证据", "现有证据", "证据只", "上述证据"]
+      : ["This evidence", "The evidence", "Current evidence", "Evidence only"];
+  const boundaryIndex = boundaryMarkers.reduce((earliest, marker) => {
+    const index = mechanism.indexOf(marker);
+    return index > 0 && (earliest === -1 || index < earliest) ? index : earliest;
+  }, -1);
+
+  if (boundaryIndex > 0) {
+    return {
+      keyPoint: mechanism.slice(0, boundaryIndex),
+      boundary: mechanism.slice(boundaryIndex),
+    };
+  }
+
+  const sentenceEnd =
+    language === "zh"
+      ? mechanism.search(/[。！？]/u)
+      : mechanism.search(/[.!?](?=\s|$)/u);
+  if (sentenceEnd >= 0 && sentenceEnd < mechanism.length - 1) {
+    return {
+      keyPoint: mechanism.slice(0, sentenceEnd + 1),
+      boundary: mechanism.slice(sentenceEnd + 1),
+    };
+  }
+
+  return { keyPoint: mechanism, boundary: "" };
+}
+
 function evidenceTime(
   publishedAt: string,
   language: Language,
@@ -175,15 +210,24 @@ function SnapshotEvidenceList({
   labels,
   language,
   market,
+  emptyState,
 }: {
   items: SnapshotEvidenceItem[];
   labels: Props["labels"];
   language: Language;
   market: MarketRegion;
+  emptyState?: Props["emptyMarketAttribution"];
 }) {
   const evidenceItems = items
     .filter((item) => hasVerifiedExternalEvidence(item.evidence));
-  if (evidenceItems.length === 0) return null;
+  if (evidenceItems.length === 0) {
+    return emptyState ? (
+      <article className="snapshot-attribution-empty">
+        <strong>{emptyState.title}</strong>
+        <p>{emptyState.detail}</p>
+      </article>
+    ) : null;
+  }
 
   const authorityLabels = {
     first_party: labels.sourceOfficial,
@@ -194,44 +238,55 @@ function SnapshotEvidenceList({
   return (
     <ul className="snapshot-evidence-list">
       {evidenceItems.map(
-        ({ evidence, tag, title, mechanism }) => (
-          <li
-            key={`${title}:${evidence.map((item) => item.source).join(":")}`}
-          >
-            <article className="snapshot-evidence-row">
-              <header className="snapshot-evidence-header">
-                <span className="snapshot-evidence-tag">{tag}</span>
-                <strong>{title}</strong>
-              </header>
-              <p className="snapshot-causal-summary">{mechanism}</p>
-              <div className="snapshot-evidence-meta">
-                {[
-                  ...new Map(
-                    evidence.map((item) => [item.source, item]),
-                  ).values(),
-                ].map((item) => (
-                  <a
-                    className="snapshot-evidence-source"
-                    href={item.source}
-                    key={item.source}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={sourceTitle(item)}
-                  >
-                    <strong>{sourceName(item)}</strong>
-                    <time dateTime={item.publishedAt}>
-                      {evidenceTime(item.publishedAt, language, market)}
-                    </time>
-                    {item.platform === "x" && item.authority && (
-                      <small>{authorityLabels[item.authority]}</small>
-                    )}
-                    <ExternalLink aria-hidden="true" />
-                  </a>
-                ))}
-              </div>
-            </article>
-          </li>
-        ),
+        ({ evidence, tag, title, mechanism }) => {
+          const { keyPoint, boundary } = causalSummaryParts(
+            mechanism,
+            language,
+          );
+          return (
+            <li
+              key={`${title}:${evidence.map((item) => item.source).join(":")}`}
+            >
+              <article className="snapshot-evidence-row">
+                <header className="snapshot-evidence-header">
+                  <span className="snapshot-evidence-tag">{tag}</span>
+                  <strong>{title}</strong>
+                </header>
+                <p className="snapshot-causal-summary">
+                  <mark className="snapshot-causal-key">{keyPoint}</mark>
+                  {boundary && (
+                    <span className="snapshot-causal-boundary">{boundary}</span>
+                  )}
+                </p>
+                <div className="snapshot-evidence-meta">
+                  {[
+                    ...new Map(
+                      evidence.map((item) => [item.source, item]),
+                    ).values(),
+                  ].map((item) => (
+                    <a
+                      className="snapshot-evidence-source"
+                      href={item.source}
+                      key={item.source}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={sourceTitle(item)}
+                    >
+                      <strong>{sourceName(item)}</strong>
+                      <time dateTime={item.publishedAt}>
+                        {evidenceTime(item.publishedAt, language, market)}
+                      </time>
+                      {item.platform === "x" && item.authority && (
+                        <small>{authorityLabels[item.authority]}</small>
+                      )}
+                      <ExternalLink aria-hidden="true" />
+                    </a>
+                  ))}
+                </div>
+              </article>
+            </li>
+          );
+        },
       )}
     </ul>
   );
@@ -291,6 +346,7 @@ export default function MarketSnapshot({
   aiUpdates,
   market,
   language,
+  emptyMarketAttribution,
   labels,
 }: Props) {
   const sectors = sectorView.current.filter((sector) => sector.market === market);
@@ -357,6 +413,7 @@ export default function MarketSnapshot({
           labels={labels}
           language={language}
           market={market}
+          emptyState={emptyMarketAttribution}
         />
       </section>
 

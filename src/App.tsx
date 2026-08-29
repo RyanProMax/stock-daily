@@ -467,6 +467,14 @@ function DailyPage({ data }: { data: DailyPageData }) {
           aiUpdates={marketAiUpdates}
           market={data.market}
           language={language}
+          emptyMarketAttribution={
+            isAttribution && marketDrivers.length === 0
+              ? {
+                  title: t.noVerifiedAttribution,
+                  detail: t.noVerifiedAttributionDetail,
+                }
+              : undefined
+          }
           labels={{
             indices: t.currentMarkets,
             sectors: isAttribution ? t.sectorPerformance : t.sectorHeat,

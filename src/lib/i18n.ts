@@ -138,6 +138,9 @@ export const copy = {
     noWeekly: "首份周报将在周日晚上生成。",
     noMarketNews: "本期暂无该市场的已核验新闻。",
     marketAttribution: "盘面归因",
+    noVerifiedAttribution: "本期暂无可靠归因",
+    noVerifiedAttributionDetail:
+      "现有公开信息未能把具体事件、传导路径与市场整体表现直接连起来，因此不发布推测性结论。",
     aiChainNews: "AI Alpha 归因",
     driverSectors: "对应行业",
     driverEvidence: "核验来源",
@@ -274,6 +277,9 @@ export const copy = {
     noWeekly: "The first weekly report will be generated on Sunday evening.",
     noMarketNews: "No verified news is available for this market in this edition.",
     marketAttribution: "Market Attribution",
+    noVerifiedAttribution: "No reliable attribution this edition",
+    noVerifiedAttributionDetail:
+      "Available public evidence does not directly connect a specific event and transmission path to the market-wide move, so no speculative conclusion is published.",
     aiChainNews: "AI Alpha Attribution",
     driverSectors: "Affected sectors",
     driverEvidence: "Verified sources",

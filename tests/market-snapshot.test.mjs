@@ -182,6 +182,16 @@ test("market snapshot renders unique compact evidence rows for market and sector
   assert.match(marketItem.textContent, /X · @example_research/);
   assert.match(marketItem.textContent, /专业研究/);
   assert.equal(marketItem.querySelectorAll(".snapshot-causal-summary").length, 1);
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-key").length, 1);
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-boundary").length, 1);
+  assert.match(
+    marketItem.querySelector(".snapshot-causal-key").textContent,
+    /现货供应预期因此收紧/,
+  );
+  assert.match(
+    marketItem.querySelector(".snapshot-causal-boundary").textContent,
+    /该证据只覆盖/,
+  );
   assert.ok(
     [...marketItem.querySelector(".snapshot-causal-summary").textContent.trim()].length >= 100,
   );
@@ -212,6 +222,33 @@ test("market snapshot renders unique compact evidence rows for market and sector
   );
   assert.doesNotMatch(html, /综合研判|未发现单一消息主导|表现居前|表现居后/);
   assert.equal(document.querySelectorAll(".snapshot-analysis").length, 0);
+});
+
+test("market snapshot explains an intentionally empty market attribution", async () => {
+  const { default: MarketSnapshot } = await vite.ssrLoadModule(
+    "/src/components/MarketSnapshot.tsx",
+  );
+  const emptyProps = {
+    ...props(),
+    drivers: [],
+    emptyMarketAttribution: {
+      title: "本期暂无可靠归因",
+      detail:
+        "现有公开信息未能把具体事件、传导路径与市场整体表现直接连起来，因此不发布推测性结论。",
+    },
+  };
+  const html = renderToStaticMarkup(
+    React.createElement(MarketSnapshot, emptyProps),
+  );
+  const document = new JSDOM(html).window.document;
+  const state = document.querySelector(
+    ".snapshot-group-indices .snapshot-attribution-empty",
+  );
+
+  assert.ok(state);
+  assert.match(state.textContent, /本期暂无可靠归因/);
+  assert.match(state.textContent, /不发布推测性结论/);
+  assert.equal(document.querySelectorAll(".snapshot-cause-status").length, 0);
 });
 
 test("AI evidence renders as a compact layer-summary-source row", async () => {

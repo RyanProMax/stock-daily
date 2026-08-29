@@ -5059,14 +5059,54 @@ footer {
 }
 
 .snapshot-causal-summary {
+  width: 100%;
   min-width: 0;
-  max-width: 75ch;
   margin: 0;
   color: color-mix(in srgb, var(--ink) 92%, var(--muted));
   font-family: var(--sans);
   font-size: 11px;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+.snapshot-causal-key {
+  color: var(--ink);
+  background:
+    linear-gradient(
+      to top,
+      color-mix(in srgb, var(--amber) 58%, transparent) 0 38%,
+      transparent 38%
+    );
+  font-weight: 720;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.snapshot-causal-boundary {
+  color: var(--muted);
+}
+
+.snapshot-attribution-empty {
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--brand-soft) 40%, var(--surface-solid));
+}
+
+.snapshot-attribution-empty strong {
+  display: block;
+  color: var(--brand);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.45;
+}
+
+.snapshot-attribution-empty p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .snapshot-evidence-list > li {

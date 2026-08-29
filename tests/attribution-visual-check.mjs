@@ -93,6 +93,12 @@ async function inspect(page, market, language, width) {
         right: Math.round(element.getBoundingClientRect().right),
       }));
     const causalSummaries = [...document.querySelectorAll(".snapshot-causal-summary")];
+    const causalWidthDeltas = causalSummaries.map((summary) => {
+      const row = summary.closest(".snapshot-evidence-row");
+      return row
+        ? Math.round(row.getBoundingClientRect().width - summary.getBoundingClientRect().width)
+        : 0;
+    });
     const mainText = document.querySelector("main")?.innerText ?? "";
     return {
       viewportWidth: innerWidth,
@@ -114,6 +120,14 @@ async function inspect(page, market, language, width) {
       causalSummaryLengths: causalSummaries.map(
         (summary) => [...(summary.textContent ?? "").trim()].length,
       ),
+      causalKeyCount: document.querySelectorAll(".snapshot-causal-key").length,
+      causalBoundaryCount: document.querySelectorAll(
+        ".snapshot-causal-boundary",
+      ).length,
+      attributionEmptyCount: document.querySelectorAll(
+        ".snapshot-group-indices .snapshot-attribution-empty",
+      ).length,
+      causalWidthDeltas,
       happenedLabelCount: [
         ...document.querySelectorAll("main strong"),
       ].filter((element) => /发生了什么|What happened/u.test(element.textContent)).length,
@@ -192,6 +206,21 @@ for (const [key, audit] of Object.entries(result)) {
   assert.equal(layout.causalSummaryCount, layout.evidenceRowCount, JSON.stringify(result));
   assert.ok(
     layout.causalSummaryLengths.every((length) => length >= 100),
+    JSON.stringify(result),
+  );
+  assert.equal(layout.causalKeyCount, layout.causalSummaryCount, JSON.stringify(result));
+  assert.equal(
+    layout.causalBoundaryCount,
+    layout.causalSummaryCount,
+    JSON.stringify(result),
+  );
+  assert.equal(
+    layout.attributionEmptyCount,
+    market === "CN" ? 1 : 0,
+    JSON.stringify(result),
+  );
+  assert.ok(
+    layout.causalWidthDeltas.every((delta) => Math.abs(delta) <= 1),
     JSON.stringify(result),
   );
   assert.equal(layout.happenedLabelCount, 0, JSON.stringify(result));
