@@ -42,7 +42,7 @@ async function main() {
   ]);
   const input = validateInput(inputValue);
   const report = validateReport(reportValue, input);
-  auditCodexRun(eventsText, report);
+  auditCodexRun(eventsText, report, input);
   await auditReportSources(report);
   const marketAsOf = marketAsOfFromInput(input);
   if (

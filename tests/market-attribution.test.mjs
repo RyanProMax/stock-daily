@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  approvedGroundingText,
   buildReportContent,
   numericClaims,
   validateInput,
   validateReport,
+  verifiedExternalSourceType,
 } from "../scripts/daily-publish.mjs";
 import { buildMarketBriefs } from "../scripts/daily-collect.mjs";
 import {
@@ -73,6 +75,48 @@ test("numeric grounding ignores localized calendar dates", () => {
       polarity: "neutral",
     },
   ]);
+  assert.deepEqual(
+    numericClaims(approvedGroundingText({ companyCount: 2 })),
+    [{ raw: "2", number: "2", unit: "count", polarity: "neutral" }],
+  );
+});
+
+test("market evidence grounds the deterministic bound-company count", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const materialSector = input.sectorPerformance.find(
+    (item) => item.market === "CN" && item.symbol === "932078",
+  );
+  const constituent = materialSector.constituents[0];
+  report.drivers[0].evidence[0] = {
+    ...report.drivers[0].evidence[0],
+    title: `${constituent.name}收盘表现`,
+    facts: `${constituent.name}在本次交易日${constituent.change}。该链接仅绑定这一只成分股。`,
+    source: constituent.source,
+    sourceLabel: "Yahoo Finance",
+  };
+  assert.equal(
+    validateReport(report, input).drivers[0].evidence[0].source,
+    constituent.source,
+  );
+});
+
+test("numeric grounding accepts the deterministic ten-year Treasury tenor", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const treasury = input.markets.find((item) => item.symbol === "DGS10");
+  report.drivers[2].evidence[0] = {
+    title: "美国十年期国债收益率日行情",
+    facts: `输入行情显示，美国十年期国债收益率当日${treasury.change}。`,
+    source: treasury.source,
+    sourceLabel: "美国联邦储备经济数据库",
+    publishedAt: input.marketSessions.find((item) => item.market === "US").windowEnd,
+    kind: "market_data",
+    sourceType: "publisher",
+    platform: "web",
+    authorHandle: "",
+  };
+  assert.doesNotThrow(() => validateReport(report, input));
 });
 
 test("historical sector replay selects each venue's completed session", () => {
@@ -98,6 +142,43 @@ test("mixed driver direction requires both rising and falling sectors", () => {
   );
 });
 
+test("mixed macro direction may combine an index rise with a sector decline", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const usDriver = report.drivers.find((driver) => driver.market === "US");
+  const usIndex = input.markets.find(
+    (market) => market.region === "US" && market.direction === "up",
+  );
+  const downSector = input.sectorPerformance.find(
+    (sector) => sector.market === "US" && sector.direction === "down",
+  );
+  usDriver.direction = "mixed";
+  usDriver.sectorSymbols = [downSector.symbol];
+  usDriver.attributionTargets = [downSector.symbol];
+  const hypothesis = report.researchAudit.US.hypotheses.find(
+    (item) => item.publishedTitle === usDriver.title,
+  );
+  hypothesis.targets = [downSector.symbol];
+  hypothesis.causalEvidence[0].targets = [downSector.symbol];
+  usDriver.evidence[0] = {
+    ...usDriver.evidence[0],
+    title: "美国指数收盘表现",
+    facts: `输入行情显示，美国指数当日${usIndex.change}。`,
+    source: usIndex.source,
+  };
+  usDriver.evidence.splice(
+    1,
+    0,
+    {
+      ...usDriver.evidence[0],
+      title: "美国行业收盘表现",
+      facts: `输入行情显示，美国行业当日${downSector.change}。`,
+      source: downSector.source,
+    },
+  );
+  assert.equal(validateReport(report, input).drivers[2].direction, "mixed");
+});
+
 test("V11 accepts only evidence-backed event and macro drivers", () => {
   const input = validateInput(fixtureInput());
   const report = validateReport(fixtureReport(input), input);
@@ -119,6 +200,108 @@ test("V11 accepts only evidence-backed event and macro drivers", () => {
   assert.equal(stored.drivers[0].evidence[0].kind, "market_data");
 });
 
+test("every published attribution must trace to one accepted causal hypothesis", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  report.researchAudit.CN.hypotheses[0].publishedTitle =
+    "与报告不一致的候选标题";
+  assert.throws(
+    () => validateReport(report, input),
+    /发布归因未唯一映射到接受的候选原因/,
+  );
+});
+
+test("published attribution requires an exact causal claim and matching evidence scope", () => {
+  const input = validateInput(fixtureInput());
+  const mismatchedHypothesis = fixtureReport(input);
+  mismatchedHypothesis.researchAudit.CN.hypotheses[0].claim =
+    "供应变化大概有利于原材料行业。";
+  assert.throws(
+    () => validateReport(mismatchedHypothesis, input),
+    /接受命题必须逐字等于最终发布机制/,
+  );
+
+  const wrongClaim = fixtureReport(input);
+  wrongClaim.researchAudit.CN.hypotheses[0].publishedClaim += "额外推断。";
+  assert.throws(
+    () => validateReport(wrongClaim, input),
+    /没有来源级证据完整支持 publishedClaim/,
+  );
+
+  const wrongScope = fixtureReport(input);
+  wrongScope.researchAudit.CN.hypotheses[0].causalEvidence[0].targets = [
+    "932086",
+  ];
+  assert.throws(
+    () => validateReport(wrongScope, input),
+    /缺少范围匹配的逐条因果证据/,
+  );
+
+  const partialSupport = fixtureReport(input);
+  partialSupport.researchAudit.CN.hypotheses[0].causalEvidence[0].supports =
+    "来源只证明事件存在，但没有完整支持最终发布机制。";
+  assert.throws(
+    () => validateReport(partialSupport, input),
+    /没有来源级证据完整支持 publishedClaim/,
+  );
+});
+
+test("subsector attribution stays attached to a parent sector without widening scope", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const driver = report.drivers[0];
+  const hypothesis = report.researchAudit.CN.hypotheses[0];
+  driver.attributionScope = "subsector";
+  driver.attributionTargets = ["工业金属"];
+  hypothesis.targets = ["工业金属", driver.sectorSymbols[0]];
+  hypothesis.causalEvidence[0].scope = "subsector";
+  hypothesis.causalEvidence[0].targets = ["工业金属"];
+  assert.equal(validateReport(report, input).drivers[0].attributionScope, "subsector");
+
+  hypothesis.causalEvidence[0].targets = ["券商"];
+  assert.throws(
+    () => validateReport(report, input),
+    /缺少范围匹配的逐条因果证据/,
+  );
+});
+
+test("unresolved hypotheses may retain partial source evidence without publishing it", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  report.researchAudit.US.hypotheses[2].causalEvidence = [{
+    source: "https://example.com/partial-company-event",
+    supports: "The source confirms a company event but does not establish its same-day market impact.",
+    scope: "company",
+    targets: ["CRWV"],
+  }];
+  assert.doesNotThrow(() => validateReport(report, input));
+});
+
+test("rejected and unresolved hypotheses cannot leak into reader attribution", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  report.researchAudit.US.hypotheses[2].publishedAs = "market_driver";
+  report.researchAudit.US.hypotheses[2].publishedTitle =
+    report.drivers.find((driver) => driver.market === "US").title;
+  assert.throws(
+    () => validateReport(report, input),
+    /未接受的候选原因不得进入读者报告/,
+  );
+});
+
+test("research must record at least one rejected or unresolved alternative", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  report.researchAudit.US.hypotheses[2] = {
+    ...report.researchAudit.US.hypotheses[1],
+    id: "US-H3",
+  };
+  assert.throws(
+    () => validateReport(report, input),
+    /必须记录至少一个被拒绝或未决的替代原因/,
+  );
+});
+
 test("V11 permits no driver when evidence is insufficient and requires one primary otherwise", () => {
   const input = validateInput(fixtureInput());
   const noCnDrivers = fixtureReport(input);
@@ -129,6 +312,20 @@ test("V11 permits no driver when evidence is insufficient and requires one prima
     2,
   );
   noCnDrivers.marketViews.CN.driverStatus = "insufficient";
+  noCnDrivers.researchAudit.CN.hypotheses =
+    noCnDrivers.researchAudit.CN.hypotheses.map((hypothesis) =>
+      hypothesis.publishedAs === "market_driver"
+        ? {
+            ...hypothesis,
+            verdict: "unresolved",
+            verdictReason:
+              "测试报告没有发布该候选原因，因此保留为未决线索而不是读者结论。",
+            publishedAs: "none",
+            publishedTitle: "",
+            publishedClaim: "",
+          }
+        : hypothesis,
+    );
   assert.equal(
     validateReport(noCnDrivers, input).drivers.filter(
       (driver) => driver.market === "CN",
@@ -194,6 +391,12 @@ test("event and macro drivers require non-expert external evidence", () => {
 });
 
 test("external source authority is derived from the cited URL", () => {
+  assert.equal(
+    verifiedExternalSourceType(
+      "https://www.latimes.com/business/story/2026-08-26/market-wrap",
+    ),
+    "publisher",
+  );
   const input = validateInput(fixtureInput());
   const spoofedPublisher = fixtureReport(input);
   spoofedPublisher.drivers[0].evidence[1].source =
@@ -252,6 +455,14 @@ test("event and official evidence cannot be published after the market close", (
 
 test("market evidence must copy an input URL and exact session close", () => {
   const input = validateInput(fixtureInput());
+  const equivalentTime = fixtureReport(input);
+  equivalentTime.drivers[0].evidence[0].publishedAt =
+    input.marketSessions.find((item) => item.market === "CN").windowEnd.replace(
+      ".000Z",
+      "Z",
+    );
+  assert.equal(validateReport(equivalentTime, input).drivers.length, 4);
+
   const wrongUrl = fixtureReport(input);
   wrongUrl.drivers[0].evidence[0].source =
     "https://quotes.example.com/unverified";
@@ -273,15 +484,30 @@ test("market evidence must copy an input URL and exact session close", () => {
   assert.equal(validateReport(publisherFeed, input).drivers.length, 4);
 });
 
+test("market attribution accepts a reader-facing market target alias", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const driver = report.drivers[2];
+  const hypothesis = report.researchAudit.US.hypotheses[0];
+  driver.attributionScope = "market";
+  driver.attributionTargets = ["U.S. stocks"];
+  hypothesis.targets = ["U.S. stocks"];
+  hypothesis.causalEvidence[0].scope = "market";
+  hypothesis.causalEvidence[0].targets = ["U.S. stocks"];
+  assert.equal(validateReport(report, input).drivers[2].attributionScope, "market");
+});
+
 test("market evidence facts and driver sectors must match the exact input source", () => {
   const input = validateInput(fixtureInput());
   const hallucinatedFact = fixtureReport(input);
   hallucinatedFact.drivers[0].evidence[0].facts =
     "原材料行业代表篮子上涨77.77%，并处于本次交易日表现前列。";
-  assert.throws(
-    () => validateReport(hallucinatedFact, input),
-    /证据未提供的数字 77.77/,
-  );
+  assert.throws(() => validateReport(hallucinatedFact, input), (error) => {
+    assert.match(error.message, /证据未提供的数字 77.77/);
+    assert.match(error.message, /请删除该数字或在对应 facts 中记录同值同单位/);
+    assert.match(error.message, /原材料行业代表篮子上涨77.77%/);
+    return true;
+  });
 
   const aiOnlySource = fixtureReport(input);
   const aiRow = input.aiChainPerformance.find(
@@ -507,6 +733,11 @@ test("X evidence handle must match the cited account", () => {
   matchingHandle.drivers[0].evidence.push(
     structuredClone(fixtureReport(input).aiChainUpdates[0].evidence[1]),
   );
+  matchingHandle.researchAudit.CN.hypotheses[0].supportingSources = [
+    "https://www.sse.com.cn/disclosure/interconnect-order",
+  ];
+  matchingHandle.researchAudit.CN.hypotheses[0].causalEvidence[0].source =
+    "https://www.sse.com.cn/disclosure/interconnect-order";
   assert.equal(
     validateReport(matchingHandle, input).drivers[0].evidence[1].authorHandle,
     "materials_authority",

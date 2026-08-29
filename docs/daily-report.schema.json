@@ -82,11 +82,15 @@
     "aiChainView": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["headline", "summary", "driverStatus"],
+      "required": ["headline", "summary", "mechanism", "driverStatus"],
       "properties": {
         "headline": { "type": "string", "minLength": 5, "maxLength": 90 },
         "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
-        "mechanism": { "type": "string", "minLength": 20, "maxLength": 460 },
+        "mechanism": {
+          "type": ["string", "null"],
+          "minLength": 20,
+          "maxLength": 460
+        },
         "driverStatus": { "$ref": "#/$defs/driverStatus" }
       }
     },
@@ -147,6 +151,8 @@
         "role",
         "basis",
         "direction",
+        "attributionScope",
+        "attributionTargets",
         "title",
         "summary",
         "mechanism",
@@ -166,6 +172,16 @@
         "direction": {
           "type": "string",
           "enum": ["positive", "negative", "mixed"]
+        },
+        "attributionScope": {
+          "type": "string",
+          "enum": ["market", "sector", "subsector", "company"]
+        },
+        "attributionTargets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "minLength": 1, "maxLength": 40 }
         },
         "title": { "type": "string", "minLength": 5, "maxLength": 80 },
         "summary": { "type": "string", "minLength": 15, "maxLength": 300 },
@@ -242,11 +258,15 @@
     "translatedAiChainView": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["headline", "summary"],
+      "required": ["headline", "summary", "mechanism"],
       "properties": {
         "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
         "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
-        "mechanism": { "type": "string", "minLength": 20, "maxLength": 700 }
+        "mechanism": {
+          "type": ["string", "null"],
+          "minLength": 20,
+          "maxLength": 700
+        }
       }
     },
     "translatedAiChainViews": {
@@ -309,7 +329,7 @@
     "researchMarket": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queries", "sourcesReviewed", "outcome"],
+      "required": ["queries", "sourcesReviewed", "outcome", "hypotheses"],
       "properties": {
         "queries": {
           "type": "array",
@@ -324,6 +344,108 @@
         "outcome": {
           "type": "string",
           "enum": ["sufficient", "limited"]
+        },
+        "hypotheses": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/researchHypothesis" }
+        }
+      }
+    },
+    "researchHypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "claim",
+        "category",
+        "targets",
+        "supportingSources",
+        "causalEvidence",
+        "counterEvidence",
+        "verdict",
+        "verdictReason",
+        "publishedAs",
+        "publishedTitle",
+        "publishedClaim"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 24,
+          "pattern": "^(CN|US)-H[1-9][0-9]*$"
+        },
+        "claim": { "type": "string", "minLength": 12, "maxLength": 300 },
+        "category": {
+          "type": "string",
+          "enum": ["macro", "policy", "industry", "company", "positioning"]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 40 }
+        },
+        "supportingSources": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1200,
+            "pattern": "^https://"
+          }
+        },
+        "causalEvidence": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/causalEvidence" }
+        },
+        "counterEvidence": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 500
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["accepted", "rejected", "unresolved"]
+        },
+        "verdictReason": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 500
+        },
+        "publishedAs": {
+          "type": "string",
+          "enum": ["market_driver", "ai_update", "none"]
+        },
+        "publishedTitle": { "type": "string", "maxLength": 90 },
+        "publishedClaim": { "type": "string", "maxLength": 460 }
+      }
+    },
+    "causalEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "supports", "scope", "targets"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 1200,
+          "pattern": "^https://"
+        },
+        "supports": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "scope": {
+          "type": "string",
+          "enum": ["market", "sector", "subsector", "ai_layer", "company"]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 40 }
         }
       }
     }

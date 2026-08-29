@@ -11,6 +11,38 @@ const AI_QUERY_PATTERN =
 const CAUSE_QUERY_PATTERN =
   /(?:原因|催化|公告|财报|订单|供需|政策|业绩|why|reason|catalyst|filing|earnings|order|demand|supply|policy)/iu;
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function aiEntityPattern(input, market) {
+  const tokens = (input?.aiChainPerformance ?? [])
+    .filter((row) => row?.market === market)
+    .flatMap((row) => [
+      row.layer,
+      row.name,
+      row.nameEn,
+      row.symbol,
+      ...(row.constituents ?? []).flatMap((item) => [
+        item.symbol,
+        item.name,
+        item.nameEn,
+      ]),
+    ])
+    .filter(
+      (token) =>
+        typeof token === "string" &&
+        token.trim().length >= 3 &&
+        !/^representative\s+\d+$/iu.test(token.trim()),
+    )
+    .map((token) => escapeRegExp(token.trim()));
+  return tokens.length > 0 ? new RegExp(`(?:${[...new Set(tokens)].join("|")})`, "iu") : null;
+}
+
+function isAiQuery(query, input, market) {
+  return AI_QUERY_PATTERN.test(query) || aiEntityPattern(input, market)?.test(query);
+}
+
 function queryMarket(query) {
   const matches = Object.entries(MARKET_QUERY_PATTERNS)
     .filter(([, pattern]) => pattern.test(query))
@@ -70,7 +102,7 @@ function citedExternalSources(report, market) {
   );
 }
 
-export function auditCodexRun(eventsText, report) {
+export function auditCodexRun(eventsText, report, input) {
   const { events, invalidLineCount } = parseEventLines(eventsText);
   if (invalidLineCount > 0) {
     throw new Error("Codex 研究事件流包含无法解析的记录");
@@ -111,7 +143,7 @@ export function auditCodexRun(eventsText, report) {
     const aiCauseQueries = classifiedQueries.filter(
       (item) =>
         item.market === market &&
-        AI_QUERY_PATTERN.test(item.query) &&
+        isAiQuery(item.query, input, market) &&
         CAUSE_QUERY_PATTERN.test(item.query),
     );
     if (aiCauseQueries.length < 2) {
@@ -134,6 +166,8 @@ export function auditCodexRun(eventsText, report) {
       !declared ||
       !Array.isArray(declared.queries) ||
       declared.queries.length < 4 ||
+      !Array.isArray(declared.hypotheses) ||
+      declared.hypotheses.length < 3 ||
       !Number.isInteger(declared.sourcesReviewed) ||
       declared.sourcesReviewed < 1 ||
       !["sufficient", "limited"].includes(declared.outcome)
@@ -174,11 +208,13 @@ export function auditCodexRun(eventsText, report) {
 async function main() {
   const eventsPath = resolve(process.argv[2] ?? "work/daily-agent-events.jsonl");
   const reportPath = resolve(process.argv[3] ?? "work/daily-report.json");
-  const [eventsText, report] = await Promise.all([
+  const inputPath = resolve(process.argv[4] ?? "work/daily-input.json");
+  const [eventsText, report, input] = await Promise.all([
     readFile(eventsPath, "utf8"),
     readFile(reportPath, "utf8").then(JSON.parse),
+    readFile(inputPath, "utf8").then(JSON.parse),
   ]);
-  console.log(JSON.stringify(auditCodexRun(eventsText, report), null, 2));
+  console.log(JSON.stringify(auditCodexRun(eventsText, report, input), null, 2));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

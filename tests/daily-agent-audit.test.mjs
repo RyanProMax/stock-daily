@@ -146,3 +146,32 @@ test("Codex run audit requires active AI cause searches for both markets", () =>
     /AI 对象与原因线索的主动归因查询/,
   );
 });
+
+test("AI cause searches may name tracked companies from the current input", () => {
+  const input = fixtureInput();
+  const cloud = input.aiChainPerformance.find(
+    (item) => item.market === "US" && item.layer === "cloud",
+  );
+  const interconnect = input.aiChainPerformance.find(
+    (item) => item.market === "US" && item.layer === "interconnect",
+  );
+  Object.assign(cloud.constituents[0], {
+    symbol: "CRWV",
+    name: "CoreWeave",
+    nameEn: "CoreWeave",
+  });
+  Object.assign(interconnect.constituents[0], {
+    symbol: "ANET",
+    name: "Arista Networks",
+    nameEn: "Arista Networks",
+  });
+  const companyQueries = [
+    ...queries.slice(0, 6),
+    "US stocks Arista Networks orders reason",
+    "US stocks CoreWeave earnings catalyst",
+  ];
+  const report = fixtureReport(input);
+  report.researchAudit.US.queries = companyQueries.slice(4);
+  const result = auditCodexRun(eventsFor(companyQueries), report, input);
+  assert.equal(result.status, "audited");
+});
