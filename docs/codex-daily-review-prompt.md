@@ -7,7 +7,8 @@
 1. 完整读取 `work/daily-input.json`、`work/daily-report.json`、
    `docs/codex-daily-task.md` 和 `specs/verified-recap-workflow/requirements.md`。
 2. 逐一打开报告中每个非 `market_data` 证据的最终 HTTPS URL，核对发布者、发布时间和正文
-   是否真的支持 `facts`、传导机制和影响范围。搜索摘要和 URL 可访问不能代替正文核对。
+   是否真的支持 `facts`、传导机制和影响范围。每个最终 URL 必须使用一次独立的打开操作，
+   不得将多个 URL 合并在同一次打开中。搜索摘要和 URL 可访问不能代替正文核对。
 3. CN、US 各执行至少一条新的窄搜索，针对各自最显著指数/行业/AI 环节异动寻找当天原因或
    反证。查询必须明确包含“A股/中国股市”或“U.S. stocks/美股”，并记录到
    `reviewAudit`。不得原样复制研究报告 `researchAudit` 中已有的查询。

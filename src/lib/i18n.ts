@@ -435,6 +435,7 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       ...driver,
       title: translation?.drivers?.[index]?.title ?? driver.title,
       summary: translation?.drivers?.[index]?.summary ?? driver.summary,
+      metrics: translation?.drivers?.[index]?.metrics ?? driver.metrics,
       mechanism:
         translation?.drivers?.[index]?.mechanism ?? driver.mechanism,
     })),
@@ -443,6 +444,8 @@ export function localizeDailyReport(report: DailyReport, language: Language) {
       title: translation?.aiChainUpdates?.[index]?.title ?? update.title,
       summary:
         translation?.aiChainUpdates?.[index]?.summary ?? update.summary,
+      metrics:
+        translation?.aiChainUpdates?.[index]?.metrics ?? update.metrics,
       implication:
         translation?.aiChainUpdates?.[index]?.implication ?? update.implication,
     })),

@@ -51,8 +51,10 @@ const FIRST_PARTY_SOURCE_DOMAINS = [
   "hkexnews.hk",
   "nasdaq.com",
   "nyse.com",
+  "nvidia.com",
   "pbc.gov.cn",
   "sec.gov",
+  "salesforce.com",
   "sse.com.cn",
   "stats.gov.cn",
   "szse.cn",
@@ -73,6 +75,8 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
   "latimes.com",
   "kiplinger.com",
   "marketwatch.com",
+  "marketbeat.com",
+  "moneyweek.com",
   "m.nbd.com.cn",
   "nbd.com.cn",
   "people.com.cn",
@@ -92,6 +96,10 @@ const INTERNAL_COPY =
   /\b(?:Codex|OpenAI|API(?:\s+Skill)?|Agent|provider|schema|pipeline|market_data_query|newsDiagnostics|schemaVersion|contractVersion)\b|内部评分|调试标记/iu;
 const RAW_DATE_OR_TIMESTAMP =
   /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
+const READER_AUDIT_COPY =
+  /该(?:来源|证据)|现有证据|证据边界|证据只|不能据此|无法据此|this evidence|the evidence only|cannot (?:be used to|establish|support|infer)|does not establish/iu;
+const FINANCIAL_EVENT_COPY =
+  /财报|业绩公告|财季|每股收益|earnings|\beps\b/iu;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const MARKET_TARGET_ALIASES = {
@@ -158,6 +166,58 @@ function readerText(value, label, maxLength, minLength = 2) {
     throw new Error(`${label} 包含未本地化的时间戳或日期`);
   }
   return text;
+}
+
+function readerAnalysis(value, label, maxLength, minLength) {
+  const text = readerText(value, label, maxLength, minLength);
+  if (READER_AUDIT_COPY.test(text)) {
+    throw new Error(`${label} 暴露了证据边界或审核过程；只保留读者需要的结论与事实`);
+  }
+  return text;
+}
+
+function validateResultComparisons(value, label, grounding, financialEvent) {
+  if (!Array.isArray(value) || value.length > 4) {
+    throw new Error(`${label} 必须为至多四项数据对比`);
+  }
+  if (financialEvent && value.length < 2) {
+    throw new Error(`${label} 财报或业绩催化必须至少提供两项实际值与基准对比`);
+  }
+  const metrics = value.map((entry, index) => {
+    const item = requireObject(entry, `${label}[${index}]`);
+    if (!['positive', 'negative', 'neutral'].includes(item.tone)) {
+      throw new Error(`${label}[${index}].tone 无效`);
+    }
+    return {
+      label: readerText(item.label, `${label}[${index}].label`, 40, 2),
+      actual: readerText(item.actual, `${label}[${index}].actual`, 40, 1),
+      baselineLabel: readerText(
+        item.baselineLabel,
+        `${label}[${index}].baselineLabel`,
+        24,
+        2,
+      ),
+      baseline: readerText(item.baseline, `${label}[${index}].baseline`, 40, 1),
+      delta: readerText(item.delta, `${label}[${index}].delta`, 60, 1),
+      tone: item.tone,
+      note:
+        typeof item.note === 'string' && item.note.trim()
+          ? readerAnalysis(item.note, `${label}[${index}].note`, 180, 2)
+          : '',
+    };
+  });
+  assertNumbersBounded(
+    grounding,
+    metrics
+      .map((item) => `${item.label} ${item.actual} ${item.baselineLabel} ${item.baseline} ${item.delta} ${item.note}`)
+      .join(' '),
+    label,
+  );
+  return metrics;
+}
+
+function sameNumericClaims(left, right) {
+  return JSON.stringify(numericClaims(left)) === JSON.stringify(numericClaims(right));
 }
 
 function stringArray(value, label, minItems, maxItems, maxLength = 80) {
@@ -975,7 +1035,7 @@ function validateDriver(value, input, index) {
     throw new Error(`${label} 分类字段无效`);
   }
   const title = readerText(driver.title, `${label}.title`, 80, 5);
-  const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
+  const summary = readerAnalysis(driver.summary, `${label}.summary`, 360, 100);
   const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 100);
   if (!["market", "sector", "subsector", "company"].includes(driver.attributionScope)) {
     throw new Error(`${label}.attributionScope 无效`);
@@ -1029,6 +1089,18 @@ function validateDriver(value, input, index) {
   }
   const marketData = evidence.filter((item) => item.kind === "market_data");
   const external = evidence.filter((item) => item.kind !== "market_data");
+  const financialEvent = FINANCIAL_EVENT_COPY.test(`${title} ${summary}`);
+  const grounding = `${marketGroundingText(input, driver.market)} ${evidenceGroundingText(
+    input,
+    driver.market,
+    evidence,
+  )}`;
+  const metrics = validateResultComparisons(
+    driver.metrics,
+    `${label}.metrics`,
+    grounding,
+    financialEvent,
+  );
   if (driver.direction === "mixed" && !sectorDirectionMatches) {
     const evidenceDirections = new Set(
       marketData
@@ -1064,11 +1136,7 @@ function validateDriver(value, input, index) {
   }
   const generatedText = `${title} ${summary} ${mechanism}`;
   assertNumbersBounded(
-    `${marketGroundingText(input, driver.market)} ${evidenceGroundingText(
-      input,
-      driver.market,
-      evidence,
-    )}`,
+    grounding,
     generatedText,
     label,
   );
@@ -1081,6 +1149,7 @@ function validateDriver(value, input, index) {
     attributionTargets,
     title,
     summary,
+    metrics,
     mechanism,
     sectorSymbols,
     evidence,
@@ -1094,7 +1163,7 @@ function validateAiUpdate(value, input, index) {
     throw new Error(`${label} 市场或环节无效`);
   }
   const title = readerText(update.title, `${label}.title`, 90, 5);
-  const summary = readerText(update.summary, `${label}.summary`, 360, 20);
+  const summary = readerAnalysis(update.summary, `${label}.summary`, 420, 100);
   const implication = readerText(
     update.implication,
     `${label}.implication`,
@@ -1134,8 +1203,18 @@ function validateAiUpdate(value, input, index) {
   ) {
     throw new Error(`${label} 未引用对应 AI 环节的本地行情`);
   }
+  const financialEvent = FINANCIAL_EVENT_COPY.test(
+    `${title} ${summary}`,
+  );
+  const grounding = evidenceGroundingText(input, update.market, evidence);
+  const metrics = validateResultComparisons(
+    update.metrics,
+    `${label}.metrics`,
+    grounding,
+    financialEvent,
+  );
   assertNumbersBounded(
-    evidenceGroundingText(input, update.market, evidence),
+    grounding,
     `${title} ${summary} ${implication}`,
     label,
   );
@@ -1144,6 +1223,7 @@ function validateAiUpdate(value, input, index) {
     layer: update.layer,
     title,
     summary,
+    metrics,
     implication,
     evidence,
   };
@@ -1512,9 +1592,21 @@ function validateTranslation(
     aiChainViews: {},
     drivers: translatedDrivers.map((value, index) => {
       const item = requireObject(value, `translations.en.drivers[${index}]`);
+      const sourceDriver = drivers[index];
+      const grounding = `${marketGroundingText(input, sourceDriver.market)} ${evidenceGroundingText(
+        input,
+        sourceDriver.market,
+        sourceDriver.evidence,
+      )}`;
       const translatedDriver = {
         title: readerText(item.title, `translations.en.drivers[${index}].title`, 140, 5),
-        summary: readerText(item.summary, `translations.en.drivers[${index}].summary`, 500, 20),
+        summary: readerAnalysis(item.summary, `translations.en.drivers[${index}].summary`, 600, 100),
+        metrics: validateResultComparisons(
+          item.metrics,
+          `translations.en.drivers[${index}].metrics`,
+          grounding,
+          FINANCIAL_EVENT_COPY.test(`${sourceDriver.title} ${sourceDriver.summary}`),
+        ),
         mechanism: readerText(
           item.mechanism,
           `translations.en.drivers[${index}].mechanism`,
@@ -1522,13 +1614,56 @@ function validateTranslation(
           100,
         ),
       };
+      for (const [metricIndex, metric] of translatedDriver.metrics.entries()) {
+        const sourceMetric = sourceDriver.metrics[metricIndex];
+        if (
+          !sourceMetric ||
+          metric.actual !== sourceMetric.actual ||
+          metric.baseline !== sourceMetric.baseline ||
+          !sameNumericClaims(metric.delta, sourceMetric.delta) ||
+          metric.tone !== sourceMetric.tone
+        ) {
+          throw new Error(
+            `translations.en.drivers[${index}].metrics[${metricIndex}] 数值或方向必须与中文一致`,
+          );
+        }
+      }
       return translatedDriver;
     }),
     aiChainUpdates: translatedAiUpdates.map((value, index) => {
       const item = requireObject(value, `translations.en.aiChainUpdates[${index}]`);
+      const sourceUpdate = aiUpdates[index];
+      const grounding = evidenceGroundingText(
+        input,
+        sourceUpdate.market,
+        sourceUpdate.evidence,
+      );
+      const metrics = validateResultComparisons(
+        item.metrics,
+        `translations.en.aiChainUpdates[${index}].metrics`,
+        grounding,
+        FINANCIAL_EVENT_COPY.test(
+          `${sourceUpdate.title} ${sourceUpdate.summary}`,
+        ),
+      );
+      for (const [metricIndex, metric] of metrics.entries()) {
+        const sourceMetric = sourceUpdate.metrics[metricIndex];
+        if (
+          !sourceMetric ||
+          metric.actual !== sourceMetric.actual ||
+          metric.baseline !== sourceMetric.baseline ||
+          !sameNumericClaims(metric.delta, sourceMetric.delta) ||
+          metric.tone !== sourceMetric.tone
+        ) {
+          throw new Error(
+            `translations.en.aiChainUpdates[${index}].metrics[${metricIndex}] 数值或方向必须与中文一致`,
+          );
+        }
+      }
       return {
         title: readerText(item.title, `translations.en.aiChainUpdates[${index}].title`, 160, 5),
-        summary: readerText(item.summary, `translations.en.aiChainUpdates[${index}].summary`, 600, 20),
+        summary: readerAnalysis(item.summary, `translations.en.aiChainUpdates[${index}].summary`, 700, 100),
+        metrics,
         implication: readerText(
           item.implication,
           `translations.en.aiChainUpdates[${index}].implication`,
@@ -1847,6 +1982,7 @@ export function buildReportContent(input, report) {
     attributionTargets: driver.attributionTargets,
     title: driver.title,
     summary: driver.summary,
+    metrics: driver.metrics,
     mechanism: driver.mechanism,
     sectorSymbols: driver.sectorSymbols,
     evidence: driver.evidence.map(storedEvidence),
@@ -1857,6 +1993,7 @@ export function buildReportContent(input, report) {
     layer: update.layer,
     title: update.title,
     summary: update.summary,
+    metrics: update.metrics,
     implication: update.implication,
     evidence: update.evidence.map(storedEvidence),
   }));

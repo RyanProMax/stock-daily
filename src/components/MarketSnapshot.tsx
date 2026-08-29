@@ -10,6 +10,7 @@ import type {
   MarketDirection,
   MarketMetric,
   MarketRegion,
+  ResultComparison,
   SectorConstituent,
   SectorHeatMetric,
   SectorHeatView,
@@ -133,7 +134,8 @@ function SectorSnapshotItem({
 interface SnapshotEvidenceItem {
   tag: string;
   title: string;
-  mechanism: string;
+  summary: string;
+  metrics: ResultComparison[];
   evidence: DriverEvidence[];
 }
 
@@ -155,37 +157,6 @@ function sourceName(evidence: DriverEvidence) {
 
 function sourceTitle(evidence: DriverEvidence) {
   return evidence.platform === "x" ? evidence.facts : evidence.title;
-}
-
-function causalSummaryParts(mechanism: string, language: Language) {
-  const boundaryMarkers =
-    language === "zh"
-      ? ["该来源", "该证据", "现有证据", "证据只", "上述证据"]
-      : ["This evidence", "The evidence", "Current evidence", "Evidence only"];
-  const boundaryIndex = boundaryMarkers.reduce((earliest, marker) => {
-    const index = mechanism.indexOf(marker);
-    return index > 0 && (earliest === -1 || index < earliest) ? index : earliest;
-  }, -1);
-
-  if (boundaryIndex > 0) {
-    return {
-      keyPoint: mechanism.slice(0, boundaryIndex),
-      boundary: mechanism.slice(boundaryIndex),
-    };
-  }
-
-  const sentenceEnd =
-    language === "zh"
-      ? mechanism.search(/[。！？]/u)
-      : mechanism.search(/[.!?](?=\s|$)/u);
-  if (sentenceEnd >= 0 && sentenceEnd < mechanism.length - 1) {
-    return {
-      keyPoint: mechanism.slice(0, sentenceEnd + 1),
-      boundary: mechanism.slice(sentenceEnd + 1),
-    };
-  }
-
-  return { keyPoint: mechanism, boundary: "" };
 }
 
 function evidenceTime(
@@ -237,13 +208,7 @@ function SnapshotEvidenceList({
 
   return (
     <ul className="snapshot-evidence-list">
-      {evidenceItems.map(
-        ({ evidence, tag, title, mechanism }) => {
-          const { keyPoint, boundary } = causalSummaryParts(
-            mechanism,
-            language,
-          );
-          return (
+      {evidenceItems.map(({ evidence, tag, title, summary, metrics }) => (
             <li
               key={`${title}:${evidence.map((item) => item.source).join(":")}`}
             >
@@ -252,11 +217,34 @@ function SnapshotEvidenceList({
                   <span className="snapshot-evidence-tag">{tag}</span>
                   <strong>{title}</strong>
                 </header>
+                {metrics.length > 0 && (
+                  <div className="snapshot-result-metrics">
+                    {metrics.map((metric) => (
+                      <article
+                        className="snapshot-result-metric"
+                        key={`${metric.label}:${metric.actual}:${metric.baseline}`}
+                      >
+                        <strong>{metric.label}</strong>
+                        <p>
+                          <span>
+                            <small>{language === "zh" ? "实际" : "Actual"}</small>
+                            <b>{metric.actual}</b>
+                          </span>
+                          <span>
+                            <small>{metric.baselineLabel}</small>
+                            <b>{metric.baseline}</b>
+                          </span>
+                          <em className={`snapshot-result-${metric.tone}`}>
+                            {metric.delta}
+                          </em>
+                        </p>
+                        {metric.note && <small>{metric.note}</small>}
+                      </article>
+                    ))}
+                  </div>
+                )}
                 <p className="snapshot-causal-summary">
-                  <mark className="snapshot-causal-key">{keyPoint}</mark>
-                  {boundary && (
-                    <span className="snapshot-causal-boundary">{boundary}</span>
-                  )}
+                  {summary}
                 </p>
                 <div className="snapshot-evidence-meta">
                   {[
@@ -285,9 +273,7 @@ function SnapshotEvidenceList({
                 </div>
               </article>
             </li>
-          );
-        },
-      )}
+          ))}
     </ul>
   );
 }
@@ -366,7 +352,8 @@ export default function MarketSnapshot({
       evidence: driver.evidence,
       tag: language === "zh" ? "大盘" : "Market",
       title: driver.title,
-      mechanism: driver.mechanism,
+      summary: driver.summary,
+      metrics: driver.metrics ?? [],
     }));
   const sectorEvidence: SnapshotEvidenceItem[] = drivers
     .filter((driver) => driver.role === "secondary")
@@ -374,16 +361,18 @@ export default function MarketSnapshot({
       evidence: driver.evidence,
       tag: language === "zh" ? "行业" : "Sector",
       title: driver.title,
-      mechanism: driver.mechanism,
+      summary: driver.summary,
+      metrics: driver.metrics ?? [],
     }));
   const aiEvidence: SnapshotEvidenceItem[] = aiUpdates.map((update) => ({
     evidence: update.evidence,
     tag:
       aiChain?.find((metric) => metric.layer === update.layer)?.[
         language === "en" ? "nameEn" : "name"
-      ] ?? (language === "zh" ? "AI" : "AI"),
+      ] ?? "AI",
     title: update.title,
-    mechanism: update.implication,
+    summary: update.summary,
+    metrics: update.metrics ?? [],
   }));
 
   return (

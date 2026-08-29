@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { readFile } from "node:fs/promises";
+import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -276,6 +278,104 @@ async function requestHeaders(
   };
 }
 
+async function requestHeadersWithNode(value, destination) {
+  const url = new URL(value);
+  const hostname = normalizeHostname(url.hostname);
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpsRequest(
+      url,
+      {
+        method: "GET",
+        family: destination.family,
+        servername: hostname,
+        headers: {
+          Accept:
+            "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.8",
+          Range: "bytes=0-0",
+          "User-Agent":
+            "Mozilla/5.0 (compatible; StockDailySourceAudit/1.0)",
+        },
+        lookup: (_lookupHostname, options, callback) => {
+          if (options?.all) {
+            callback(null, [destination]);
+            return;
+          }
+          callback(null, destination.address, destination.family);
+        },
+      },
+      (response) => {
+        response.resume();
+        resolveRequest({
+          status: Number(response.statusCode ?? 0),
+          location: response.headers.location,
+        });
+      },
+    );
+    request.setTimeout(30_000, () => {
+      request.destroy(new Error("Node HTTPS request timed out"));
+    });
+    request.once("error", rejectRequest);
+    request.end();
+  });
+}
+
+async function requestHeadersWithSystemDns(
+  value,
+  { runner = execFileAsync, curlPath = DEFAULT_CURL_PATH } = {},
+) {
+  const resolved = await publicDestination(value, (hostname, options) =>
+    dnsLookup(hostname, options),
+  );
+  try {
+    const response = await requestHeaders(
+      resolved.url.toString(),
+      resolved.destination,
+      { runner, curlPath },
+    );
+    if (![403, 429].includes(response.status)) return response;
+  } catch {
+    // The pinned Node HTTPS request below covers local curl/TLS failures.
+  }
+  return requestHeadersWithNode(resolved.url.toString(), resolved.destination);
+}
+
+async function requestHeadersWithFallback(
+  value,
+  destination,
+  { runner = execFileAsync, curlPath = DEFAULT_CURL_PATH } = {},
+) {
+  try {
+    const response = await requestHeaders(value, destination, {
+      runner,
+      curlPath,
+    });
+    if (![403, 429].includes(response.status)) return response;
+    try {
+      return await requestHeadersWithSystemDns(value, {
+        runner,
+        curlPath,
+      });
+    } catch {
+      return response;
+    }
+  } catch (curlError) {
+    try {
+      return await requestHeadersWithSystemDns(value, {
+        runner,
+        curlPath,
+      });
+    } catch (nodeError) {
+      const curlDetail = String(curlError?.message ?? "curl failed")
+        .replace(/\s+/gu, " ")
+        .trim();
+      const nodeDetail = String(nodeError?.message ?? "Node HTTPS failed")
+        .replace(/\s+/gu, " ")
+        .trim();
+      throw new Error(`${curlDetail}; fallback: ${nodeDetail}`);
+    }
+  }
+}
+
 export async function openExternalSource(
   source,
   {
@@ -292,7 +392,7 @@ export async function openExternalSource(
   const openDestination =
     requester ??
     ((url, destination) =>
-      requestHeaders(url, destination, { runner, curlPath }));
+      requestHeadersWithFallback(url, destination, { runner, curlPath }));
   let current = source;
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
     let resolved;
@@ -300,7 +400,18 @@ export async function openExternalSource(
       resolved = await publicDestination(current, resolveDestination);
     } catch (error) {
       if (String(error?.message ?? "").startsWith("外部证据")) throw error;
-      throw new Error(`外部证据无法解析：${current}`);
+      try {
+        resolved = await publicDestination(current, (hostname, options) =>
+          dnsLookup(hostname, options),
+        );
+      } catch (fallbackError) {
+        if (
+          String(fallbackError?.message ?? "").startsWith("外部证据")
+        ) {
+          throw fallbackError;
+        }
+        throw new Error(`外部证据无法解析：${current}`);
+      }
     }
     let response;
     try {

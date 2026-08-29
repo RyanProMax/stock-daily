@@ -104,7 +104,6 @@ async function inspect(page, market, language, width) {
       viewportWidth: innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
       fontsLoaded: document.fonts.status,
-      contract: document.querySelector(".page-shell")?.dataset.contract,
       activeMarket: document
         .querySelector('.market-switcher a[aria-current="page"]')
         ?.textContent.trim(),
@@ -124,6 +123,9 @@ async function inspect(page, market, language, width) {
       causalBoundaryCount: document.querySelectorAll(
         ".snapshot-causal-boundary",
       ).length,
+      resultMetricCount: document.querySelectorAll(
+        ".snapshot-result-metric",
+      ).length,
       attributionEmptyCount: document.querySelectorAll(
         ".snapshot-group-indices .snapshot-attribution-empty",
       ).length,
@@ -142,6 +144,10 @@ async function inspect(page, market, language, width) {
       forbiddenCopy:
         mainText.match(
           /API\s*Skill|market_data_query|codex-daily|agentModel|schemaVersion|contractVersion/giu,
+        ) ?? [],
+      auditCopy:
+        mainText.match(
+          /该(?:来源|证据)|证据边界|证据只|不能据此|this evidence|does not establish/giu,
         ) ?? [],
       clipped,
       offCanvas,
@@ -208,10 +214,11 @@ for (const [key, audit] of Object.entries(result)) {
     layout.causalSummaryLengths.every((length) => length >= 100),
     JSON.stringify(result),
   );
-  assert.equal(layout.causalKeyCount, layout.causalSummaryCount, JSON.stringify(result));
+  assert.equal(layout.causalKeyCount, 0, JSON.stringify(result));
+  assert.equal(layout.causalBoundaryCount, 0, JSON.stringify(result));
   assert.equal(
-    layout.causalBoundaryCount,
-    layout.causalSummaryCount,
+    layout.resultMetricCount > 0,
+    market === "US",
     JSON.stringify(result),
   );
   assert.equal(
@@ -228,6 +235,7 @@ for (const [key, audit] of Object.entries(result)) {
   assert.equal(layout.unverifiedCount, 0, JSON.stringify(result));
   assert.deepEqual(layout.rawTimestamps, [], JSON.stringify(result));
   assert.deepEqual(layout.forbiddenCopy, [], JSON.stringify(result));
+  assert.deepEqual(layout.auditCopy, [], JSON.stringify(result));
   assert.deepEqual(layout.clipped, [], JSON.stringify(result));
   assert.deepEqual(layout.offCanvas, [], JSON.stringify(result));
   assert.deepEqual(audit.consoleErrors, [], JSON.stringify(result));

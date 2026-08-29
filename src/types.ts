@@ -266,6 +266,16 @@ export interface DriverEvidence {
   authorHandle?: string;
 }
 
+export interface ResultComparison {
+  label: string;
+  actual: string;
+  baselineLabel: string;
+  baseline: string;
+  delta: string;
+  tone: ImpactTone;
+  note: string;
+}
+
 export interface MarketDriver {
   id: string;
   market: MarketRegion;
@@ -274,6 +284,7 @@ export interface MarketDriver {
   direction: Exclude<ImpactTone, "neutral">;
   title: string;
   summary: string;
+  metrics?: ResultComparison[];
   mechanism: string;
   sectorSymbols: string[];
   evidence: DriverEvidence[];
@@ -285,6 +296,7 @@ export interface AiChainUpdate {
   layer: AiChainLayer;
   title: string;
   summary: string;
+  metrics?: ResultComparison[];
   implication: string;
   evidence: DriverEvidence[];
 }
@@ -363,9 +375,11 @@ export interface DailyReportTranslation {
       >;
     };
   }>;
-  drivers?: Array<Pick<MarketDriver, "title" | "summary" | "mechanism">>;
+  drivers?: Array<
+    Pick<MarketDriver, "title" | "summary" | "metrics" | "mechanism">
+  >;
   aiChainUpdates?: Array<
-    Pick<AiChainUpdate, "title" | "summary" | "implication">
+    Pick<AiChainUpdate, "title" | "summary" | "metrics" | "implication">
   >;
 }
 

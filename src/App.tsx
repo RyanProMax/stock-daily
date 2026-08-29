@@ -14,6 +14,7 @@ import {
   marketTrendLabel,
   toneLabel,
 } from "./lib/i18n";
+import { publicDailyReport, publicWeeklyReport } from "./lib/public-data";
 import type {
   DailyReport,
   Language,
@@ -49,6 +50,15 @@ export interface WeeklyPageData extends CommonPageData {
 }
 
 export type PageData = DailyPageData | WeeklyPageData;
+
+export function publicPageData(data: PageData): PageData {
+  return data.kind === "daily"
+    ? { ...data, report: publicDailyReport(data.report) }
+    : {
+        ...data,
+        report: data.report ? publicWeeklyReport(data.report) : null,
+      };
+}
 
 function buildLanguageHref(data: PageData) {
   const url = new URL(data.requestUrl);
@@ -298,11 +308,9 @@ function DailyPage({ data }: { data: DailyPageData }) {
   const marketStories = report.stories.filter((story) =>
     story.regions.includes(data.market),
   );
-  const isAttribution = [
-    "market-attribution-v9",
-    "codex-market-research-v10",
-    "codex-market-research-v11",
-  ].includes(report.contractVersion ?? "");
+  const isAttribution = Boolean(
+    report.sectorPerformance?.length && report.aiChainPerformance?.length,
+  );
   const marketDrivers = (report.drivers ?? []).filter(
     (driver) =>
       driver.market === data.market &&
@@ -355,9 +363,8 @@ function DailyPage({ data }: { data: DailyPageData }) {
     : "";
   return (
     <div
-      className="page-shell"
+      className={`page-shell${isAttribution ? " page-shell-dense" : ""}`}
       data-render="ssr"
-      data-contract={report.contractVersion}
     >
       <header
         className={`hero hero-daily${isAttribution ? " hero-daily-compact" : ""}`}
@@ -768,13 +775,14 @@ function serializePageData(data: PageData) {
 }
 
 export default function Document({ data }: { data: PageData }) {
-  const t = copy[data.language];
-  const metadata = pageMetadata(data);
-  const canonical = data.requestUrl;
+  const readerData = publicPageData(data);
+  const t = copy[readerData.language];
+  const metadata = pageMetadata(readerData);
+  const canonical = readerData.requestUrl;
 
   return (
     <html
-      lang={data.language === "zh" ? "zh-CN" : "en"}
+      lang={readerData.language === "zh" ? "zh-CN" : "en"}
       suppressHydrationWarning
     >
       <head>
@@ -815,19 +823,19 @@ export default function Document({ data }: { data: PageData }) {
         <a className="skip-link" href="#main-content">
           {t.skip}
         </a>
-        <AppHeader data={data} />
+        <AppHeader data={readerData} />
         <main id="main-content">
-          {data.kind === "daily" ? (
-            <DailyPage data={data} />
+          {readerData.kind === "daily" ? (
+            <DailyPage data={readerData} />
           ) : (
-            <WeeklyPage data={data} />
+            <WeeklyPage data={readerData} />
           )}
         </main>
-        <AppFooter language={data.language} />
+        <AppFooter language={readerData.language} />
         <script
           id="stock-daily-data"
           type="application/json"
-          dangerouslySetInnerHTML={{ __html: serializePageData(data) }}
+          dangerouslySetInnerHTML={{ __html: serializePageData(readerData) }}
         />
         <script type="module" src="/static/client.js" />
       </body>

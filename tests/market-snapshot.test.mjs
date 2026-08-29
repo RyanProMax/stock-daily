@@ -104,7 +104,8 @@ function props(aiUpdates = []) {
         role: "primary",
         direction: "positive",
         title: "原材料供给变化支撑市场",
-        summary: "供给变化支撑原材料并影响大盘。",
+        summary: "行业机构确认主要生产环节出现供应调整，现货供给预期随之收紧。供给收缩先改善相关产品的议价能力、库存价值和企业盈利预期，再推动资金重新评估原材料公司的估值；当天原材料代表篮子的上涨方向与这条传导链一致。",
+        metrics: [],
         mechanism: causalSummary,
         sectorSymbols: ["SECTOR-0"],
         evidence: [evidence, xEvidence],
@@ -115,7 +116,27 @@ function props(aiUpdates = []) {
         role: "secondary",
         direction: "positive",
         title: "公司业绩带动行业走强",
-        summary: "同交易时段的业绩与客流数据超过预期。",
+        summary: "公司披露季度收入和利润高于市场预期，同时提高后续经营指引。盈利兑现和指引上修共同抬高投资者对增长持续性的判断，带动资金重新评估公司及其所在行业；公告后的价格反应与业绩改善方向一致。",
+        metrics: [
+          {
+            label: "季度营收",
+            actual: "112亿元",
+            baselineLabel: "市场预期",
+            baseline: "108亿元",
+            delta: "高出4亿元（+3.7%）",
+            tone: "positive",
+            note: "",
+          },
+          {
+            label: "每股收益",
+            actual: "2.20元",
+            baselineLabel: "市场预期",
+            baseline: "2.00元",
+            delta: "高出0.20元（+10.0%）",
+            tone: "positive",
+            note: "",
+          },
+        ],
         mechanism: secondaryCausalSummary,
         sectorSymbols: ["SECTOR-1"],
         evidence: [
@@ -175,23 +196,15 @@ test("market snapshot renders unique compact evidence rows for market and sector
   );
   assert.match(marketItem.textContent, /大盘/);
   assert.match(marketItem.textContent, /原材料供给变化支撑市场/);
-  assert.doesNotMatch(marketItem.textContent, /供给变化支撑原材料并影响大盘/);
-  assert.match(marketItem.textContent, /现货供应预期因此收紧/);
+  assert.match(marketItem.textContent, /行业机构确认主要生产环节/);
+  assert.match(marketItem.textContent, /现货供给预期随之收紧/);
   assert.doesNotMatch(marketItem.textContent, /为什么|发生了什么|原因已验证|部分解释|原因未证实/);
   assert.match(marketItem.textContent, /市场收评/);
   assert.match(marketItem.textContent, /X · @example_research/);
   assert.match(marketItem.textContent, /专业研究/);
   assert.equal(marketItem.querySelectorAll(".snapshot-causal-summary").length, 1);
-  assert.equal(marketItem.querySelectorAll(".snapshot-causal-key").length, 1);
-  assert.equal(marketItem.querySelectorAll(".snapshot-causal-boundary").length, 1);
-  assert.match(
-    marketItem.querySelector(".snapshot-causal-key").textContent,
-    /现货供应预期因此收紧/,
-  );
-  assert.match(
-    marketItem.querySelector(".snapshot-causal-boundary").textContent,
-    /该证据只覆盖/,
-  );
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-key").length, 0);
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-boundary").length, 0);
   assert.ok(
     [...marketItem.querySelector(".snapshot-causal-summary").textContent.trim()].length >= 100,
   );
@@ -212,7 +225,10 @@ test("market snapshot renders unique compact evidence rows for market and sector
   assert.equal(marketItem.querySelectorAll("time[datetime]").length, 2);
   assert.match(sectorItem.textContent, /行业/);
   assert.match(sectorItem.textContent, /公司业绩带动行业走强/);
-  assert.doesNotMatch(sectorItem.textContent, /同交易时段的业绩与客流数据超过预期/);
+  assert.match(sectorItem.textContent, /季度收入和利润高于市场预期/);
+  assert.equal(sectorItem.querySelectorAll(".snapshot-result-metric").length, 2);
+  assert.match(sectorItem.textContent, /112亿元/);
+  assert.match(sectorItem.textContent, /高出4亿元/);
   assert.doesNotMatch(sectorItem.textContent, /原材料供给变化支撑市场/);
   assert.equal(
     sectorItem.querySelectorAll(
@@ -261,7 +277,8 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
       market: "US",
       layer: "interconnect",
       title: "光互连订单与技术路线得到验证",
-      summary: "企业订单和行业研究共同指向光互连需求。",
+      summary: "公司公告确认光互连产品订单增加，并披露相应交付安排。新增订单先改善近期收入兑现、产能利用与现金回收预期，再推动投资者上调相关公司的盈利与估值判断；交易时段的光互连代表标的走势与订单改善方向一致，需求变化已形成可跟踪的经营线索。",
+      metrics: [],
       implication: aiCausalSummary,
       evidence: [{ ...evidence, source: "https://example.com/ai-evidence" }],
     },
@@ -277,8 +294,7 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
   assert.ok(item);
   assert.match(item.textContent, /AI层4/);
   assert.match(item.textContent, /光互连订单与技术路线得到验证/);
-  assert.doesNotMatch(item.textContent, /企业订单和行业研究共同指向光互连需求/);
-  assert.match(item.textContent, /订单增长会先改善市场/);
+  assert.match(item.textContent, /新增订单先改善近期收入兑现/);
   assert.doesNotMatch(item.textContent, /发生了什么|原因已验证|部分解释|原因未证实/);
   assert.match(item.textContent, /市场收评/);
   assert.ok(

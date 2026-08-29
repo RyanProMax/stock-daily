@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { renderToReadableStream } from "react-dom/server.edge";
 import Document, {
+  publicPageData,
   type DailyPageData,
   type PageData,
   type WeeklyPageData,
@@ -250,7 +251,7 @@ app.get("/api/page/daily", async (c) => {
       );
     }
     c.header("Cache-Control", "no-store");
-    return c.json({ data });
+    return c.json({ data: publicPageData(data) });
   } catch {
     return c.json(
       { error: { message: "Daily page data is unavailable.", status: 503 } },

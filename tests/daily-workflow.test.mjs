@@ -175,6 +175,14 @@ test("daily task uses market results as search leads instead of a news pool", as
   assert.equal(schema.$defs.aiUpdate.properties.implication.minLength, 100);
   assert.equal(schema.$defs.translatedDriver.properties.mechanism.minLength, 100);
   assert.equal(schema.$defs.translatedAiUpdate.properties.implication.minLength, 100);
+  assert.equal(schema.$defs.driver.properties.summary.minLength, 100);
+  assert.equal(schema.$defs.aiUpdate.properties.summary.minLength, 100);
+  assert.ok(schema.$defs.driver.required.includes("metrics"));
+  assert.ok(schema.$defs.aiUpdate.required.includes("metrics"));
+  assert.ok(schema.$defs.translatedDriver.required.includes("metrics"));
+  assert.ok(schema.$defs.translatedAiUpdate.required.includes("metrics"));
+  assert.match(prompt, /财报、业绩或指引催化必须填写至少两项 `metrics`/);
+  assert.match(prompt, /严禁写“该来源只验证”“证据边界”“不能据此”/);
   assert.match(prompt, /至少一百个字符/);
 });
 

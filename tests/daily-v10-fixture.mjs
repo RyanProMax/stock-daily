@@ -232,6 +232,22 @@ const fixtureAnalysisEn = {
   cnInterconnect: "A company filing disclosed slower confirmation of optical-interconnect orders and warned of near-term delivery volatility. Delayed confirmations can weaken expectations for near-term revenue realization and utilization before pressuring related valuations; the evidence covers optical interconnects only and does not explain dispersion across other intelligent-industry layers.",
 };
 
+const fixtureReaderSummary = {
+  cnMaterials: "行业机构确认主要生产环节出现供应调整，现货供给预期随之收紧。供给收缩通常先改善相关产品的议价能力、库存价值和企业盈利预期，再推动资金重新评估原材料公司的估值；当天原材料代表篮子的上涨方向与这条传导链一致。",
+  cnUtilities: "监管机构披露相关价格调整仍受约束，并要求部分公用事业企业控制终端收费。收费空间收窄会限制收入弹性和利润改善幅度，市场因此下调近期盈利预期与配置意愿；当天公用事业代表篮子的下跌方向与这一约束继续保持一致。",
+  usMaterials: "专业媒体在交易时段报道商业活动改善并带动需求预期回升。更强的需求先改善周期品订单、销量和盈利判断，再推动资金提高对材料公司的估值与配置；当天材料行业代表篮子上涨，和商业活动改善所指向的周期需求变化保持一致。",
+  usTechnology: "专业媒体报道资本开支上升引发市场对科技企业短期利润率的担忧。更高投入会先压低近期自由现金流和盈利预期，再通过估值折现与仓位调整对科技股形成压力；当天科技行业代表篮子下跌，与利润率担忧所指向的方向一致。",
+  cnInterconnect: "公司公告显示光互连产品的订单确认节奏放缓，并提示短期交付存在波动。订单推迟会降低近期收入兑现、产能利用和现金回收预期，进而压低相关公司的估值；当天光互连代表篮子相对走弱，与订单和交付节奏变化指向的压力一致。",
+};
+
+const fixtureReaderSummaryEn = {
+  cnMaterials: "An industry authority confirmed a supply adjustment in a major production segment, tightening expectations for spot availability. The shift can improve pricing power, inventory values, and earnings expectations before investors revalue materials companies; the materials basket moved in the same direction during the session.",
+  cnUtilities: "The regulator said relevant price adjustments remained constrained and required some utilities to limit end-user charges. Reduced pricing room caps revenue and margin upside, which can weaken near-term earnings expectations and allocations; the utilities basket declined in the direction implied by that constraint.",
+  usMaterials: "A professional publisher reported improving business activity and stronger demand expectations during the completed session. Better demand can lift cyclical orders, volumes, and earnings expectations before investors raise valuations and allocations; the materials basket advanced in the direction implied by that improvement.",
+  usTechnology: "A professional publisher reported that rising capital expenditure prompted concern about near-term technology-sector margins. Higher investment can reduce free cash flow and earnings expectations before discount rates and positioning weigh on valuations; the technology basket declined in the direction implied by that concern.",
+  cnInterconnect: "A company filing disclosed slower confirmation of optical-interconnect orders and warned of near-term delivery volatility. Delayed confirmation can weaken revenue realization, utilization, and cash-collection expectations before pressuring valuations; the optical-interconnect basket lagged in the direction implied by those changes.",
+};
+
 export function fixtureReport(input = fixtureInput()) {
   const cnMaterials = input.sectorPerformance.find(
     (item) => item.market === "CN" && item.symbol === "932078",
@@ -287,7 +303,8 @@ export function fixtureReport(input = fixtureInput()) {
         attributionScope: "sector",
         attributionTargets: ["932078"],
         title: "供应变化支撑原材料行业",
-        summary: "官方披露的供应变化与原材料行业走强方向一致，为该行业表现提供直接支撑。",
+        summary: fixtureReaderSummary.cnMaterials,
+        metrics: [],
         mechanism: fixtureAnalysis.cnMaterials,
         sectorSymbols: ["932078"],
         evidence: [
@@ -316,7 +333,8 @@ export function fixtureReport(input = fixtureInput()) {
         attributionScope: "sector",
         attributionTargets: ["932086"],
         title: "价格监管消息压制公用事业",
-        summary: "监管机构披露的价格约束与公用事业行业走弱方向一致，为其相对落后提供直接解释。",
+        summary: fixtureReaderSummary.cnUtilities,
+        metrics: [],
         mechanism: fixtureAnalysis.cnUtilities,
         sectorSymbols: ["932086"],
         evidence: [
@@ -345,7 +363,8 @@ export function fixtureReport(input = fixtureInput()) {
         attributionScope: "sector",
         attributionTargets: ["XLB"],
         title: "商业活动信息支撑材料行业",
-        summary: "专业媒体报道的商业活动改善与材料行业上涨方向一致，为周期方向提供局部支撑。",
+        summary: fixtureReaderSummary.usMaterials,
+        metrics: [],
         mechanism: fixtureAnalysis.usMaterials,
         sectorSymbols: ["XLB"],
         evidence: [
@@ -376,7 +395,8 @@ export function fixtureReport(input = fixtureInput()) {
         attributionScope: "sector",
         attributionTargets: ["XLK"],
         title: "资本开支担忧压制科技行业",
-        summary: "专业媒体报道的资本开支担忧与科技行业下跌方向一致，为其相对落后提供直接解释。",
+        summary: fixtureReaderSummary.usTechnology,
+        metrics: [],
         mechanism: fixtureAnalysis.usTechnology,
         sectorSymbols: ["XLK"],
         evidence: [
@@ -405,7 +425,8 @@ export function fixtureReport(input = fixtureInput()) {
         market: "CN",
         layer: "interconnect",
         title: "光互连订单变化提供局部线索",
-        summary: "光互连代表篮子相对走弱，公司披露的订单节奏变化与该环节承压方向一致。",
+        summary: fixtureReaderSummary.cnInterconnect,
+        metrics: [],
         implication: fixtureAnalysis.cnInterconnect,
         evidence: [
           marketEvidence(
@@ -455,29 +476,34 @@ export function fixtureReport(input = fixtureInput()) {
         drivers: [
           {
             title: "Supply changes supported materials",
-            summary: "Officially disclosed supply changes aligned with materials strength and directly supported the sector move.",
+            summary: fixtureReaderSummaryEn.cnMaterials,
+            metrics: [],
             mechanism: fixtureAnalysisEn.cnMaterials,
           },
           {
             title: "Pricing constraints weighed on utilities",
-            summary: "Disclosed pricing constraints aligned with utilities weakness and directly explained part of the lag.",
+            summary: fixtureReaderSummaryEn.cnUtilities,
+            metrics: [],
             mechanism: fixtureAnalysisEn.cnUtilities,
           },
           {
             title: "Business activity supported materials",
-            summary: "Reported improvement in business activity aligned with materials strength and offered support for cyclicals.",
+            summary: fixtureReaderSummaryEn.usMaterials,
+            metrics: [],
             mechanism: fixtureAnalysisEn.usMaterials,
           },
           {
             title: "Capital-spending concerns weighed on technology",
-            summary: "Reported capital-spending concerns aligned with technology weakness and directly explained part of the lag.",
+            summary: fixtureReaderSummaryEn.usTechnology,
+            metrics: [],
             mechanism: fixtureAnalysisEn.usTechnology,
           },
         ],
         aiChainUpdates: [
           {
             title: "Order changes offered a partial clue for optical interconnects",
-            summary: "The optical-interconnect basket lagged as disclosed order timing moved in the same direction.",
+            summary: fixtureReaderSummaryEn.cnInterconnect,
+            metrics: [],
             implication: fixtureAnalysisEn.cnInterconnect,
           },
         ],

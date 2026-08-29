@@ -641,10 +641,10 @@ test("English AI translations may use numbers from AI-specific evidence", () => 
   const report = fixtureReport(input);
   report.aiChainUpdates[0].evidence[1].facts +=
     " 公司同时披露相关订单同比增长17.24%。";
-  report.aiChainUpdates[0].summary =
-    "光互连代表篮子相对走弱，公司披露相关订单同比增长17.24%，但价格表现仍然承压。";
-  report.translations.en.aiChainUpdates[0].summary =
-    "The basket lagged even as disclosed orders rose 17.24%, so the event explained only part of the move.";
+  report.aiChainUpdates[0].summary +=
+    " 公司同时披露相关订单同比增长17.24%，但价格表现仍然承压。";
+  report.translations.en.aiChainUpdates[0].summary +=
+    " The basket lagged even as disclosed orders rose 17.24%, so the event explained only part of the move.";
   assert.equal(validateReport(report, input).aiChainUpdates.length, 1);
 });
 
@@ -692,8 +692,8 @@ test("reader copy rejects internal terms, raw timestamps and ungrounded numbers"
   );
 
   const hallucinated = fixtureReport(input);
-  hallucinated.drivers[0].summary =
-    "官方供应变化与原材料上涨99%的幅度一致，并为行业表现提供直接支撑。";
+  hallucinated.drivers[0].summary +=
+    " 官方供应变化与原材料上涨99%的幅度一致。";
   assert.throws(
     () => validateReport(hallucinated, input),
     /证据未提供的数字 99/,
@@ -723,8 +723,8 @@ test("numeric grounding cannot borrow a value from another market", () => {
   input.marketBriefs = buildMarketBriefs(input);
 
   const crossMarketDriver = fixtureReport(input);
-  crossMarketDriver.drivers[0].summary =
-    "供应变化与原材料行业下跌6.01%的方向一致，并为当天表现提供直接支撑。";
+  crossMarketDriver.drivers[0].summary +=
+    " 供应变化与原材料行业下跌6.01%的方向一致。";
   assert.throws(
     () => validateReport(crossMarketDriver, input),
     /证据未提供的数字 6.01/,

@@ -143,6 +143,31 @@
         "authorHandle": { "type": "string", "maxLength": 80 }
       }
     },
+    "resultComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "actual",
+        "baselineLabel",
+        "baseline",
+        "delta",
+        "tone",
+        "note"
+      ],
+      "properties": {
+        "label": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "actual": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "baselineLabel": { "type": "string", "minLength": 2, "maxLength": 24 },
+        "baseline": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "delta": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "tone": {
+          "type": "string",
+          "enum": ["positive", "negative", "neutral"]
+        },
+        "note": { "type": "string", "maxLength": 180 }
+      }
+    },
     "driver": {
       "type": "object",
       "additionalProperties": false,
@@ -155,6 +180,7 @@
         "attributionTargets",
         "title",
         "summary",
+        "metrics",
         "mechanism",
         "sectorSymbols",
         "evidence"
@@ -184,7 +210,12 @@
           "items": { "type": "string", "minLength": 1, "maxLength": 40 }
         },
         "title": { "type": "string", "minLength": 5, "maxLength": 80 },
-        "summary": { "type": "string", "minLength": 15, "maxLength": 300 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 360 },
+        "metrics": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/resultComparison" }
+        },
         "mechanism": { "type": "string", "minLength": 100, "maxLength": 460 },
         "sectorSymbols": {
           "type": "array",
@@ -208,6 +239,7 @@
         "layer",
         "title",
         "summary",
+        "metrics",
         "implication",
         "evidence"
       ],
@@ -227,7 +259,12 @@
           ]
         },
         "title": { "type": "string", "minLength": 5, "maxLength": 90 },
-        "summary": { "type": "string", "minLength": 20, "maxLength": 360 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 420 },
+        "metrics": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/resultComparison" }
+        },
         "implication": { "type": "string", "minLength": 100, "maxLength": 420 },
         "evidence": {
           "type": "array",
@@ -281,20 +318,30 @@
     "translatedDriver": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "summary", "mechanism"],
+      "required": ["title", "summary", "metrics", "mechanism"],
       "properties": {
         "title": { "type": "string", "minLength": 5, "maxLength": 140 },
-        "summary": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 600 },
+        "metrics": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/resultComparison" }
+        },
         "mechanism": { "type": "string", "minLength": 100, "maxLength": 700 }
       }
     },
     "translatedAiUpdate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "summary", "implication"],
+      "required": ["title", "summary", "metrics", "implication"],
       "properties": {
         "title": { "type": "string", "minLength": 5, "maxLength": 160 },
-        "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 700 },
+        "metrics": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/resultComparison" }
+        },
         "implication": { "type": "string", "minLength": 100, "maxLength": 700 }
       }
     },
