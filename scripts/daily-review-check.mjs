@@ -26,7 +26,7 @@ function object(value, label) {
 }
 
 function text(value, label, minLength = 1) {
-  if (typeof value !== "string" || value.trim().length < minLength) {
+  if (typeof value !== "string" || [...value.trim()].length < minLength) {
     throw new Error(`${label} 缺失`);
   }
   return value.trim();
@@ -98,6 +98,11 @@ function assertClaimReviews(review, report) {
     const source = normalizedUrl(
       claim.source,
       `daily-review.claimReviews[${index}].source`,
+    );
+    text(
+      claim.publishedClaim,
+      `daily-review.claimReviews[${index}].publishedClaim`,
+      100,
     );
     text(claim.summary, `daily-review.claimReviews[${index}].summary`, 20);
     if (

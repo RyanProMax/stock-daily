@@ -486,7 +486,6 @@ function DailyPage({ data }: { data: DailyPageData }) {
             sourceOfficial: t.xSourceOfficial,
             sourceSpecialist: t.xSourceSpecialist,
             sourceExpert: t.xSourceExpert,
-            mechanism: t.driverMechanism,
           }}
         />
       </section>

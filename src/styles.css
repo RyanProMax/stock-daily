@@ -5058,22 +5058,8 @@ footer {
   line-height: 1.45;
 }
 
-.snapshot-causal-reason {
+.snapshot-causal-summary {
   min-width: 0;
-}
-
-.snapshot-causal-reason > strong {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--muted);
-  font-family: var(--sans);
-  font-size: 9px;
-  font-weight: 760;
-  letter-spacing: 0.04em;
-  line-height: 1.35;
-}
-
-.snapshot-causal-reason p {
   max-width: 75ch;
   margin: 0;
   color: color-mix(in srgb, var(--ink) 92%, var(--muted));
@@ -5212,7 +5198,7 @@ footer {
     font-size: 12px;
   }
 
-  .snapshot-causal-reason p {
+  .snapshot-causal-summary {
     font-size: 11px;
   }
 

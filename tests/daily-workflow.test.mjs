@@ -171,6 +171,11 @@ test("daily task uses market results as search leads instead of a news pool", as
   );
   assert.ok(schema.required.includes("researchAudit"));
   assert.equal(schema.$defs.researchMarket.properties.hypotheses.minItems, 3);
+  assert.equal(schema.$defs.driver.properties.mechanism.minLength, 100);
+  assert.equal(schema.$defs.aiUpdate.properties.implication.minLength, 100);
+  assert.equal(schema.$defs.translatedDriver.properties.mechanism.minLength, 100);
+  assert.equal(schema.$defs.translatedAiUpdate.properties.implication.minLength, 100);
+  assert.match(prompt, /至少一百个字符/);
 });
 
 test("each retry reads the previous validation failure", async () => {

@@ -41,6 +41,10 @@ const xEvidence = {
   authority: "specialist",
 };
 
+const causalSummary = "行业机构确认主要生产环节出现供应调整，现货供应预期因此收紧。更紧的供应预期会先改善相关企业的产品价格和盈利判断，再推动资金重新评估原材料行业。该证据只覆盖已披露的供应变化及对应行业，不能解释其他行业或整个市场的同步表现。";
+const secondaryCausalSummary = "公司公告确认季度利润和收入高于市场预期，并同步提高后续经营指引。盈利与指引改善会先抬高投资者对公司增长兑现能力的判断，再带动相关行业估值上修。该证据能够解释公告涉及公司的表现，但不能据此断言同一行业的所有公司都由这项事件推动。";
+const aiCausalSummary = "公司公告确认光互连产品订单增加，并披露了相应的交付安排。订单增长会先改善市场对近期收入兑现和产能利用的预期，再推动相关光互连标的估值调整。该证据只覆盖公告涉及的公司和光互连环节，不能解释其他智能产业链环节之间的分化。";
+
 function constituents(prefix) {
   return Array.from({ length: 4 }, (_, index) => ({
     symbol: `${prefix}-${index}`,
@@ -101,7 +105,7 @@ function props(aiUpdates = []) {
         direction: "positive",
         title: "原材料供给变化支撑市场",
         summary: "供给变化支撑原材料并影响大盘。",
-        mechanism: "供给收紧抬升原材料价格，并传导到行业表现。",
+        mechanism: causalSummary,
         sectorSymbols: ["SECTOR-0"],
         evidence: [evidence, xEvidence],
       },
@@ -112,7 +116,7 @@ function props(aiUpdates = []) {
         direction: "positive",
         title: "公司业绩带动行业走强",
         summary: "同交易时段的业绩与客流数据超过预期。",
-        mechanism: "行业龙头上涨并与板块方向一致。",
+        mechanism: secondaryCausalSummary,
         sectorSymbols: ["SECTOR-1"],
         evidence: [
           {
@@ -142,7 +146,6 @@ function props(aiUpdates = []) {
       sourceOfficial: "官方",
       sourceSpecialist: "专业研究",
       sourceExpert: "行业专家",
-      mechanism: "为什么",
     },
   };
 }
@@ -173,13 +176,15 @@ test("market snapshot renders unique compact evidence rows for market and sector
   assert.match(marketItem.textContent, /大盘/);
   assert.match(marketItem.textContent, /原材料供给变化支撑市场/);
   assert.doesNotMatch(marketItem.textContent, /供给变化支撑原材料并影响大盘/);
-  assert.match(marketItem.textContent, /供给收紧抬升原材料价格，并传导到行业表现/);
-  assert.match(marketItem.textContent, /为什么/);
-  assert.doesNotMatch(marketItem.textContent, /发生了什么|原因已验证|部分解释|原因未证实/);
+  assert.match(marketItem.textContent, /现货供应预期因此收紧/);
+  assert.doesNotMatch(marketItem.textContent, /为什么|发生了什么|原因已验证|部分解释|原因未证实/);
   assert.match(marketItem.textContent, /市场收评/);
   assert.match(marketItem.textContent, /X · @example_research/);
   assert.match(marketItem.textContent, /专业研究/);
-  assert.equal(marketItem.querySelectorAll(".snapshot-causal-reason").length, 1);
+  assert.equal(marketItem.querySelectorAll(".snapshot-causal-summary").length, 1);
+  assert.ok(
+    [...marketItem.querySelector(".snapshot-causal-summary").textContent.trim()].length >= 100,
+  );
   assert.equal(marketItem.querySelectorAll(".snapshot-causal-grid").length, 0);
   assert.ok(
     marketItem.querySelector(
@@ -220,7 +225,7 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
       layer: "interconnect",
       title: "光互连订单与技术路线得到验证",
       summary: "企业订单和行业研究共同指向光互连需求。",
-      implication: "带宽需求支撑光互连链条。",
+      implication: aiCausalSummary,
       evidence: [{ ...evidence, source: "https://example.com/ai-evidence" }],
     },
   ];
@@ -236,9 +241,12 @@ test("AI evidence renders as a compact layer-summary-source row", async () => {
   assert.match(item.textContent, /AI层4/);
   assert.match(item.textContent, /光互连订单与技术路线得到验证/);
   assert.doesNotMatch(item.textContent, /企业订单和行业研究共同指向光互连需求/);
-  assert.match(item.textContent, /带宽需求支撑光互连链条/);
+  assert.match(item.textContent, /订单增长会先改善市场/);
   assert.doesNotMatch(item.textContent, /发生了什么|原因已验证|部分解释|原因未证实/);
   assert.match(item.textContent, /市场收评/);
+  assert.ok(
+    [...item.querySelector(".snapshot-causal-summary").textContent.trim()].length >= 100,
+  );
   assert.equal(
     item.querySelectorAll(
       ".snapshot-evidence-meta > .snapshot-evidence-source",

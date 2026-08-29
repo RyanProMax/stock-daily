@@ -92,7 +92,7 @@ async function inspect(page, market, language, width) {
         left: Math.round(element.getBoundingClientRect().left),
         right: Math.round(element.getBoundingClientRect().right),
       }));
-    const causalReasons = [...document.querySelectorAll(".snapshot-causal-reason")];
+    const causalSummaries = [...document.querySelectorAll(".snapshot-causal-summary")];
     const mainText = document.querySelector("main")?.innerText ?? "";
     return {
       viewportWidth: innerWidth,
@@ -110,16 +110,16 @@ async function inspect(page, market, language, width) {
       evidenceRowCount: document.querySelectorAll(".snapshot-evidence-row").length,
       causeStatusCount: document.querySelectorAll(".snapshot-cause-status").length,
       causalGridCount: document.querySelectorAll(".snapshot-causal-grid").length,
-      causalReasonCount: causalReasons.length,
-      causalReasonDisplays: causalReasons.map(
-        (reason) => getComputedStyle(reason).display,
+      causalSummaryCount: causalSummaries.length,
+      causalSummaryLengths: causalSummaries.map(
+        (summary) => [...(summary.textContent ?? "").trim()].length,
       ),
       happenedLabelCount: [
         ...document.querySelectorAll("main strong"),
       ].filter((element) => /发生了什么|What happened/u.test(element.textContent)).length,
-      whyLabelCount: [
-        ...document.querySelectorAll(".snapshot-causal-reason > strong"),
-      ].filter((element) => /为什么|Why it moved/u.test(element.textContent)).length,
+      whyLabelCount: [...document.querySelectorAll("main")].filter(
+        (element) => /为什么|Why it moved/u.test(element.innerText),
+      ).length,
       unverifiedCount: (mainText.match(/原因未证实|Cause unverified/gu) ?? []).length,
       rawTimestamps:
         mainText.match(
@@ -189,10 +189,13 @@ for (const [key, audit] of Object.entries(result)) {
   assert.equal(layout.aiLayerCount, 8, JSON.stringify(result));
   assert.equal(layout.causeStatusCount, 0, JSON.stringify(result));
   assert.equal(layout.causalGridCount, 0, JSON.stringify(result));
-  assert.equal(layout.causalReasonCount, layout.evidenceRowCount, JSON.stringify(result));
-  assert.ok(layout.causalReasonDisplays.every((display) => display !== "grid"), JSON.stringify(result));
+  assert.equal(layout.causalSummaryCount, layout.evidenceRowCount, JSON.stringify(result));
+  assert.ok(
+    layout.causalSummaryLengths.every((length) => length >= 100),
+    JSON.stringify(result),
+  );
   assert.equal(layout.happenedLabelCount, 0, JSON.stringify(result));
-  assert.equal(layout.whyLabelCount, layout.causalReasonCount, JSON.stringify(result));
+  assert.equal(layout.whyLabelCount, 0, JSON.stringify(result));
   assert.equal(layout.unverifiedCount, 0, JSON.stringify(result));
   assert.deepEqual(layout.rawTimestamps, [], JSON.stringify(result));
   assert.deepEqual(layout.forbiddenCopy, [], JSON.stringify(result));

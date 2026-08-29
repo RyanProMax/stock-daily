@@ -71,6 +71,7 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
   "finance.yahoo.com",
   "ft.com",
   "latimes.com",
+  "kiplinger.com",
   "marketwatch.com",
   "m.nbd.com.cn",
   "nbd.com.cn",
@@ -144,8 +145,9 @@ function requireText(value, label, maxLength, minLength = 2) {
     .replace(/\p{Cf}/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
-  if (text.length < minLength) throw new Error(`${label} 少于 ${minLength} 字`);
-  if (text.length > maxLength) throw new Error(`${label} 超过 ${maxLength} 字`);
+  const length = [...text].length;
+  if (length < minLength) throw new Error(`${label} 少于 ${minLength} 字`);
+  if (length > maxLength) throw new Error(`${label} 超过 ${maxLength} 字`);
   return text;
 }
 
@@ -974,7 +976,7 @@ function validateDriver(value, input, index) {
   }
   const title = readerText(driver.title, `${label}.title`, 80, 5);
   const summary = readerText(driver.summary, `${label}.summary`, 300, 15);
-  const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 20);
+  const mechanism = readerText(driver.mechanism, `${label}.mechanism`, 460, 100);
   if (!["market", "sector", "subsector", "company"].includes(driver.attributionScope)) {
     throw new Error(`${label}.attributionScope 无效`);
   }
@@ -1097,7 +1099,7 @@ function validateAiUpdate(value, input, index) {
     update.implication,
     `${label}.implication`,
     420,
-    20,
+    100,
   );
   if (!Array.isArray(update.evidence) || update.evidence.length < 2 || update.evidence.length > 4) {
     throw new Error(`${label}.evidence 数量必须为 2–4`);
@@ -1517,7 +1519,7 @@ function validateTranslation(
           item.mechanism,
           `translations.en.drivers[${index}].mechanism`,
           700,
-          20,
+          100,
         ),
       };
       return translatedDriver;
@@ -1531,7 +1533,7 @@ function validateTranslation(
           item.implication,
           `translations.en.aiChainUpdates[${index}].implication`,
           700,
-          20,
+          100,
         ),
       };
     }),

@@ -79,7 +79,7 @@
         "market": { "type": "string", "enum": ["CN", "US"] },
         "publishedAs": { "type": "string", "enum": ["market_driver", "ai_update"] },
         "publishedTitle": { "type": "string", "minLength": 5, "maxLength": 90 },
-        "publishedClaim": { "type": "string", "minLength": 20, "maxLength": 460 },
+        "publishedClaim": { "type": "string", "minLength": 100, "maxLength": 460 },
         "source": { "type": "string", "minLength": 12, "maxLength": 1200, "pattern": "^https://" },
         "supportedScope": { "type": "string", "enum": ["market", "sector", "subsector", "ai_layer", "company", "none"] },
         "verdict": { "type": "string", "enum": ["pass", "revise"] },

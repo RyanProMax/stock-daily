@@ -216,6 +216,22 @@ function externalEvidence({ market, title, facts, source, sourceLabel, published
   };
 }
 
+const fixtureAnalysis = {
+  cnMaterials: "行业机构确认主要生产环节出现供应调整，这一变化先收紧现货供给预期，再改善相关企业的产品价格与盈利预期，并吸引资金重新评估原材料行业。该证据只覆盖已披露的供应变化及其对应行业，不解释公用事业、科技或整个市场的同步表现。",
+  cnUtilities: "监管机构披露相关价格调整仍受约束，并要求部分公用事业企业控制终端收费。收费空间受限会压低市场对相关企业收入和利润改善的预期，进而减少资金对公用事业行业的配置。该约束只解释公用事业的相对承压，不能外推为其他行业下跌的共同原因。",
+  usMaterials: "专业媒体在已结束的交易时段报道商业活动改善并带动需求预期回升。更强的需求预期会先改善周期品订单和盈利判断，再推动资金提高对材料行业的估值与配置。该证据与材料行业走强方向一致，但科技行业同期下跌，因此不能解释整个美国市场的表现。",
+  usTechnology: "专业媒体报道资本开支上升引发市场对科技企业短期利润率的担忧。更高的投入会先压低近期自由现金流和盈利预期，再通过估值折现与仓位调整对科技行业形成压力。该证据只覆盖科技行业的相对落后，不能解释材料行业上涨或整个市场的共同方向。",
+  cnInterconnect: "公司公告显示光互连产品的订单确认节奏放缓，并提示短期交付存在波动。订单确认推迟会先压低市场对近期收入兑现和产能利用的预期，再对相关光互连标的估值形成压力。该证据只覆盖光互连环节，不能解释其他智能产业链环节之间的分化。",
+};
+
+const fixtureAnalysisEn = {
+  cnMaterials: "An industry authority confirmed a supply adjustment in a major production segment. Tighter expected spot supply can improve pricing and earnings expectations before investors revalue materials companies; the evidence is limited to the disclosed supply change and does not explain utilities, technology, or the whole market.",
+  cnUtilities: "The regulator disclosed that relevant price adjustments remained constrained and required some utilities to limit end-user charges. Less pricing room can weaken revenue and profit expectations and reduce allocations to utilities; this evidence explains relative pressure in utilities only, not declines across other sectors.",
+  usMaterials: "A professional publisher reported improving business activity and stronger demand expectations during the completed session. Better demand can lift cyclical order and earnings expectations before investors raise valuations and allocations to materials; technology fell at the same time, so this evidence does not explain the entire United States market.",
+  usTechnology: "A professional publisher reported that rising capital expenditure prompted concern about near-term technology-sector margins. Higher investment can reduce near-term cash flow and earnings expectations before valuation and positioning adjustments weigh on technology; it does not explain the concurrent materials advance or the whole market.",
+  cnInterconnect: "A company filing disclosed slower confirmation of optical-interconnect orders and warned of near-term delivery volatility. Delayed confirmations can weaken expectations for near-term revenue realization and utilization before pressuring related valuations; the evidence covers optical interconnects only and does not explain dispersion across other intelligent-industry layers.",
+};
+
 export function fixtureReport(input = fixtureInput()) {
   const cnMaterials = input.sectorPerformance.find(
     (item) => item.market === "CN" && item.symbol === "932078",
@@ -272,7 +288,7 @@ export function fixtureReport(input = fixtureInput()) {
         attributionTargets: ["932078"],
         title: "供应变化支撑原材料行业",
         summary: "官方披露的供应变化与原材料行业走强方向一致，为该行业表现提供直接支撑。",
-        mechanism: "供应收紧预期改善相关企业的价格与盈利预期，并吸引资金向原材料行业集中。",
+        mechanism: fixtureAnalysis.cnMaterials,
         sectorSymbols: ["932078"],
         evidence: [
           marketEvidence(
@@ -301,7 +317,7 @@ export function fixtureReport(input = fixtureInput()) {
         attributionTargets: ["932086"],
         title: "价格监管消息压制公用事业",
         summary: "监管机构披露的价格约束与公用事业行业走弱方向一致，为其相对落后提供直接解释。",
-        mechanism: "价格调整受限会压低公用事业企业的盈利预期，并使资金减少对该行业的配置。",
+        mechanism: fixtureAnalysis.cnUtilities,
         sectorSymbols: ["932086"],
         evidence: [
           marketEvidence(
@@ -330,7 +346,7 @@ export function fixtureReport(input = fixtureInput()) {
         attributionTargets: ["XLB"],
         title: "商业活动信息支撑材料行业",
         summary: "专业媒体报道的商业活动改善与材料行业上涨方向一致，为周期方向提供局部支撑。",
-        mechanism: "需求预期改善有利于周期品订单和盈利预期，因而对材料行业形成正向传导。",
+        mechanism: fixtureAnalysis.usMaterials,
         sectorSymbols: ["XLB"],
         evidence: [
           marketEvidence(
@@ -361,7 +377,7 @@ export function fixtureReport(input = fixtureInput()) {
         attributionTargets: ["XLK"],
         title: "资本开支担忧压制科技行业",
         summary: "专业媒体报道的资本开支担忧与科技行业下跌方向一致，为其相对落后提供直接解释。",
-        mechanism: "资本开支上升会增加短期利润率压力，从而压低部分科技公司的盈利预期与估值。",
+        mechanism: fixtureAnalysis.usTechnology,
         sectorSymbols: ["XLK"],
         evidence: [
           marketEvidence(
@@ -390,7 +406,7 @@ export function fixtureReport(input = fixtureInput()) {
         layer: "interconnect",
         title: "光互连订单变化提供局部线索",
         summary: "光互连代表篮子相对走弱，公司披露的订单节奏变化与该环节承压方向一致。",
-        implication: "订单节奏放缓可能压低短期收入预期，但还不足以解释其他智能产业链环节的分化。",
+        implication: fixtureAnalysis.cnInterconnect,
         evidence: [
           marketEvidence(
             input,
@@ -440,29 +456,29 @@ export function fixtureReport(input = fixtureInput()) {
           {
             title: "Supply changes supported materials",
             summary: "Officially disclosed supply changes aligned with materials strength and directly supported the sector move.",
-            mechanism: "Tighter supply expectations improved pricing and earnings expectations and attracted capital toward materials.",
+            mechanism: fixtureAnalysisEn.cnMaterials,
           },
           {
             title: "Pricing constraints weighed on utilities",
             summary: "Disclosed pricing constraints aligned with utilities weakness and directly explained part of the lag.",
-            mechanism: "Limited price adjustments can weigh on earnings expectations and reduce investor demand for utilities.",
+            mechanism: fixtureAnalysisEn.cnUtilities,
           },
           {
             title: "Business activity supported materials",
             summary: "Reported improvement in business activity aligned with materials strength and offered support for cyclicals.",
-            mechanism: "Better demand expectations can improve orders and earnings expectations for cyclical businesses.",
+            mechanism: fixtureAnalysisEn.usMaterials,
           },
           {
             title: "Capital-spending concerns weighed on technology",
             summary: "Reported capital-spending concerns aligned with technology weakness and directly explained part of the lag.",
-            mechanism: "Higher capital spending can pressure near-term margins and reduce earnings expectations and valuations for technology companies.",
+            mechanism: fixtureAnalysisEn.usTechnology,
           },
         ],
         aiChainUpdates: [
           {
             title: "Order changes offered a partial clue for optical interconnects",
             summary: "The optical-interconnect basket lagged as disclosed order timing moved in the same direction.",
-            implication: "Slower order timing may weigh on near-term revenue expectations but does not explain dispersion across other layers.",
+            implication: fixtureAnalysisEn.cnInterconnect,
           },
         ],
       },
@@ -480,7 +496,7 @@ export function fixtureReport(input = fixtureInput()) {
         hypotheses: [
           {
             id: "CN-H1",
-            claim: "供应收紧预期改善相关企业的价格与盈利预期，并吸引资金向原材料行业集中。",
+            claim: fixtureAnalysis.cnMaterials,
             category: "industry",
             targets: ["932078"],
             supportingSources: [
@@ -488,7 +504,7 @@ export function fixtureReport(input = fixtureInput()) {
             ],
             causalEvidence: [{
               source: "https://www.sse.com.cn/disclosure/materials-supply",
-              supports: "供应收紧预期改善相关企业的价格与盈利预期，并吸引资金向原材料行业集中。",
+              supports: fixtureAnalysis.cnMaterials,
               scope: "sector",
               targets: ["932078"],
             }],
@@ -497,11 +513,11 @@ export function fixtureReport(input = fixtureInput()) {
             verdictReason: "交易窗口内的一手披露与行业方向一致，并有对应行业行情交叉验证。",
             publishedAs: "market_driver",
             publishedTitle: "供应变化支撑原材料行业",
-            publishedClaim: "供应收紧预期改善相关企业的价格与盈利预期，并吸引资金向原材料行业集中。",
+            publishedClaim: fixtureAnalysis.cnMaterials,
           },
           {
             id: "CN-H2",
-            claim: "价格调整受限会压低公用事业企业的盈利预期，并使资金减少对该行业的配置。",
+            claim: fixtureAnalysis.cnUtilities,
             category: "policy",
             targets: ["932086"],
             supportingSources: [
@@ -509,7 +525,7 @@ export function fixtureReport(input = fixtureInput()) {
             ],
             causalEvidence: [{
               source: "https://www.sse.com.cn/disclosure/utilities-pricing",
-              supports: "价格调整受限会压低公用事业企业的盈利预期，并使资金减少对该行业的配置。",
+              supports: fixtureAnalysis.cnUtilities,
               scope: "sector",
               targets: ["932086"],
             }],
@@ -518,11 +534,11 @@ export function fixtureReport(input = fixtureInput()) {
             verdictReason: "监管披露与公用事业行业下跌方向一致，传导路径明确。",
             publishedAs: "market_driver",
             publishedTitle: "价格监管消息压制公用事业",
-            publishedClaim: "价格调整受限会压低公用事业企业的盈利预期，并使资金减少对该行业的配置。",
+            publishedClaim: fixtureAnalysis.cnUtilities,
           },
           {
             id: "CN-H3",
-            claim: "订单节奏放缓可能压低短期收入预期，但还不足以解释其他智能产业链环节的分化。",
+            claim: fixtureAnalysis.cnInterconnect,
             category: "company",
             targets: ["interconnect"],
             supportingSources: [
@@ -530,7 +546,7 @@ export function fixtureReport(input = fixtureInput()) {
             ],
             causalEvidence: [{
               source: "https://www.sse.com.cn/disclosure/interconnect-order",
-              supports: "订单节奏放缓可能压低短期收入预期，但还不足以解释其他智能产业链环节的分化。",
+              supports: fixtureAnalysis.cnInterconnect,
               scope: "ai_layer",
               targets: ["interconnect"],
             }],
@@ -539,7 +555,7 @@ export function fixtureReport(input = fixtureInput()) {
             verdictReason: "公司公告与对应环节方向一致，但解释范围仅限光互连。",
             publishedAs: "ai_update",
             publishedTitle: "光互连订单变化提供局部线索",
-            publishedClaim: "订单节奏放缓可能压低短期收入预期，但还不足以解释其他智能产业链环节的分化。",
+            publishedClaim: fixtureAnalysis.cnInterconnect,
           },
           {
             id: "CN-H4",
@@ -569,7 +585,7 @@ export function fixtureReport(input = fixtureInput()) {
         hypotheses: [
           {
             id: "US-H1",
-            claim: "需求预期改善有利于周期品订单和盈利预期，因而对材料行业形成正向传导。",
+            claim: fixtureAnalysis.usMaterials,
             category: "macro",
             targets: ["XLB"],
             supportingSources: [
@@ -577,7 +593,7 @@ export function fixtureReport(input = fixtureInput()) {
             ],
             causalEvidence: [{
               source: "https://www.reuters.com/markets/us/business-activity",
-              supports: "需求预期改善有利于周期品订单和盈利预期，因而对材料行业形成正向传导。",
+              supports: fixtureAnalysis.usMaterials,
               scope: "sector",
               targets: ["XLB"],
             }],
@@ -586,11 +602,11 @@ export function fixtureReport(input = fixtureInput()) {
             verdictReason: "专业媒体的交易窗口报道与材料行业上涨方向一致。",
             publishedAs: "market_driver",
             publishedTitle: "商业活动信息支撑材料行业",
-            publishedClaim: "需求预期改善有利于周期品订单和盈利预期，因而对材料行业形成正向传导。",
+            publishedClaim: fixtureAnalysis.usMaterials,
           },
           {
             id: "US-H2",
-            claim: "资本开支上升会增加短期利润率压力，从而压低部分科技公司的盈利预期与估值。",
+            claim: fixtureAnalysis.usTechnology,
             category: "industry",
             targets: ["XLK"],
             supportingSources: [
@@ -598,7 +614,7 @@ export function fixtureReport(input = fixtureInput()) {
             ],
             causalEvidence: [{
               source: "https://www.reuters.com/markets/us/technology-capex",
-              supports: "资本开支上升会增加短期利润率压力，从而压低部分科技公司的盈利预期与估值。",
+              supports: fixtureAnalysis.usTechnology,
               scope: "sector",
               targets: ["XLK"],
             }],
@@ -607,7 +623,7 @@ export function fixtureReport(input = fixtureInput()) {
             verdictReason: "专业媒体直接报道利润率担忧，且科技行业行情方向一致。",
             publishedAs: "market_driver",
             publishedTitle: "资本开支担忧压制科技行业",
-            publishedClaim: "资本开支上升会增加短期利润率压力，从而压低部分科技公司的盈利预期与估值。",
+            publishedClaim: fixtureAnalysis.usTechnology,
           },
           {
             id: "US-H3",

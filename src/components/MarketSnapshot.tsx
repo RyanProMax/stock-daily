@@ -49,7 +49,6 @@ interface Props {
     sourceOfficial: string;
     sourceSpecialist: string;
     sourceExpert: string;
-    mechanism: string;
   };
 }
 
@@ -204,10 +203,7 @@ function SnapshotEvidenceList({
                 <span className="snapshot-evidence-tag">{tag}</span>
                 <strong>{title}</strong>
               </header>
-              <section className="snapshot-causal-reason">
-                <strong>{labels.mechanism}</strong>
-                <p>{mechanism}</p>
-              </section>
+              <p className="snapshot-causal-summary">{mechanism}</p>
               <div className="snapshot-evidence-meta">
                 {[
                   ...new Map(

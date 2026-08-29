@@ -27,6 +27,15 @@ test("V11 accepts deterministic market input without a preselected news pool", (
   assert.deepEqual(input.marketBriefs, fixtureInput().marketBriefs);
 });
 
+test("established financial publications retain publisher authority", () => {
+  assert.equal(
+    verifiedExternalSourceType(
+      "https://www.kiplinger.com/investing/stocks/market-recap",
+    ),
+    "publisher",
+  );
+});
+
 test("market sessions use the completed close of each venue", () => {
   assert.equal(
     zonedDateTimeIso("2026-08-21", 15, "Asia/Shanghai"),
@@ -98,6 +107,23 @@ test("market evidence grounds the deterministic bound-company count", () => {
   assert.equal(
     validateReport(report, input).drivers[0].evidence[0].source,
     constituent.source,
+  );
+});
+
+test("publication rejects one-line causal analysis", () => {
+  const input = validateInput(fixtureInput());
+  const shortDriver = fixtureReport(input);
+  shortDriver.drivers[0].mechanism = "供应变化改善盈利预期并推动行业上涨。";
+  assert.throws(
+    () => validateReport(shortDriver, input),
+    /drivers\[0\]\.mechanism 少于 100 字/,
+  );
+
+  const shortAiUpdate = fixtureReport(input);
+  shortAiUpdate.aiChainUpdates[0].implication = "订单变化压低收入预期并影响相关标的。";
+  assert.throws(
+    () => validateReport(shortAiUpdate, input),
+    /aiChainUpdates\[0\]\.implication 少于 100 字/,
   );
 });
 
