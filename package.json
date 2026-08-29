@@ -33,7 +33,7 @@
     "weekly:publish": "node scripts/weekly-publish.mjs",
     "weekly:verify": "node scripts/weekly-verify.mjs",
     "weekly:run": "scripts/run-codex-weekly.sh --force",
-    "db:migrate:remote": "wrangler d1 migrations apply stock-daily-db --env production --remote",
+    "db:migrate:remote": "wrangler d1 migrations apply stock-daily-db --config wrangler.data.jsonc --remote",
     "deploy": "npm run build && wrangler pages deploy dist --project-name stock-daily --branch main --commit-dirty=true",
     "test": "npm run build && python3 -m unittest tests/test_x_intelligence.py && node --test tests/*.test.mjs"
   },

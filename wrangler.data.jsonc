@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stock-daily-data-admin",
+  "account_id": "fa5320378df19eb4201884ba77768cf1",
+  "compatibility_date": "2026-07-25",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stock-daily-db",
+      "database_id": "4c748c0b-58c3-4525-ba47-5a436ba01e75",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
