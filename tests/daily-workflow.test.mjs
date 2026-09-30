@@ -6,7 +6,7 @@ import {
   assessDailyFreshness,
   dailyCutoffAt,
 } from "../scripts/daily-policy.mjs";
-import { yahooSectorPoint } from "../scripts/sector-heat.mjs";
+import { yahooSectorPoint, currentSectorMetrics } from "../scripts/sector-heat.mjs";
 import { auditStructuredOutputSchema } from "../scripts/structured-output-schema-audit.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 import { fetchComparisonReport } from "../scripts/daily-freshness.mjs";
@@ -402,4 +402,17 @@ test("sector quote settlement grace rejects data beyond the cutoff", () => {
   payload.chart.result[0].meta.regularMarketTime =
     Date.parse("2026-08-21T07:05:01.000Z") / 1_000;
   assert.equal(yahooSectorPoint(payload, cutoffTime), null);
+});
+
+test("current sector quotations cite the provider actually read rather than an unread official page", () => {
+  const cutoff = Date.parse("2026-08-21T21:00:00Z");
+  for (const [market, symbol, path] of [["US", "XLK", "/us/XLK.html"], ["CN", "932077", "/zz/2.932077.html"]]) {
+    const sectors = [{ symbol, name: "科技", nameEn: "Technology" }];
+    const payload = { data: { diff: [{ f12: symbol, f3: 1.23, f124: cutoff / 1000 }] } };
+    const [metric] = currentSectorMetrics(payload, sectors, market, cutoff);
+    assert.equal(metric.source, `https://quote.eastmoney.com${path}`);
+    assert.equal(metric.change, "+1.23%");
+    payload.data.diff[0].f12 = "WRONG";
+    assert.throws(() => currentSectorMetrics(payload, sectors, market, cutoff), /sectors/);
+  }
 });

@@ -1061,9 +1061,9 @@ function verifiedSourceTime(source, envelope, candidates) {
 }
 
 const FACT_NUMBER_MENTION =
-  /(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK]|%|％|百分点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
+  /(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|%|％|百分点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
-  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceeded?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
+  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
   /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|drops?|dropped|dropping|slid|slides?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
@@ -1100,24 +1100,16 @@ function nearestDirection(value, start, end, rawNumber) {
   if (/^[年月日]/u.test(value.slice(end))) return null;
   if (rawNumber.startsWith("+")) return "positive";
   if (rawNumber.startsWith("-")) return "negative";
-  const leftBoundary = Math.max(
-    value.lastIndexOf("。", start),
-    value.lastIndexOf(".", start),
-    value.lastIndexOf("！", start),
-    value.lastIndexOf("!", start),
-    value.lastIndexOf("？", start),
-    value.lastIndexOf("?", start),
-    value.lastIndexOf("；", start),
-    value.lastIndexOf(";", start),
-    value.lastIndexOf("，", start),
-    value.lastIndexOf(",", start),
-    value.lastIndexOf("\n", start),
-  );
-  const boundaryCandidates = ["。", ".", "！", "!", "？", "?", "；", ";", "，", ",", "\n"]
-    .map((separator) => value.indexOf(separator, end))
-    .filter((index) => index >= 0);
-  const rightBoundary =
-    boundaryCandidates.length > 0 ? Math.min(...boundaryCandidates) : value.length;
+  const boundaries = [...value.matchAll(/[。.!！?？；;，,\n]/gu)]
+    .filter(match => !(/[.,]/u.test(match[0]) && /\d/u.test(value[(match.index ?? 0) - 1] ?? "") && /\d/u.test(value[(match.index ?? 0) + 1] ?? "")))
+    .map(match => match.index ?? 0);
+  let leftBoundary = boundaries.filter(index => index < start).at(-1) ?? -1;
+  // A settlement clause can continue the same movement after a comma.
+  // Decimal points and thousands separators above are not clause boundaries.
+  if (/[，,]/u.test(value[leftBoundary] ?? "") && /^\s*(?:收于|收报|报收|至|settled? at|closed at|closing at)/iu.test(value.slice(leftBoundary + 1, start))) {
+    leftBoundary = boundaries.filter(index => index < leftBoundary && !/[，,]/u.test(value[index])).at(-1) ?? -1;
+  }
+  const rightBoundary = boundaries.find(index => index >= end) ?? value.length;
   const clauseStart = leftBoundary + 1;
   const clause = value.slice(clauseStart, rightBoundary);
   const numberOffset = start - clauseStart;
@@ -1131,11 +1123,12 @@ function nearestDirection(value, start, end, rawNumber) {
       if (/^(?:超过|高于|低于)$/u.test(match[0]) && /^\s*(?:只|家|项|人)/u.test(value.slice(end)) && (match.index ?? 0) < numberOffset) continue;
       candidates.push({
         direction,
+        preceding: (match.index ?? 0) < numberOffset,
         distance: Math.abs((match.index ?? 0) - numberOffset),
       });
     }
   }
-  candidates.sort((left, right) => left.distance - right.distance);
+  candidates.sort((left, right) => Number(right.preceding) - Number(left.preceding) || left.distance - right.distance);
   return candidates[0]?.direction ?? null;
 }
 

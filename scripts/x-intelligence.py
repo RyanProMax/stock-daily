@@ -245,11 +245,14 @@ async def search_items(
     source_by_handle: dict[str, dict[str, Any]],
     start_time: datetime,
     reference_time: datetime,
+    diagnostics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     tweets = api.search(query, limit=max(1, limit))
     try:
         async for tweet in tweets:
+            if diagnostics is not None:
+                diagnostics["rawPostCount"] = diagnostics.get("rawPostCount", 0) + 1
             handle = author_handle(tweet)
             source = source_by_handle.get(handle.lower())
             created_at = utc_datetime(getattr(tweet, "date", None))
@@ -265,6 +268,8 @@ async def search_items(
                 or created_at < start_time
                 or created_at > reference_time
             ):
+                if diagnostics is not None:
+                    diagnostics["filteredPostCount"] = diagnostics.get("filteredPostCount", 0) + 1
                 continue
             items.append(
                 {
@@ -366,6 +371,7 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
         "-filter:replies -filter:retweets"
     )
     items: list[dict[str, Any]] = []
+    search_diagnostics: dict[str, Any] = {"rawPostCount": 0, "filteredPostCount": 0}
     for attempt in range(2):
         api = API(
             str(db_path),
@@ -381,6 +387,7 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
                 source_by_handle,
                 start_time,
                 reference_time,
+                search_diagnostics,
             )
             break
         except Exception as exc:
@@ -408,7 +415,8 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
 
     unique = {item["url"]: item for item in items}
     return {
-        "status": "ok",
+        "status": "ok" if search_diagnostics["rawPostCount"] else "empty_response",
+        **search_diagnostics,
         "sourceCount": len(sources),
         "candidateCount": len(unique),
         "recoveredFromCooldown": waited_for_cooldown,

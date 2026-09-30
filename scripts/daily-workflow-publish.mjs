@@ -926,6 +926,9 @@ export async function publishPreparedWorkflowReport({
   };
   const { manifest } = await loadWorkflowArtifacts(paths);
   if (manifest.deliveryMode !== "publish") throw new Error("工作流未授权进入生产发布模式");
+  if (manifest.coverageRequired !== true || manifest.recapApproval?.status !== "complete") {
+    throw new Error("生产发布需要通过完整板块复盘验收，旧版报告不得绕过覆盖检查");
+  }
   // The convenience manifest is a copy. Persist publication state in the
   // original run so the scheduler and subsequent recovery see the same truth.
   const runDirectory = dirname(dirname(resolve(manifest.reportPath)));
@@ -939,6 +942,7 @@ export async function publishPreparedWorkflowReport({
   const { recoverPendingPublications } = await import("./daily-workflow.mjs");
   const results = await recoverPendingPublications(dirname(dirname(paths.manifestPath)), {
     ...options,
+    requireCompleteRecap: true,
     manifestPaths: [paths.manifestPath],
   });
   if (results.length) return results[0];

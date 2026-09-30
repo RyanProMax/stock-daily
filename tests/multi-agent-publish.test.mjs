@@ -40,7 +40,7 @@ import { recapFixture } from "./complete-recap-fixture.mjs";
 import { validateCompleteRecap } from "../scripts/complete-recap.mjs";
 
 test("standalone publisher reaches recovery readback without a circular module deadlock", async () => {
-  const fixture = await publicationFixture();
+  const fixture = await completePublicationFixture();
   const entry = resolve("scripts/daily-workflow-publish.mjs");
   const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "--eval", `
     process.argv = [process.execPath, ${JSON.stringify(entry)}, '--manifest', ${JSON.stringify(fixture.manifestPath)}];
@@ -214,6 +214,8 @@ test("the comprehensive latest alias retains exact independent writer and review
   await persistWorkflowArtifacts(fixture, projectDir);
   const result = await checkWorkflowArtifacts({ manifestPath: resolve(projectDir, "work/daily-workflow-manifest.json") });
   assert.equal(result.status, "valid");
+  assert.equal(result.completeRecap, true);
+  assert.equal(result.recapTargetCount, 20);
 });
 
 test("recap evidence, low review scores and rewritten reader claims stop before network writes", async () => {
@@ -482,7 +484,7 @@ test("pending approved publication retries directly without workflow budget", as
 
 test("manual publication persists readback and completion for only the selected manifest", async () => {
   const workRoot=await mkdtemp(resolve(tmpdir(),"stock-daily-manual-publish-"));
-  const selected=await publicationFixture(resolve(workRoot,"selected"));
+  const selected=await completePublicationFixture();
   const other=await publicationFixture(resolve(workRoot,"other"),"CN");
   let writes=0;let finalizations=0;
   const result=await publishPreparedWorkflowReport({manifestPath:selected.manifestPath},{
@@ -494,6 +496,21 @@ test("manual publication persists readback and completion for only the selected 
   const saved=JSON.parse(await readFile(selected.manifestPath));
   assert.equal(saved.publication.status,"published");assert.equal(saved.ingestionFinalization.status,"completed");
   assert.equal(JSON.parse(await readFile(other.manifestPath)).publication,undefined);
+});
+
+test("manual production publication rejects a thin legacy report before any write or readback", async () => {
+  const fixture = await publicationFixture();
+  let externalCalls = 0;
+  await assert.rejects(() => publishPreparedWorkflowReport(fixture, {
+    verify: async () => { externalCalls++; },
+    publishApproved: async () => { externalCalls++; },
+    finalize: async () => { externalCalls++; },
+  }), /完整板块复盘验收/);
+  assert.equal(externalCalls, 0);
+  const result = await checkWorkflowArtifacts(fixture);
+  assert.equal(result.completeRecap, false);
+  assert.equal(result.recapTargetCount, 0);
+  await assert.rejects(() => checkWorkflowArtifacts({ ...fixture, requireComplete: true }), /完整板块复盘验收/);
 });
 
 test("publication recovery ignores incompatible workflow checkpoints", async () => {

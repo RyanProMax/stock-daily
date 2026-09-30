@@ -84,6 +84,7 @@ npm run daily:run       # US，发布
 npm run daily:close     # CN，发布
 npm run daily:evening   # 自动选择有新收盘数据的市场，发布
 npm run daily:shadow    # 自动选择市场，不写 Cloudflare
+npm run daily:check -- --require-complete  # 必须通过全部板块复盘验收
 scripts/run-codex-daily.sh --force --shadow --update-kind evening --market CN
 npm run daily:workflow:acceptance -- --runs-root work/acceptance-runs --labels specs/verified-recap-workflow/acceptance-labels.json --require-pass
 ```

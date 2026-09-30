@@ -819,6 +819,29 @@ export async function unavailableResearchSourceUrls(workRoot, { market, marketAs
   return (await researchSourceAvailability(workRoot, { market, marketAsOf, inputHash })).urls;
 }
 
+export function recapResearchSourceAccess(initial, ledger) {
+  const urls = new Set(initial.urls ?? []);
+  const refused = new Map();
+  for (const item of ledger.rejected ?? []) {
+    if (!/HTTP (?:401|403|404|429)|正文过短/u.test(item.reason ?? "")) continue;
+    let url;
+    try { url = new URL(item.url); } catch { continue; }
+    if (url.protocol !== "https:" || url.username || url.password) continue;
+    urls.add(url.href);
+    if (/HTTP (?:401|403|429)/u.test(item.reason)) {
+      const domain = publishableExternalSourceDomains().find(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+      if (domain) {
+        const failures = refused.get(domain) ?? new Set();
+        failures.add(url.href); refused.set(domain, failures);
+      }
+    }
+  }
+  return {
+    urls: [...urls].sort().slice(0, 40),
+    unavailableDomains: [...new Set([...(initial.unavailableDomains ?? []), ...[...refused].filter(([, failures]) => failures.size >= 2).map(([domain]) => domain)])].sort(),
+  };
+}
+
 export async function researchSourceAvailability(workRoot, { market, marketAsOf, inputHash, beforeStartedAt = null }) {
   const urls = new Set();
   const refusedByDomain = new Map();
@@ -2016,7 +2039,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v10",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v11",
       researchOutputs,
     });
     const key = `evidence-verification-${inputHash.slice(0, 8)}`;
@@ -2842,14 +2865,27 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-observations.json"), observations);
     await this.revalidateResearchQueryCheckpoints(plan);
     const outputs = [];
+    const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
+    let nextAccess = initialAccess;
+    let ledger;
     // Four targets at a time: each has independent facts/causal processes.
     // A failed sibling must settle before this market can report failure.
     for (let i = 0; i < plan.anomalies.length; i += 4) {
       const batch = plan.anomalies.slice(i, i + 4);
+      const batchKey = String(i / 4);
+      this.manifest.recapBatchSourceAccess ??= {};
+      const access = this.manifest.recapBatchSourceAccess[batchKey] ?? nextAccess;
+      this.manifest.recapBatchSourceAccess[batchKey] = access;
+      this.excludedSources = access.urls;
+      this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !access.unavailableDomains.includes(domain));
+      await this.saveManifest();
       await this.assertResearchCapacity(batch);
       outputs.push(...(await settleAgentResults(batch.map((anomaly) => this.researchAnomaly(anomaly)))).flat());
+      ledger = await this.verifyEvidence(outputs);
+      nextAccess = recapResearchSourceAccess(initialAccess, ledger);
     }
-    const ledger = await this.verifyEvidence(outputs);
+    this.excludedSources = initialAccess.urls;
+    this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
     await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
     this.manifest.recapLedgerHash = stableHash(ledger);
     const coverage = assessRecapEvidenceCoverage(this.envelope, ledger);

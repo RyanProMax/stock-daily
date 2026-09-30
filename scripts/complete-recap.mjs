@@ -8,6 +8,7 @@ import {
   requiresFinancialComparisons,
   stableHash,
 } from "./daily-workflow-core.mjs";
+import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 
@@ -90,6 +91,11 @@ export function completeRecapPlan(envelope, tradingData = null) {
       const id = `recap-${stableHash(metric.symbol).slice(0, 12)}`;
       const name = envelope.market === "CN" ? metric.name : metric.nameEn ?? metric.name;
       const market = envelope.market === "CN" ? "A股" : "US";
+      const movers = [...(metric.constituents ?? [])]
+        .sort((a, b) => Math.abs(returnValue(b.change, b.symbol)) - Math.abs(returnValue(a.change, a.symbol)) || a.symbol.localeCompare(b.symbol))
+        .slice(0, 2);
+      const companyNames = movers.map(item => envelope.market === "CN" ? item.name : item.nameEn ?? item.name).join(" ");
+      const targetNames = `${name}${companyNames ? ` ${companyNames}` : ""}`;
       return {
         id, kind: metric.kind, target: metric.symbol,
         observation: metric,
@@ -102,8 +108,8 @@ export function completeRecapPlan(envelope, tradingData = null) {
           { id: `${id}-macro`, category: "macro_policy", claim: "A verified macro or policy shock affected this target through financing, demand or valuation." },
           { id: `${id}-offset`, category: "alternative", claim: "Opposing forces, constituent dispersion or documented positioning limited or amplified the net move." },
         ],
-        factQueries: [`${envelope.marketAsOf} ${market} ${name} ${envelope.market === "CN" ? "公告 政策 行业" : "official earnings policy industry"}`],
-        causalQueries: [`${envelope.marketAsOf} ${market} ${name} ${envelope.market === "CN" ? "收盘 原因 成交 分化" : "market close drivers volume offsets"}`],
+        factQueries: [`${envelope.marketAsOf} ${market} ${targetNames} ${envelope.market === "CN" ? "收盘 新闻 公告" : "stocks news market close"}`],
+        causalQueries: [`${envelope.marketAsOf} ${market} ${targetNames} ${envelope.market === "CN" ? "涨跌 原因 分化" : "stocks rose fell why sector"}`],
       };
     }),
   };
@@ -193,7 +199,10 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
       if (!size.some((source) => source.anomalyId === anomaly.id && source.role === "causal" && SIZE_EVIDENCE.test(source.supportingExcerpt))) throw new Error(`${target.symbol} 缺少成交、振幅、分化或相反力量的直接证据`);
       if (raw.confidence === "low") throw new Error(`${target.symbol} 低置信归因不能视为完成`);
-      if (raw.confidence === "high" && new Set(cause.filter(source => source.sourceType === "publisher").map(source => new URL(source.url).hostname)).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
+      if (raw.confidence === "high") {
+        const publishers = cause.filter(source => source.sourceType === "publisher");
+        if (new Set(publishers.map(source => new URL(source.url).hostname)).size < 2 || new Set(publishers.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
+      }
     }
     let grounding = [JSON.stringify(target), JSON.stringify(observations.get(target.symbol)), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);

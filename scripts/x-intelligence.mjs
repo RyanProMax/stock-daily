@@ -55,6 +55,8 @@ export async function collectXIntelligence(referenceTime) {
             : "search_error",
         sourceCount: Number(payload.sourceCount ?? 0),
         candidateCount: Number(payload.candidateCount ?? 0),
+        rawPostCount: Number(payload.rawPostCount ?? 0),
+        filteredPostCount: Number(payload.filteredPostCount ?? 0),
         ...(payload.recoveredFromCooldown === true
           ? { recoveredFromCooldown: true }
           : {}),

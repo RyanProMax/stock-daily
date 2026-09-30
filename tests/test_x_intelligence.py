@@ -33,6 +33,25 @@ def create_account_db(path: Path, *, lock_until: datetime | None = None) -> None
 
 
 class XIntelligenceTests(unittest.TestCase):
+    def test_discovery_distinguishes_empty_response_from_filtered_posts(self) -> None:
+        reference = datetime(2026, 9, 29, 22, 0, tzinfo=timezone.utc)
+        source = {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["US"], "layers": []}
+        valid = SimpleNamespace(id=123, date=reference - timedelta(hours=1), user=SimpleNamespace(username="Analyst"), rawContent="Bond valuation remains vulnerable because inflation and interest rates raise financing costs, while credit conditions offset some pressure on equity markets.")
+        vague = SimpleNamespace(id=124, date=reference, user=SimpleNamespace(username="Analyst"), rawContent="Very bullish, this is a game changer. " * 4)
+
+        class Api:
+            def __init__(self, posts): self.posts = posts
+            async def search(self, _query, limit):
+                for post in self.posts: yield post
+
+        stats = {"rawPostCount": 0, "filteredPostCount": 0}
+        items = asyncio.run(x_intelligence.search_items(Api([valid, vague]), "query", 100, {"analyst": source}, reference - timedelta(hours=72), reference, stats))
+        self.assertEqual(len(items), 1)
+        self.assertEqual(stats, {"rawPostCount": 2, "filteredPostCount": 1})
+        empty = {"rawPostCount": 0, "filteredPostCount": 0}
+        asyncio.run(x_intelligence.search_items(Api([]), "query", 100, {"analyst": source}, reference - timedelta(hours=72), reference, empty))
+        self.assertEqual(empty["rawPostCount"], 0)
+
     def test_specific_kol_mechanism_is_kept_without_numeric_filler(self) -> None:
         thesis = "I think demand growth and the inventory bottleneck affect pricing and margins; published orders and deliveries will determine whether earnings expectations can be sustained."
         self.assertTrue(x_intelligence.is_selected_post(thesis, "expert"))

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import test from "node:test";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
-import { marketEnvelope, publicComparison, stableHash, validateResearchOutput } from "../scripts/daily-workflow-core.mjs";
-import { MarketWorkflow, assertResearchBatchBudget, compatibleFeatureArgs } from "../scripts/daily-workflow.mjs";
+import { assertFactsNumbersInExcerpt, marketEnvelope, publicComparison, stableHash, validateResearchOutput } from "../scripts/daily-workflow-core.mjs";
+import { MarketWorkflow, assertResearchBatchBudget, compatibleFeatureArgs, recapResearchSourceAccess } from "../scripts/daily-workflow.mjs";
 import { RECAP_VERSION, assessRecapEvidenceCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap, validateRecapReview, verifySocialLeads } from "../scripts/complete-recap.mjs";
 import { workflowMarketContentHash, preserveInactiveStoredSlice, auditWorkflowCausalEvidence } from "../scripts/daily-workflow-publish.mjs";
 import { verifiedExternalSourceType } from "../scripts/source-registry.mjs";
@@ -82,6 +85,22 @@ test("thin, ungrounded, expert-only and target-mismatched attribution cannot pas
   }
 });
 
+test("unit checks do not turn the first letter of Monday into a million-dollar scale", () => {
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "Brent briefly climbed above $100 Monday.", supportingExcerpt: "Brent briefly climbed above $100 on Monday." }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "Brent briefly climbed above $100M.", supportingExcerpt: "Brent briefly climbed above $100 on Monday." }), /单位|数字/);
+});
+
+test("decimal points preserve movement context and later rebounds cannot reverse an earlier settlement", () => {
+  const excerpt = "Brent fell 1.7% to settle at $96.16 a barrel. It briefly climbed above $100 on Monday.";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "Brent fell 1.7% to settle at $96.16 after briefly climbing above $100 Monday.", supportingExcerpt: excerpt }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "Brent rose 1.7% to settle at $96.16.", supportingExcerpt: excerpt }), /单位和方向/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "Brent fell 1.7% to settle at $96.16M.", supportingExcerpt: excerpt }), /单位和方向/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "Brent fell 1.7% to $96.16 after briefly exceeding $100 on Monday.", supportingExcerpt: excerpt }));
+  const oil = "WTI原油期货下跌3.66美元，收于每桶88.94美元，跌幅为3.95%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "WTI原油期货下跌3.66美元至每桶88.94美元，跌幅为3.95%。", supportingExcerpt: oil }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "WTI原油期货上涨至每桶88.94美元。", supportingExcerpt: oil }), /单位和方向/);
+});
+
 test("magnitude needs target-specific offset, volume, range or breadth evidence", () => {
   const fixture = recapFixture();
   fixture.ledger.sources[1].supportingExcerpt = "The index rose because the official announcement improved earnings expectations.";
@@ -103,6 +122,17 @@ test("every target and magnitude score must pass independent review", () => {
   review.entries[0].scores.magnitude = 4;
   review.entries[1].target = review.entries[0].target;
   assert.throws(() => validateRecapReview(review, recap), /目标重复/);
+});
+
+test("identical wire passages on different domains cannot produce high confidence", () => {
+  const f = recapFixture();
+  const copy = { ...f.ledger.sources[1], id: "0-syndicated", url: "https://finance.yahoo.com/news/reprinted-story.html", sourceLabel: "Yahoo Finance" };
+  f.ledger.sources.push(copy);
+  f.raw.entries[0].evidenceIds.push(copy.id);
+  f.raw.entries[0].confidence = "high";
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /独立报道交叉佐证/);
+  f.raw.entries[0].confidence = "medium";
+  assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social).entries[0].confidence, "medium");
 });
 
 test("financial attributions show two actual/baseline/code-delta comparisons in both languages", () => {
@@ -146,6 +176,65 @@ test("comprehensive research has a deterministic query budget and frozen plan", 
   assert.equal(assertResearchBatchBudget(12, completeRecapPlan(workflow.envelope).anomalies, {}, "", workflow.searchQueryLimit), 80);
   assert.throws(() => assertResearchBatchBudget(13, completeRecapPlan(workflow.envelope).anomalies, {}, "", workflow.searchQueryLimit), /预算不足/);
   assert.deepEqual(completeRecapPlan(workflow.envelope), completeRecapPlan(workflow.envelope));
+});
+
+test("recap searches name the largest observed representatives in deterministic order", () => {
+  const f = recapFixture();
+  const sector = f.envelope.sectorPerformance[0];
+  sector.constituents.forEach((item, i) => item.change = ["+1.00%", "-4.00%", "+3.00%", "-2.00%"][i]);
+  const plan = completeRecapPlan(f.envelope);
+  const anomaly = plan.anomalies.find(item => item.target === sector.symbol);
+  for (const query of [...anomaly.factQueries, ...anomaly.causalQueries]) {
+    assert.ok(query.includes(sector.constituents[1].nameEn));
+    assert.ok(query.includes(sector.constituents[2].nameEn));
+    assert.ok(!query.includes("official earnings policy industry"));
+  }
+});
+
+test("later research batches avoid repeated access refusals without excluding an entire publisher after one denial", () => {
+  const initial = { urls: ["https://apnews.com/article/previous"], unavailableDomains: [] };
+  const ledger = { rejected: [
+    { url: "https://apnews.com/article/one", reason: "HTTP 403" },
+    { url: "https://apnews.com/article/one", reason: "HTTP 403" },
+    { url: "https://www.reuters.com/article/dated", reason: "未找到文章级发布时间" },
+  ] };
+  const one = recapResearchSourceAccess(initial, ledger);
+  assert.equal(one.unavailableDomains.length, 0);
+  assert.ok(one.urls.includes("https://apnews.com/article/one"));
+  assert.ok(!one.urls.includes("https://www.reuters.com/article/dated"));
+  ledger.rejected.push({ url: "https://apnews.com/article/two", reason: "HTTP 403" });
+  const two = recapResearchSourceAccess(initial, ledger);
+  assert.ok(two.unavailableDomains.includes("apnews.com"));
+  assert.deepEqual(initial, { urls: ["https://apnews.com/article/previous"], unavailableDomains: [] });
+});
+
+test("comprehensive research freezes batch access hints and reproduces them on resume", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-recap-batches-"));
+  try {
+    const f = recapFixture();
+    const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root,
+      sourceVerifier: async outputs => ({ sources: [], rejected: outputs.slice(0, 2).map((output, i) => ({ anomalyId: output.anomalyId, url: `https://apnews.com/article/refused-${i}`, reason: "HTTP 403" })) }),
+    });
+    await workflow.initialize();
+    workflow.manifest.socialHash = stableHash(f.social);
+    workflow.manifest.tradingHash = stableHash(f.tradingData);
+    await writeFile(resolve(workflow.runDir, "artifacts/social-ledger.json"), JSON.stringify(f.social));
+    await writeFile(resolve(workflow.runDir, "artifacts/recap-trading-data.json"), JSON.stringify(f.tradingData));
+    workflow.assertResearchCapacity = async () => {};
+    const contexts = [];
+    workflow.researchAnomaly = async anomaly => {
+      contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains] });
+      return [{ anomalyId: anomaly.id, role: "facts", sources: [] }];
+    };
+    await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
+    assert.ok(contexts[0].domains.includes("apnews.com"));
+    assert.ok(!contexts[4].domains.includes("apnews.com"));
+    assert.equal(contexts[4].urls.length, 2);
+    const first = structuredClone(contexts);
+    contexts.length = 0;
+    await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
+    assert.deepEqual(contexts, first);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("recap content participates in readback hashes", () => {

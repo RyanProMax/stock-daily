@@ -20,7 +20,7 @@ These reports do not satisfy the requested all-sector explanation standard. A tr
 - Original daily-bar snapshots, price/date reconciliation, intraday range, opening and intraday components, prior-20-session baselines, and equal-weight AI contribution reconstruction.
 - Exact writer/reviewer artifact provenance, publication input hashes, inactive-market preservation, and exact production-readback inclusion of all recap content.
 - Comprehensive recovery refuses older thin reports. Failed coverage does not update scheduled completion.
-- Final automated suite: 302 Node tests and 7 Python tests, with TypeScript and production build. Repository safety, whitespace and zsh syntax checks passed.
+- Final automated suite: 310 Node tests and 8 Python tests, with TypeScript and production build. Repository safety, whitespace and zsh syntax checks passed.
 
 Publication/readback coverage here uses controlled tests. It does **not** establish a successful production publication of the new recap format.
 
@@ -53,6 +53,18 @@ For example, the US benchmark's approximately −0.17% closing return accompanie
 Frozen daily-bar snapshots: work/complete-recap-2026-09-30-us-trading.json and work/complete-recap-2026-09-30-cn-trading.json. Source responses, retrieval times, hashes and recalculated measurements are retained locally.
 
 The original X preflight was accessible but found zero qualifying leads. After adding independently identified macro/sector commentators, the 14-source preflight again found zero qualifying candidates. Neither result proves absence of market discussion. No KOL consensus or post was invented.
+
+The subsequent diagnostic preflight recorded **zero raw posts and zero filtered posts** from all 14 registered authors. It now reports `empty_response`, rather than treating an empty raw result as verified original access with no relevant opinions. This is an unresolved source-availability limitation, not evidence that the authors had no market views.
+
+## Follow-up research and publication review
+
+The second frozen-session run named the largest observed representative companies in the search seeds and verified each four-target batch before continuing. Access refusals were passed to later batches, with frozen batch hints checked for repeatability on resume. The run completed 40 researchers and 80 searches, and reconciled all 83 US trading observations without gaps. Its initial ledger contained three verified passages and ten rejections; only one passage provided a causal link for a representative company, with no verified official root facts for the complete basket. Coverage remained **0 of 20**, and no writer or production write followed.
+
+Run directory: work/complete-recap-2026-09-30-v2/US-2026-09-29-530f6ceaca27-shadow-complete-attempt-7f4e73c8-f69/. Later local source rechecks against amended numeric validation are separate from that completed run and do not convert it into a passing report.
+
+Review also corrected two numeric-validation false rejections: the initial M in “Monday” was incorrectly read as a million-unit suffix, and decimal punctuation could discard a preceding movement verb. Tests preserve proper currency scales and reject reversed price directions while accepting faithful price paraphrases and comma-separated settlement clauses. Exact duplicate wire passages on different domains cannot produce high confidence; semantic review must still distinguish other syndicated copies.
+
+Manual publication now refuses thin legacy reports before any external readback or write. Standard artifact/readback commands require complete-recap approval. Current sector quote links identify Eastmoney when Eastmoney supplied the data, rather than implying an unread official Nasdaq/CSI page was the retrieved evidence.
 
 ## Reader UI verification
 

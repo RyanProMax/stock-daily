@@ -69,11 +69,11 @@ npm run daily:verify  # 重新回读线上当前市场切片
 定向核验或发布已审核成稿时，显式指定该次运行的 `manifest.json`，输入和报告路径会从清单读取：
 
 ```bash
-npm run daily:check -- --manifest work/runs/RUN_KEY/manifest.json
+npm run daily:check -- --require-complete --manifest work/runs/RUN_KEY/manifest.json
 npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
 ```
 
-手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式的已审核成稿可写入，影子报告会被拒绝。旧流程验证见 [历史验收记录](specs/verified-recap-workflow/acceptance.md)，完整板块复盘实跑与页面验收见 [完整复盘验收记录](specs/complete-sector-recap/acceptance.md)。
+手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式且通过全部板块复盘验收的成稿可写入，影子报告和旧版简略报告会被拒绝。普通检查会单独返回完整复盘是否通过及其目标数量，不能把旧版结构有效当作完整复盘验收。旧流程验证见 [历史验收记录](specs/verified-recap-workflow/acceptance.md)，完整板块复盘实跑与页面验收见 [完整复盘验收记录](specs/complete-sector-recap/acceptance.md)。
 
 手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
 指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`

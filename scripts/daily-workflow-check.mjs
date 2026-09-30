@@ -18,10 +18,14 @@ export async function checkWorkflowArtifacts({
   reportPath,
   manifestPath = "work/daily-workflow-manifest.json",
   production = false,
+  requireComplete = false,
 } = {}) {
   const resolvedManifestPath = resolve(manifestPath);
   const manifestText = await readFile(resolvedManifestPath, "utf8");
   const manifest = JSON.parse(manifestText);
+  if (requireComplete && (manifest.coverageRequired !== true || manifest.recapApproval?.status !== "complete")) {
+    throw new Error("报告尚未通过完整板块复盘验收");
+  }
   const resolvedInputPath = resolve(
     inputPath ?? manifest.inputPath ?? "work/daily-input.json",
   );
@@ -77,6 +81,8 @@ export async function checkWorkflowArtifacts({
     agentRunCount: audit.agentRunCount,
     verifiedSourceCount: audit.verifiedSourceCount,
     minimumReviewScore: audit.minimumReviewScore,
+    completeRecap: manifest.coverageRequired === true && manifest.recapApproval?.status === "complete",
+    recapTargetCount: content.recaps?.[manifest.market]?.entries?.length ?? 0,
   };
 }
 
@@ -90,6 +96,7 @@ async function main() {
     reportPath: reportIndex >= 0 ? args[reportIndex + 1] : undefined,
     manifestPath: manifestIndex >= 0 ? args[manifestIndex + 1] : undefined,
     production: args.includes("--production"),
+    requireComplete: args.includes("--require-complete"),
   });
   console.log(JSON.stringify(result, null, 2));
 }

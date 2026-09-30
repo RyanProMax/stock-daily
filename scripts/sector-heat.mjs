@@ -309,8 +309,12 @@ async function fetchCurrentSectors(sectors, market, cutoffTime) {
       .join(","),
   });
   const payload = await fetchEastmoneyJson(url);
+  return currentSectorMetrics(payload, sectors, market, cutoffTime);
+}
+
+export function currentSectorMetrics(payload, sectors, market, cutoffTime) {
   const rows = payload.data?.diff ?? [];
-  if (rows.length !== sectors.length) {
+  if (!Array.isArray(rows) || rows.length !== sectors.length || new Set(rows.map(row => row.f12)).size !== sectors.length || rows.some(row => !sectors.some(sector => sector.symbol === row.f12))) {
     throw new Error(`${market} sectors: ${rows.length}/${sectors.length}`);
   }
   if (
@@ -331,7 +335,9 @@ async function fetchCurrentSectors(sectors, market, cutoffTime) {
       market,
       Number(row.f3),
       new Date(Number(row.f124) * 1_000).toISOString().slice(0, 10),
-      sectorQuoteUrl(market, sector.symbol),
+      market === "CN"
+        ? `https://quote.eastmoney.com/zz/2.${sector.symbol}.html`
+        : `https://quote.eastmoney.com/us/${sector.symbol}.html`,
     );
   });
 }
