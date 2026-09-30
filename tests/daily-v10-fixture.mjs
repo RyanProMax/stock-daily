@@ -433,8 +433,8 @@ export function fixtureReport(input = fixtureInput()) {
             input,
             "CN",
             cnInterconnect.source,
-            "光互连代表篮子收盘表现",
-            "光互连代表篮子在本次交易日下跌，表现弱于多个其他产业链环节。",
+            `${cnInterconnect.name}收盘行情`,
+            `${cnInterconnect.name}代表篮子在本次交易时段下跌${cnInterconnect.change}。`,
           ),
           externalEvidence({
             market: "CN",

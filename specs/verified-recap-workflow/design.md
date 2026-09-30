@@ -3,83 +3,45 @@
 ## Runtime flow
 
 ```text
-collect deterministic market data
-  -> research Agent: hypotheses + sourced report
-  -> search-event audit
-  -> source accessibility audit
-  -> deterministic report validator
-  -> independent review Agent
-  -> review-event audit + review score gate
-       pass   -> publish -> production readback
-       revise -> feedback -> research Agent (maximum three attempts)
+deterministic market collection
+  -> one-market Planner Agent
+  -> per anomaly: Facts Agent || Causal Agent
+  -> deterministic source/body/time/number verification
+  -> Adjudicator Agent
+  -> Writer Agent
+  -> independent Reviewer Agent
+       revise -> scoped new research/adjudication/repair Agent
+       pass   -> Translator Agent
+  -> merge active market with latest production inactive slice
+  -> D1 write -> production readback -> market content hash
 ```
 
-## Internal hypothesis ledger
+Every Agent call uses `codex exec --ephemeral`, an isolated working directory, a role-specific prompt and a strict output schema. It receives one structured JSON payload through stdin and cannot inherit prior model conversation. Search is enabled only for Facts and Causal roles. The macOS outer sandbox denies the repository, sibling run artifacts and the rest of the user's home directory; only the current stage directory and the Codex runtime credential directory are readable.
 
-`researchAudit.<market>.hypotheses` is stripped before publication. Each item stores:
+## Deterministic state machine
 
-- stable ID within the report;
-- causal category and concise claim;
-- affected market, sector, layer or company targets;
-- supporting external URLs;
-- counter-evidence or the exact missing proof;
-- `accepted`, `rejected` or `unresolved` verdict;
-- `market_driver`, `ai_update` or `none` publication target;
-- exact published title when accepted.
-- exact published causal claim when accepted;
-- source-level causal-evidence records containing the supported proposition,
-  narrowest supported scope and exact targets.
+`scripts/daily-workflow.mjs` owns orchestration, budgets and JSON checkpoints under `work/runs/<market-date-input-hash>/`. A stage is reusable only when its prompt, output and event hashes all match the manifest. Parallel workers serialize manifest writes, so one worker cannot erase another worker's state. Every running stage persists its timeout; after an interruption, the uncheckpointed interval is charged up to that timeout before a new workflow or research budget session begins.
 
-The deterministic validator checks the ledger-to-report edges. It does not attempt
-to infer causality from prose.
+Interrupted or failed runs adopt the current collection's ingestion identity before continuing, so publication and finalization refer to one batch consistently. Each ingestion identity has its own immutable input snapshot; the snapshot is written before the manifest is rebound, and publication rejects a manifest whose batch ID differs from its snapshot. A terminal `no_claims` run is not an interrupted checkpoint: its artifacts remain immutable for audit, while the next trigger creates a new attempt directory with empty stages and a fresh search budget. If that new attempt is interrupted, later triggers resume that latest attempt rather than starting over. Completed-stage queries are excluded only when that exact checkpoint is resumable; failed or semantically invalid same-key queries remain charged and cannot be repeated as fresh research.
 
-For a market driver, at least one causal-evidence record must support either the
-whole market or an explicitly listed first-level sector. For an AI update, at least
-one record must support the named AI layer or a company whose input quote is bound
-to that layer. A thematic source that merely mentions the same topic cannot satisfy
-this edge.
+The state machine records a unique process ID, role, model, reasoning effort, search setting, prompt-plus-schema hash, declared input artifacts, output artifact and actual web queries for every run. Planner's canonical checkpoint separately binds the current prompt and schema hashes, so changed planning instructions cannot silently reuse an older plan. Reviewer inputs are audited to ensure they never reference prompts or event streams.
 
-When evidence supports only a subsector, the driver records `subsector` plus a
-reader-facing target such as `券商` or `工业金属`. Its first-level `sectorSymbols`
-remain only a placement link; they do not widen the causal claim.
+## Evidence boundary
 
-## Independent review contract
+Research workers return exact source excerpts, not citations alone. `scripts/daily-source-audit.mjs` pins every HTTPS destination, rejects private networks and redirects, downloads the full supported page body, extracts visible text and publication metadata, and limits body size. DNS, Node HTTPS and pinned curl requests receive the workflow abort signal, while the orchestrator also races the verification stage against the remaining 45-minute deadline. `scripts/source-registry.mjs` derives source class from the final hostname.
 
-The review output is stored locally and never published. It contains:
+The verifier decodes source bodies using BOM, HTTP charset and HTML meta charset in that order before UTF-8 fallback. It requires the normalized excerpt to occur in the body and derives canonical publication time from article-level page metadata rather than trusting the researcher's declared time. The canonical time must be inside the role-specific window; related-content dates cannot substitute for the cited article's date. Facts may use the preceding 72 hours as context, while causal evidence must describe the target trading session. Non-China metadata without an explicit timezone is rejected instead of being interpreted in the scheduler host's local timezone. Every numeral in a source fact must match an excerpt numeral with the same scale/unit and stated direction. Typed financial display values must occur in the excerpt, and unscaled USD or CNY fields reject million/billion or 万/亿 notation. Semantically duplicate comparisons are collapsed by metric label, values, unit and polarity before the financial gate counts them, and code preserves the typed-value precision when calculating reader-visible deltas so a real nonzero difference cannot render as zero. A pre-event positioning exemption applies only to a pure pre-release claim and cannot suppress the comparison gate when the copy also states a disclosed result. Adjudication receives only this verified ledger, including verified alternative-explanation references.
 
-- global and per-market pass/revise verdicts;
-- one or more independently executed queries per market;
-- five integer quality scores from 1 to 5;
-- concrete issues and revision actions;
-- explicit booleans for unsupported claims, fact-restatement, source traceability
-  and alternative testing.
-- one itemized claim verdict for every published driver and AI update, including
-  the source inspected and the narrowest scope that source actually supports.
+Facts and causal evidence must come from isolated workers, distinct verified passages and a shared planned hypothesis ID. The same live article is allowed only when different excerpts independently support the factual event and the causal connection. Each accepted anomaly must have exactly one card, and every card must map to a distinct accepted anomaly. At most two accepted cards may be market drivers, matching the Writer and V11 limits. Each accepted card carries two or three external evidence IDs; the state machine adds the deterministic market-data row, keeping the V11 public evidence list within its four-row limit. The causal passage must explicitly connect the event to the same scope and target; an event passage plus a price quote is insufficient. Company evidence cannot establish sector or market causality, and a company attribution is bound to the selected constituent plus its deterministic parent sector. Agent-supplied sector symbols are rejected unless they match the frozen market envelope. Source titles and facts are checked again at the public evidence-row boundary so research caveats and audit prose cannot leak into the site.
 
-The reviewer may approve a market with no published cause when the hypothesis ledger
-shows a serious but inconclusive search. It must reject a report that simply restates
-leaders, laggards or constituent contributions as reasons.
+## Scoped repair
 
-## Retry behavior
+Reviewer returns `claimId`, defect codes, repair stage and scores; it never rewrites copy. A pass requires every score at least 4/5, no defect and no repair stage; a revise verdict requires at least one defect and a concrete repair stage. Every repair round routes each failed card to the requested fresh research, adjudication or writing process rather than defaulting later failures to Writer. Research repair replaces only the failed anomaly's two independent research outputs; when the remaining query budget cannot fund that isolated pair, the claim is rejected instead of being rewritten against unchanged evidence. Writing repair receives sanitized defect details without scores or prior dialogue, filtered to claim IDs that still survive adjudication. When a claim was removed, overview and market/AI aggregate fields are rebuilt solely from surviving cards and the global review summary is cleared before the new Writer runs, preventing rejected prose from re-entering the report. The state machine rejects any change to card copy that already passed. If the final deterministic V11 gate still fails after translation repair, completed Writer, Reviewer, repair and Translator checkpoints are invalidated so the next trigger cannot reuse the same bad reader output.
 
-The scheduler keeps the prior review JSON and the last deterministic error as
-read-only feedback for the next research attempt. Each attempt starts with a fresh
-report and event log. The gate is never relaxed. After the third failure the task
-exits non-zero and leaves production untouched.
+Translation runs only after review passes. It preserves IDs and exact numeric displays while translating each metric label, baseline label and note in order. Code reattaches the verified numeric fields after validating the translated text, so an English card cannot silently inherit Chinese labels or change a value.
 
-Research and review commands run through a process-group timeout wrapper. Research
-defaults to fifteen minutes and review to ten minutes, both configurable for local
-operations. In addition, five minutes without research events or four minutes
-without review events is treated as a stall. Either timeout sends `SIGTERM` to the
-complete spawned group, escalates to `SIGKILL` after five seconds and returns exit
-code 124 so the scheduler can distinguish a hang from an ordinary model failure.
+## Publication and recovery
 
-Research defaults to low reasoning effort because a real full-input probe reached
-file reads and native search promptly at that setting, while medium repeatedly
-stalled before the first tool call. The independent reviewer remains at medium
-effort, and all deterministic evidence gates remain unchanged.
+`mergeMarketReport` rebuilds the active market from approved cards and carries the inactive market from the latest eligible production report. It also keeps the Writer-approved active overview in hash-bound local workflow metadata that is omitted from D1; publication uses that value when refreshing a concurrently changed inactive slice, so a truncated combined headline cannot erase an accepted AI or market conclusion. For historical runs, the comparison reader searches the archive and selects the newest report whose date is no later than the requested date, so a future slice can never leak into a backfill while an older eligible slice is still preserved. If no card survives, it returns `no_claims` before constructing a report, so production remains untouched.
 
-Every failed gate writes its exact diagnostic to `work/daily-attempt-error.txt`.
-The next research attempt must read that file before searching. This makes source
-availability failures, unsupported numeric claims and review revisions actionable
-instead of repeating the same invalid output across all three attempts.
+The new publisher requires a ready multi-Agent manifest created with immutable `deliveryMode: publish`. Delivery mode is part of the run identity, so a shadow replay and a publish execution cannot share a manifest or relabel each other's artifacts. It writes the V11 public contract and performs a full production readback for the exact requested report date. On every first-ever write, it records the exact inactive-slice hash seeded by the active market. A later independently approved run may replace only that exact placeholder hash for the same report date, market and `marketAsOf`, even when CN and US are scheduled as separate batches; the marker is retained in the local manifest for restart recovery. If the write succeeded but readback was interrupted, the manifest stays pending. A later trigger processes current-version pending attempts newest-first within each market and first compares the expected active-market slice—including market date, views, attribution IDs, market data and translations—against production. Incompatible older checkpoints remain untouched for inspection but cannot block the current recovery queue. A newer approved attempt may replace an older known pending slice from the same recovery set, but an unrelated equal-date production slice remains protected. It marks completion only when that exact-date hash matches, without overwriting a newer inactive market. Recovery retries also write `running`, which is the existing D1 in-progress state; a readback-only recovery finalizes the ingestion row only after every market recorded in that batch is published or superseded. Publication success and ingestion finalization remain separate statuses, so an incomplete sibling cannot turn a verified market slice back into a pending publication. A batch whose sibling ended as failed or `no_claims` can no longer complete: recovery marks its D1 ingestion row failed, records `abandoned` locally and removes it from the pending queue before a new batch takes over. A transient publication or finalization failure remains retryable and keeps the scheduled run in partial failure. The scheduler separately persists the last handled CN and US `marketAsOf` for both newly published runs and recovered checkpoints, always using the production-confirmed date returned by readback; supersession therefore advances to the newer production date instead of the attempted date. A no-claim result preserves production and stays pending instead of falsely completing the scheduled event. A no-market-advance result also exits before writing the daily success marker, allowing later compensation triggers to recollect delayed close data. Explicit shadow replays force market selection even when production already contains the same market dates.

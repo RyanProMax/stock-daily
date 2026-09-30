@@ -1,0 +1,154 @@
+{
+  "contractVersion": "stock-daily-replay-labels-v1",
+  "expectedSessions": [
+    {
+      "market": "CN",
+      "marketAsOf": "2026-08-24"
+    },
+    {
+      "market": "CN",
+      "marketAsOf": "2026-08-25"
+    },
+    {
+      "market": "CN",
+      "marketAsOf": "2026-08-26"
+    },
+    {
+      "market": "CN",
+      "marketAsOf": "2026-08-27"
+    },
+    {
+      "market": "CN",
+      "marketAsOf": "2026-08-28"
+    },
+    {
+      "market": "US",
+      "marketAsOf": "2026-08-24"
+    },
+    {
+      "market": "US",
+      "marketAsOf": "2026-08-25"
+    },
+    {
+      "market": "US",
+      "marketAsOf": "2026-08-26"
+    },
+    {
+      "market": "US",
+      "marketAsOf": "2026-08-27"
+    },
+    {
+      "market": "US",
+      "marketAsOf": "2026-08-28"
+    }
+  ],
+  "expectedSignals": [
+    {
+      "id": "us-2026-08-24-tech-risk-off",
+      "market": "US",
+      "marketAsOf": "2026-08-24",
+      "target": "IXIC",
+      "sourceIncludes": [
+        "https://apnews.com/article/stocks-markets-futures-bonds-oil-8ab800029c559c5e751058ac1a8ef932",
+        "https://apnews.com/article/8ab800029c559c5e751058ac1a8ef932",
+        "https://www.latimes.com/business/story/2026-08-24/wall-street-drifts-at-start-of-week-that-could-swing-stocks-bonds",
+        "https://finance.yahoo.com/markets/live/stock-market-today-monday-august-24-dow-sp-500-nasdaq-080306047.html"
+      ],
+      "eventIncludes": [
+        "AI估值",
+        "AI投资回报",
+        "芯片需求",
+        "科技股轮动",
+        "财报前",
+        "业绩公布前",
+        "业绩发布前"
+      ],
+      "referenceEvent": "AI valuation and chip-demand concerns pressured technology stocks before Nvidia earnings."
+    },
+    {
+      "id": "us-2026-08-25-oil-yield",
+      "market": "US",
+      "marketAsOf": "2026-08-25",
+      "target": "DGS10",
+      "sourceIncludes": [
+        "https://apnews.com/article/stocks-markets-futures-nvidia-bonds-oil-f17fc8cfc61f40114eb7246701b4695d",
+        "https://apnews.com/article/f17fc8cfc61f40114eb7246701b4695d",
+        "https://www.latimes.com/business/story/2026-08-25/falling-oil-prices-help-calm-stock-bond-markets"
+      ],
+      "eventIncludes": [
+        "油价回落",
+        "油价下跌",
+        "原油下跌",
+        "原油回落",
+        "能源价格回落"
+      ],
+      "referenceEvent": "Lower oil prices eased inflation concerns and supported declining Treasury yields."
+    },
+    {
+      "id": "us-2026-08-27-nvidia-results",
+      "market": "US",
+      "marketAsOf": "2026-08-27",
+      "target": "IXIC",
+      "sourceIncludes": [
+        "https://apnews.com/article/stocks-market-iran-war-oil-us-35c60216666d877595a3941df73030de",
+        "https://apnews.com/article/wall-street-stocks-dow-nasdaq-b4216a1f191d0304b4ed59e6912e23a4",
+        "https://apnews.com/article/b4216a1f191d0304b4ed59e6912e23a4",
+        "https://www.kiplinger.com/investing/stocks/nasdaq-jumps-411-points-as-nvidia-stock-soars-stock-market-today"
+      ],
+      "eventIncludes": [
+        "英伟达业绩",
+        "英伟达财报",
+        "英伟达超预期",
+        "英伟达盈利",
+        "英伟达的业绩",
+        "英伟达的财报"
+      ],
+      "referenceEvent": "Nvidia earnings and revenue guidance lifted the Nasdaq through concentrated technology leadership."
+    },
+    {
+      "id": "cn-2026-08-28-ai-applications",
+      "market": "CN",
+      "marketAsOf": "2026-08-28",
+      "target": "AI-CN-applications",
+      "sourceIncludes": [
+        "https://finance.sina.com.cn/jjxw/2026-08-28/doc-inipvrue0248757.shtml",
+        "https://www.stcn.com/article/detail/4149773.html"
+      ],
+      "eventIncludes": [
+        "海外软件",
+        "赛富时",
+        "Salesforce",
+        "Claudeforce",
+        "网安财报",
+        "网络安全财报",
+        "CrowdStrike"
+      ],
+      "referenceEvent": "Overseas software and cybersecurity results supported A-share software and security names."
+    },
+    {
+      "id": "us-2026-08-28-yield-repricing",
+      "market": "US",
+      "marketAsOf": "2026-08-28",
+      "target": "DGS10",
+      "sourceIncludes": [
+        "https://apnews.com/article/stocks-markets-oil-ai-nvidia-0a655f1c042b059279343443d5802907",
+        "https://apnews.com/article/0a655f1c042b059279343443d5802907",
+        "https://www.latimes.com/business/story/2026-08-28/bond-market-prepares-for-hike-in-interest-rates-while-stocks-drift-lower",
+        "https://www.kiplinger.com/investing/stocks/stocks-turn-down-as-warsh-talks-up-rates-stock-market-today",
+        "https://www.investing.com/news/economy-news/stocks-fall-while-dollar-bond-yields-rise-as-warsh-prompts-rate-hike-bets-4881939"
+      ],
+      "eventIncludes": [
+        "沃什",
+        "Warsh",
+        "杰克逊霍尔",
+        "Jackson Hole"
+      ],
+      "referenceEvent": "Warsh’s Jackson Hole remarks increased rate-hike expectations and lifted Treasury yields."
+    }
+  ],
+  "labelReview": {
+    "status": "source-reviewed-human-confirmation-pending",
+    "reviewedAt": "2026-09-14T17:39:41.381Z",
+    "method": "Reference events were checked independently against publisher reporting before replay results. These are not human-labeled recall ground truth."
+  }
+}

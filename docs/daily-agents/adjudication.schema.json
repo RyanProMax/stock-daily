@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock Daily Adjudication V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "market", "decisions", "claimCards"],
+  "properties": {
+    "contractVersion": { "type": "string", "const": "stock-daily-adjudication-v1" },
+    "market": { "type": "string", "enum": ["CN", "US"] },
+    "decisions": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "$ref": "#/$defs/decision" } },
+    "claimCards": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/claim" } }
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anomalyId", "verdict", "publishedAs", "reason"],
+      "properties": {
+        "anomalyId": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "verdict": { "type": "string", "enum": ["accepted", "rejected", "unresolved"] },
+        "publishedAs": { "type": "string", "enum": ["market_driver", "ai_update", "none"] },
+        "reason": { "type": "string", "minLength": 10, "maxLength": 500 }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anomalyId", "hypothesisId", "publishedAs", "basis", "direction", "scope", "targets", "sectorSymbols", "layer", "title", "factSummary", "causalStatement", "evidenceIds", "comparisonIds", "alternativeAssessment"],
+      "properties": {
+        "anomalyId": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "hypothesisId": { "type": "string", "minLength": 3, "maxLength": 50 },
+        "publishedAs": { "type": "string", "enum": ["market_driver", "ai_update"] },
+        "basis": { "type": "string", "enum": ["event", "macro"] },
+        "direction": { "type": "string", "enum": ["positive", "negative", "mixed"] },
+        "scope": { "type": "string", "enum": ["market", "sector", "subsector", "ai_layer", "company"] },
+        "targets": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 80 } },
+        "sectorSymbols": { "type": "array", "minItems": 0, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 20 } },
+        "layer": { "type": "string", "maxLength": 40 },
+        "title": { "type": "string", "minLength": 5, "maxLength": 100 },
+        "factSummary": { "type": "string", "minLength": 20, "maxLength": 800 },
+        "causalStatement": { "type": "string", "minLength": 40, "maxLength": 600 },
+        "evidenceIds": { "type": "array", "minItems": 2, "maxItems": 3, "items": { "type": "string", "minLength": 8, "maxLength": 40 } },
+        "comparisonIds": { "type": "array", "maxItems": 4, "items": { "type": "string", "minLength": 8, "maxLength": 50 } },
+        "alternativeAssessment": { "type": "string", "minLength": 10, "maxLength": 500 }
+      }
+    }
+  }
+}

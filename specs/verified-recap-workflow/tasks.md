@@ -1,16 +1,40 @@
 # Verified Market Recap Workflow Tasks
 
-- [x] Review mature open-source financial-agent and evaluator-optimizer patterns.
-- [x] Add the internal causal-hypothesis ledger to the report contract and validator.
-- [x] Add an independent report-review prompt and structured review contract.
-- [x] Add review event auditing and deterministic review quality gates.
-- [x] Add bounded three-attempt feedback/rewrite orchestration.
-- [x] Add automated tests for ledger, reviewer and retry behavior.
-- [x] Run a real shadow report and inspect the resulting recap.
-- [x] Iterate up to two more times if acceptance fails.
-- [x] Continue round 1: add source-level causal claims, scope binding and itemized review.
-- [x] Continue round 2: revise from the first new shadow-run failure and re-evaluate.
-- [x] Continue round 3: revise from the second new shadow-run failure and run final acceptance.
-- [x] Bound every research and review process tree with configurable hard timeouts.
-- [x] Feed the exact failed gate diagnostic into the next research attempt.
-- [ ] Commit, deploy and verify production only after acceptance passes.
+- [x] Split planning, facts research, causal research, adjudication, writing, review and translation into isolated Agent roles.
+- [x] Add strict schemas and lean role-specific prompts.
+- [x] Add deterministic full-page, redirect, timestamp, exact-excerpt, source-class and typed-number checks.
+- [x] Add isolated-worker, distinct-passage and narrow-scope adjudication gates.
+- [x] Add 100–220-character reader-copy gates and block audit/process leakage.
+- [x] Add itemized Reviewer scoring and directed fresh-Agent repair.
+- [x] Add hash-verified JSON checkpoints, parallel-safe manifest writes and hard budgets.
+- [x] Add CN/US independent merge, no-claim preservation and production readback recovery.
+- [x] Isolate shadow/publish run identities and finalize ingestion only after the full selected-market batch succeeds.
+- [x] Disable the legacy monolithic prompt and direct publisher entry.
+- [x] Add automated harness and readback-recovery tests.
+- [x] Execute all ten CN/US historical sessions with event-specific references and cumulative retry latency; retain the earlier invalidated attempts.
+- [ ] Pass the full weekly recall benchmark against human-confirmed labels. Current production validation is separate from this reliability threshold.
+- [x] Replace the scheduler entry with the multi-Agent state machine; validate deployment separately from the weekly replay benchmark.
+- [x] Keep no-advance checkpoints retryable, route every review round by defect stage, preserve metric identity during comparison deduplication and decode legacy Chinese page encodings.
+- [x] Harden first-run two-market replacement and restart recovery, derive article times from source-page metadata, reject scaled CNY in unscaled fields and keep wrapped command flags opaque.
+- [x] Preserve the approved active overview during market merge, translate English metric labels and scrub rejected aggregate copy before targeted repair.
+- [x] Keep comparison baselines direction-neutral, derive Treasury-yield reader tone from impact semantics and carry placeholder hashes across separate market batches.
+- [x] Fix source entity decoding, publication metadata, financial units/direction phrases, natural-language search dates and deterministic company names.
+- [x] Preserve verified unchanged sources across targeted repair and retry failed CDN transports only through already-validated public addresses.
+- [x] Bind publication to immutable report artifacts; manual publication persists readback and batch completion through the same recovery logic.
+- [x] Localize archive dates, name actual historical market sessions and show complete mobile company names.
+- [x] Exercise the standalone publication command in a separate process, fix its circular-import startup deadlock and confirm a real CN write, readback and completed ingestion.
+- [x] Preserve complete sentences in combined summary metadata and reserve query budget again when a completed checkpoint's real fingerprint is stale.
+- [x] Supplement verified evidence during research repair, retain rejection history in prior artifacts and accept written percentage/basis-point units from official releases.
+- [x] Freeze source availability hints during resume, reject corrupt reader text and independently review Chinese financial labels while preserving deterministic numeric values.
+- [x] Exclude adjudication alternatives from reader and reviewer facts, and stop the research clock before writing while retaining old consumed budgets.
+- [x] Normalize approved reports identically during publication, independent readback and idempotent retries; reproduce the null-field mismatch with a regression.
+- [x] Publish the approved US recap, independently verify both production market hashes and completed ingestion, update only confirmed scheduler dates, and review all eight production layouts.
+- [x] Bind CLS embedded publication times to the exact article ID and replace publisher-only reference labels with source-reviewed event-specific labels, keeping human confirmation explicit.
+- [x] Reject price-only causal passages at adjudication and immutable publication/readback gates; preserve the failed sample and confirm its new no-claim adjudication.
+- [x] Exclude later cross-market closes from research, recognize the AI-software query alias, and parse article-bound 21jingji author-line and NBD publication metadata.
+- [x] Preflight real checkpoint hashes for the whole research batch, settle parallel siblings before returning failure and retain exhausted attempts when a later trigger starts fresh.
+- [x] Permit dated issuer/event queries during directed research, and block EPS excerpts that omit source-disclosed investment or non-recurring gains; require the new earnings-context verification at publication.
+- [x] Verify and preserve numeric comparison notes, consistently mark earnings-context checks, and recognize company-name numerals without accepting invented percentages.
+- [x] Resolve exact Federal Reserve speech publication times through article-bound official RSS items; retain date-only pages as unverified when matching metadata is unavailable.
+- [x] Restore completed supplemental research from its original invocation and immutable artifacts without spending new queries, and reject price-only causal candidates before adjudication.
+- [x] Make human label confirmation and exact article references mandatory for formal benchmark success.

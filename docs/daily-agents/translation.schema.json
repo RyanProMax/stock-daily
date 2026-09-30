@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock Daily Market Translation V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "market", "overviewHeadline", "overviewSummary", "marketView", "aiChainView", "drivers", "aiChainUpdates"],
+  "properties": {
+    "contractVersion": { "type": "string", "const": "stock-daily-market-translation-v1" },
+    "market": { "type": "string", "enum": ["CN", "US"] },
+    "overviewHeadline": { "type": "string", "minLength": 5, "maxLength": 160 },
+    "overviewSummary": { "type": "string", "minLength": 100, "maxLength": 700 },
+    "marketView": { "$ref": "#/$defs/view" },
+    "aiChainView": { "$ref": "#/$defs/aiView" },
+    "drivers": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/driver" } },
+    "aiChainUpdates": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/aiUpdate" } }
+  },
+  "$defs": {
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 60, "maxLength": 600 }
+      }
+    },
+    "aiView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "summary", "mechanism"],
+      "properties": {
+        "headline": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 40, "maxLength": 600 },
+        "mechanism": { "type": ["string", "null"], "minLength": 60, "maxLength": 700 }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimId", "title", "summary", "mechanism", "metrics"],
+      "properties": {
+        "claimId": { "type": "string", "minLength": 8, "maxLength": 40 },
+        "title": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 700, "pattern": "^[^\\u200B-\\u200F\\u2060\\uFEFF]*$" },
+        "mechanism": { "type": "string", "minLength": 100, "maxLength": 700, "pattern": "^[^\\u200B-\\u200F\\u2060\\uFEFF]*$" },
+        "metrics": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/metric" } }
+      }
+    },
+    "aiUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimId", "title", "summary", "implication", "metrics"],
+      "properties": {
+        "claimId": { "type": "string", "minLength": 8, "maxLength": 40 },
+        "title": { "type": "string", "minLength": 5, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 100, "maxLength": 700, "pattern": "^[^\\u200B-\\u200F\\u2060\\uFEFF]*$" },
+        "implication": { "type": "string", "minLength": 100, "maxLength": 700, "pattern": "^[^\\u200B-\\u200F\\u2060\\uFEFF]*$" },
+        "metrics": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/metric" } }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "baselineLabel", "note"],
+      "properties": {
+        "label": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "baselineLabel": { "type": "string", "minLength": 2, "maxLength": 24 },
+        "note": { "type": "string", "maxLength": 180 }
+      }
+    }
+  }
+}

@@ -17,6 +17,26 @@ import {
 import { metricAtCutoff } from "../scripts/sector-heat.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
 
+test("computed signed count deltas after Chinese prose remain grounded numbers", () => {
+  const claims = numericClaims("新增就业：差额为+97,000（+149.2%）。");
+  assert.ok(claims.some((item) => item.number === "97000" && item.unit === "bare" && item.polarity === "positive"));
+  assert.ok(numericClaims("差额为0。").some((item) => item.number === "0"));
+  assert.equal(numericClaims("代表标的1收盘表现").length, 0);
+});
+
+test("known index endpoints imply points without relabeling company prices", () => {
+  for (const text of ["The Dow rose 1.0% to 52,573.", "The Dow, which gained 1.0% to 52,573.", "The Dow Jones Industrial Average closed at 52,573.", "道指上涨1.0%至52,573点。"])
+    assert.ok(numericClaims(text).some((claim) => claim.number === "52573" && claim.unit === "level"), text);
+  assert.ok(numericClaims("Company shares rose 1.0% to 52,573.").some((claim) => claim.number === "52573" && claim.unit === "bare"));
+  assert.ok(numericClaims("The Nasdaq Composite fell 0.5% to 26,333.").some((claim) => claim.number === "26333" && claim.unit === "level"));
+});
+
+test("final numeric grounding treats hyphenated English basis-point units like Chinese units", () => {
+  for (const text of ["A 25-basis-point rate hike.", "A 25 basis-point rate hike.", "加息25个基点。"])
+    assert.ok(numericClaims(text).some((claim) => claim.number === "25" && claim.unit === "basis_point"), text);
+  assert.ok(numericClaims("A 0.4-percent inflation reading.").some((claim) => claim.number === "0.4" && claim.unit === "percent"));
+});
+
 test("V11 accepts deterministic market input without a preselected news pool", () => {
   const input = validateInput(fixtureInput());
   assert.equal(input.contractVersion, "codex-market-research-v11");
@@ -68,6 +88,28 @@ test("numeric grounding ignores localized calendar dates", () => {
       polarity: "positive",
     },
   ]);
+  assert.deepEqual(
+    numericClaims("截至2026年第二季度末，价格仍在上涨。"),
+    [
+      {
+        raw: "2026",
+        number: "2026",
+        unit: "calendar_year",
+        polarity: "neutral",
+      },
+    ],
+  );
+  assert.deepEqual(
+    numericClaims("As of the end of the second quarter of 2026, prices were rising."),
+    [
+      {
+        raw: "2026",
+        number: "2026",
+        unit: "calendar_year",
+        polarity: "neutral",
+      },
+    ],
+  );
   assert.deepEqual(numericClaims("商业活动升至五十二个月高位。"), [
     {
       raw: "52",
@@ -85,8 +127,75 @@ test("numeric grounding ignores localized calendar dates", () => {
     },
   ]);
   assert.deepEqual(
+    numericClaims("The policy-sensitive two-year Treasury yield rose."),
+    [{ raw: "2", number: "2", unit: "tenor", polarity: "neutral" }],
+  );
+  assert.deepEqual(
+    numericClaims("政策敏感型两年期国债收益率上升。"),
+    [{ raw: "2", number: "2", unit: "tenor", polarity: "neutral" }],
+  );
+  assert.deepEqual(
+    numericClaims(
+      "Data 360 generated recurring revenue while 360 Security Technology and 360 Security shares rose.",
+    ),
+    [],
+  );
+  assert.deepEqual(numericClaims("加息概率由35%升至接近58%。"), [
+    { raw: "35", number: "35", unit: "percent", polarity: "neutral" },
+    { raw: "58", number: "58", unit: "percent", polarity: "positive" },
+  ]);
+  assert.deepEqual(numericClaims("Nvidia sank 2.9%."), [
+    { raw: "2.9", number: "2.9", unit: "percent", polarity: "negative" },
+  ]);
+  assert.deepEqual(numericClaims("英伟达下跌2.9%。"), [
+    { raw: "2.9", number: "2.9", unit: "percent", polarity: "negative" },
+  ]);
+  assert.deepEqual(numericClaims("The Dow added 140 points, or 0.3%."), [
+    { raw: "140", number: "140", unit: "level", polarity: "positive" },
+    { raw: "0.3", number: "0.3", unit: "percent", polarity: "positive" },
+  ]);
+  assert.deepEqual(
     numericClaims(approvedGroundingText({ companyCount: 2 })),
     [{ raw: "2", number: "2", unit: "count", polarity: "neutral" }],
+  );
+});
+
+test("numeric grounding does not assign a later clause's direction to a baseline", () => {
+  assert.deepEqual(numericClaims("前一日基准为35%，增加23个百分点。"), [
+    { raw: "35", number: "35", unit: "percent", polarity: "neutral" },
+    { raw: "23", number: "23", unit: "percent", polarity: "positive" },
+  ]);
+  assert.deepEqual(
+    numericClaims("相较周四尾盘4.67%上升+0.05个百分点。"),
+    [
+      { raw: "4.67", number: "4.67", unit: "percent", polarity: "neutral" },
+      { raw: "+0.05", number: "0.05", unit: "percent", polarity: "positive" },
+    ],
+  );
+  assert.deepEqual(
+    numericClaims("The yield rose to 4.72% from 4.67% versus Thursday."),
+    [
+      { raw: "4.72", number: "4.72", unit: "percent", polarity: "neutral" },
+      { raw: "4.67", number: "4.67", unit: "percent", polarity: "neutral" },
+    ],
+  );
+});
+
+test("reader tone treats a rising Treasury yield as adverse", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const primary = report.drivers.find(
+    (item) => item.market === "US" && item.role === "primary",
+  );
+  primary.attributionScope = "market";
+  primary.attributionTargets = ["DGS10"];
+  primary.sectorSymbols = [];
+  primary.direction = "positive";
+  const content = JSON.parse(buildReportContent(input, report));
+  assert.equal(content.marketViews.US.overview.tone, "negative");
+  assert.equal(
+    content.translations.en.marketViews.US.overview.tone,
+    "negative",
   );
 });
 
@@ -107,6 +216,43 @@ test("market evidence grounds the deterministic bound-company count", () => {
   assert.equal(
     validateReport(report, input).drivers[0].evidence[0].source,
     constituent.source,
+  );
+});
+
+test("company attribution is bound to the selected constituent and parent sector", () => {
+  const input = validateInput(fixtureInput());
+  const report = fixtureReport(input);
+  const driver = report.drivers.find(
+    (item) =>
+      item.market === "US" && item.sectorSymbols.includes("XLB"),
+  );
+  const sector = input.sectorPerformance.find(
+    (item) => item.market === "US" && item.symbol === "XLB",
+  );
+  const company = sector.constituents.find((item) => item.direction === "up");
+  driver.attributionScope = "company";
+  driver.attributionTargets = [company.symbol];
+  driver.evidence[0] = {
+    ...driver.evidence[0],
+    title: `${company.name}收盘表现`,
+    facts: `${company.name}在本次交易日上涨${company.change}。`,
+    source: company.source,
+  };
+  const hypothesis = report.researchAudit.US.hypotheses.find(
+    (item) => item.publishedTitle === driver.title,
+  );
+  hypothesis.targets = [company.symbol];
+  hypothesis.causalEvidence[0].scope = "company";
+  hypothesis.causalEvidence[0].targets = [company.symbol];
+  assert.doesNotThrow(() => validateReport(report, input));
+
+  const unrelatedSector = structuredClone(report);
+  unrelatedSector.drivers.find(
+    (item) => item.title === driver.title,
+  ).sectorSymbols = ["XLC"];
+  assert.throws(
+    () => validateReport(unrelatedSector, input),
+    /归因范围与目标不一致/,
   );
 });
 
@@ -653,6 +799,10 @@ test("reader copy rejects internal terms, raw timestamps and ungrounded numbers"
   const internal = fixtureReport(input);
   internal.summary = "本报告由 Codex pipeline stage 生成，因此行业轮动与材料方向获得支持。";
   assert.throws(() => validateReport(internal, input), /暴露了内部实现术语/);
+
+  const corrupted = fixtureReport(input);
+  corrupted.summary += "�";
+  assert.throws(() => validateReport(corrupted, input), /乱码替代字符/);
 
   const rawTime = fixtureReport(input);
   rawTime.marketViews.CN.summary =

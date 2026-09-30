@@ -2,52 +2,62 @@
 
 ## Functional requirements
 
-1. Each researched market must record at least three distinct causal hypotheses.
-2. Each hypothesis must record a claim, category, affected targets, supporting
-   source URLs, counter-evidence or missing-proof note, verdict and verdict reason.
-3. At least one hypothesis per market must be rejected or unresolved so the ledger
-   demonstrates alternative testing rather than post-hoc confirmation.
-4. Every published driver and AI update must map to exactly one accepted hypothesis
-   by title and share at least one non-market-data evidence URL with it.
-5. Rejected and unresolved hypotheses must never appear in reader-facing drivers or
-   AI updates.
-6. A separate review run must independently search both markets and open every cited
-   external source before it can pass the report.
-7. Review must grade factual accuracy, causal logic, evidence directness,
-   alternative testing and reader utility on a five-point scale.
-8. Publication requires a global pass, a pass for both markets, all five dimensions
-   at least 4/5, no unresolved review issue, and all deterministic quality checks.
-9. Failed generation, search audit, source audit, report validation or review must
-   feed a concise error or structured review back into the next attempt.
-10. The scheduled workflow must stop after at most three attempts. Exhaustion exits
-    without publishing or marking the schedule complete.
-11. Every accepted hypothesis must state, for each supporting source, the exact
-    causal proposition it supports and the narrowest supported scope (market,
-    sector, subsector, AI layer or company).
-12. The published mechanism must exactly match the accepted hypothesis claim that
-    was checked against those causal-evidence records.
-13. The independent reviewer must return one itemized verdict for every published
-    driver and AI update; a report cannot pass on aggregate scores alone.
-14. A subsector catalyst may be attached to its parent first-level sector for page
-    placement, but all causal copy and review scope must remain at the subsector.
-15. Every research and review model invocation must have a bounded wall-clock
-    duration and terminate its spawned process tree when the bound is exceeded.
-16. Every retry after generation, search, source, report or review failure must read
-    the exact prior failure and avoid repeating the rejected URL, number or claim.
+1. Every judgment, search, writing, review and translation role runs in a new ephemeral Agent process.
+2. Planner handles one completed market and returns two anomalies plus at most one fallback, each with at least three competing hypotheses.
+3. Facts and causal researchers for the same anomaly run independently and cannot read each other's output.
+4. Every cited source must pass final-URL, public-network, body, publication-time, exact-excerpt and registered-domain validation before adjudication.
+5. Facts and causal evidence for an accepted claim must come from isolated workers and different verified passages, while supporting the same planned hypothesis, narrow scope and target. The same live article is allowed only when the excerpts and evidence IDs differ.
+6. Financial comparisons contain typed actual and baseline values, including an explicit USD or CNY scale for monetary figures. Display values must match those typed values, and the verified excerpt must bind each number to the same declared unit and scale; code computes delta and tone.
+7. A financial beat, miss or guidance claim without all required comparisons is rejected.
+8. Writer receives only accepted cards and their verified evidence. Each Chinese core summary and mechanism is 100–220 characters and must include all supplied financial comparisons.
+9. Reader copy cannot contain internal process, audit caveats, rejected hypotheses, empty headings or price-restatement filler.
+10. Reviewer runs in a fresh context without Writer prompts, conversations or event logs. Every claim needs scores of at least 4/5 for factual accuracy, causal logic, evidence directness and reader utility.
+11. Failed claims alone are sent to new research, adjudication or repair processes. Passed card copy must remain byte-for-byte unchanged during a targeted writing repair.
+12. Translation runs only after review passes and preserves IDs, order, scope and every numeric display string.
+13. A market uses at most 12 search queries, 20 minutes of research time and 45 minutes total. The third anomaly is researched only when the first two produce no publishable claim.
+14. Stage prompts, outputs and events are hash-addressed JSON checkpoints. A matching completed stage resumes; a changed or incomplete stage reruns without a local database.
+15. CN and US advance independently. Failure or no-claim status in one market does not block a successful other market.
+16. Publishing replaces only the active market analysis while preserving the inactive market's latest production slice.
+17. No-claim runs do not overwrite that market's prior valid analysis.
+18. Publication completes only after production readback returns the exact requested report date and matches the expected report. An interrupted readback remains pending and is recovered by active-market content hash on the next trigger.
+19. Shadow manifests cannot cross the production publication boundary.
+20. Planner, evidence ledger, adjudication, review scores, prompts and events remain local runtime artifacts and never enter D1 or reader UI.
+21. Scheduled triggers persist the latest handled `marketAsOf` independently for CN and US only after a new run or recovered checkpoint is published or confirmed superseded; the checkpoint date must come from the production readback, never from the attempted input date.
+22. A no-claim market preserves the prior production analysis and remains pending; it cannot mark the scheduled publication complete or advance the handled-market checkpoint.
+23. The outer Agent sandbox denies the repository, sibling run artifacts and unrelated files under the user's home directory; it permits only the current stage directory and the Codex runtime credential directory.
+24. Interrupted Agent time is charged to persisted workflow and research budgets, and pending publication attempts for the same market are recovered newest-first.
+25. Interrupted or failed attempts rebind to the current collection's ingestion batch before resuming. A terminal no-claim result never reuses completed research stages; the next trigger starts a fresh isolated attempt while retaining prior artifacts for audit.
+26. Delivery mode is immutable and part of the run identity, so shadow and publish executions cannot relabel or reuse each other's publication state.
+27. Per-market writes keep the shared ingestion run in the existing D1 `running` state; it becomes `completed` only after every selected market has published and passed production readback. Publication status remains independent from batch finalization status.
+28. Non-China publication timestamps without an explicit timezone are rejected, and recovery considers a failed ingestion finalization unresolved even after the market slice has passed readback.
+29. Recovery ignores checkpoints from incompatible workflow versions, while an explicitly requested shadow replay forces fresh market selection even when production already has the same market date.
+30. A historical run may preserve an inactive production slice only from the requested report date or earlier. A multi-market ingestion batch that has a terminal failed or no-claim sibling is marked failed and retired from recovery. Final deterministic report-gate failures invalidate cached Writer, Reviewer and Translator stages, and repair input excludes claims already removed from the active card set.
+31. Resumed runs bind the manifest to an immutable input snapshot for the current ingestion batch. Historical comparison selects the newest archived report at or before the requested date. Source verification is abortable at the workflow hard deadline. Accepted anomalies and claim cards are one-to-one, reader cards use only deterministic sector bindings, per-claim review verdicts must agree with defect and repair fields, and every failed or invalid same-stage query remains consumed.
+32. Concurrent or two-role research reserves its full query cost before launch. A pending newest recovery defers older attempts from the same market session, and no candidate may overwrite a production slice with a later `marketAsOf`, regardless of which pipeline produced it. Default artifact checks resolve the immutable input and report paths from the manifest. Historical archive lookup is server-bounded by the requested date rather than a fixed recent-result window.
+33. Computed financial deltas preserve enough precision that a nonzero difference cannot render as zero. Semantically duplicate comparisons count once toward the financial gate, adjudication accepts at most two market-driver cards, and every title or fact copied into a public evidence row passes the same internal/audit-copy guard as the main analysis.
+34. Report-construction failures invalidate resumable reader-output stages. A pre-event positioning exemption cannot hide a disclosed financial result, unscaled USD values cannot carry million/billion notation, fact numerals must match excerpt units and direction, and Planner checkpoints bind the current prompt and output schema hashes.
+35. A scheduled no-advance result remains retryable and cannot write the checkpoint success marker. Every Reviewer repair round honors its requested research, adjudication or writing stage; research defects that cannot fit the remaining query budget are rejected rather than sent to Writer. Comparison deduplication includes metric identity, and source decoding honors BOM, HTTP charset and HTML-declared charset before UTF-8 fallback.
+36. Every first-ever publication records the inactive slice it seeded so a later independently approved market run can replace that exact placeholder, including across separate market batches and process restarts. Unscaled CNY fields reject scaled Renminbi notation, canonical source publication time is derived from article-level page metadata and must satisfy the role-specific evidence window, and timeout-wrapper flags are parsed only before the command separator.
+37. The approved active-market overview survives inactive-slice refresh even when the combined public headline was truncated. English financial cards translate metric labels, baseline labels and notes while code preserves the numeric displays. If review removes a card, every aggregate repair field and the global review summary are rebuilt or cleared from surviving cards before a new Writer sees them.
+38. A comparison baseline introduced by `from`, `versus`, `相较` or a separate signed delta remains direction-neutral at the final numeric gate. Reader tone for the U.S. 10-year Treasury yield reflects impact semantics, so a rising yield is not labeled favorable.
+39. Writer supplies Chinese metric labels and notes in comparison order for independent review; code attaches the verified actual, baseline, computed delta and tone. English translation uses the approved labels. Replacement characters are rejected at reader and publication gates, and display-unit localization does not alter canonical numeric values.
+40. Publication, readback recovery and idempotent retry compute the active-market hash from the same validated representation. Optional null fields in the approved draft must not cause a correctly published report to be classified as a different report.
+41. Adjudication must inspect the source passage itself for an event-to-price connection. Parallel index and constituent moves are not a catalyst. Publication and recovery additionally require a causal passage attached to each active card in the hash-verified evidence ledger; lexical checks are necessary guards, not substitutes for semantic review.
+42. Research excludes cross-market closes that happened after the active market's session. The collected input hash remains immutable, while research payloads, artifacts and priority rules use only chronologically eligible leads.
+43. Parallel research checks the full batch's actual prompt, schema, output and event hashes before spending its query budget. An error is reported only after running siblings settle. Exhausted failed attempts remain recorded; a later trigger starts a separate bounded attempt instead of repeatedly resuming an impossible budget.
+44. EPS comparisons must retain material investment-gain or non-recurring-item qualifications disclosed near the source's EPS discussion. Such source checks have a separate version and are required at the publication boundary. Directed research may investigate the discovered issuer/event instead of repeating the original index query, while retaining a date and market context and all evidence-scope checks.
+
+45. Comparison-note numbers are checked against the exact source excerpt with units and directions, preserved in the public evidence facts, and checked again at publication. Earnings-context verification applies equally to target-matched and event-only facts.
+46. A date-only Federal Reserve speech page may use the exact official RSS item's publication time only when article date, URL, feed link, GUID and New York publication date agree. The reader never invents an intraday timestamp from a date.
+47. Completed supplemental research retains its invocation input and can be restored within an existing attempt without new queries only when plan, market session, current prompt/schema and output/event hashes agree. Prior searches and time remain consumed. At most two distinct initial anomalies receive directed repair within the twelve-query limit.
 
 ## Acceptance requirements
 
-1. Automated tests cover hypothesis traceability, rejected-hypothesis leakage,
-   independent review-event auditing, review score gates and the three-attempt cap.
-2. A real current-report shadow run must complete generation, deterministic checks
-   and independent review without writing Cloudflare state.
-3. Human acceptance inspects the resulting CN and US recap and confirms that each
-   published reason adds causal information beyond the already-visible price facts.
-4. If the first real run fails acceptance, the failure must be classified and used
-   to revise the workflow before a second run. The same applies once more before the
-   third and final run.
-5. Weekly reports and unrelated Cloudflare resources remain unchanged.
-6. A hung model invocation exits with a distinct timeout result, advances the
-   bounded retry loop and leaves no child process or publication behind.
-6. Numeric grounding must accept the deterministic ten-year Treasury tenor while
-   continuing to reject ungrounded market numbers.
+1. Strict structured-output schemas exist for planner, evidence, adjudication, draft, review and translation stages.
+2. Automated tests cover process isolation records, source-body and time verification, financial comparisons, independent evidence pages, thin-copy rejection, internal-copy rejection, review score gates, market isolation and production readback recovery.
+3. This week's CN and US sessions run as non-publishing replays before the scheduler is considered accepted.
+4. Every visible causal claim and number maps to a verified page passage; inaccessible, out-of-window, wrong-direction and price-only claims published equals zero.
+5. Human-labeled high-signal event recall is at least 90%, and every published card scores at least 4/5 for causality and information gain.
+6. At least 90% of per-market replays finish within 30 minutes and no per-market run exceeds 45 minutes.
+7. Weekly reports, website schema and unrelated Cloudflare resources remain unchanged.
+8. Formal benchmark success requires explicit human confirmation of reference labels, including reviewer and review time. Publisher-only labels and machine-reviewed reference events cannot qualify as human-labeled acceptance; strict matching requires event terms and exact article links.

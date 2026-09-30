@@ -5,8 +5,8 @@ import { assessDailyFreshness } from "./daily-policy.mjs";
 
 const DEFAULT_BASE_URL = "https://stock-daily-8k4.pages.dev";
 
-async function fetchJson(url) {
-  const response = await fetch(url, {
+async function fetchJson(url, fetcher = fetch) {
+  const response = await fetcher(url, {
     headers: {
       Accept: "application/json",
       "Cache-Control": "no-cache",
@@ -18,22 +18,36 @@ async function fetchJson(url) {
   return response.json();
 }
 
-export async function fetchComparisonReport(input, baseUrl = DEFAULT_BASE_URL) {
+export async function fetchComparisonReport(
+  input,
+  baseUrl = DEFAULT_BASE_URL,
+  { fetcher = fetch } = {},
+) {
   const cacheBust = Date.now();
   const sameDate = await fetchJson(
     `${baseUrl}/api/reports/${input.reportDate}?_=${cacheBust}`,
+    fetcher,
   );
   if (sameDate?.data) return sameDate.data;
 
   const archive = await fetchJson(
-    `${baseUrl}/api/reports?limit=1&_=${cacheBust}`,
+    `${baseUrl}/api/reports?limit=1&before=${encodeURIComponent(input.reportDate)}&_=${cacheBust}`,
+    fetcher,
   );
-  const latestDate = archive?.data?.[0]?.reportDate;
-  if (!latestDate || latestDate === input.reportDate) return null;
-  const latest = await fetchJson(
-    `${baseUrl}/api/reports/${latestDate}?_=${cacheBust}`,
+  const comparisonDate = (archive?.data ?? [])
+    .map((item) => item?.reportDate)
+    .filter(
+      (reportDate) =>
+        typeof reportDate === "string" && reportDate <= input.reportDate,
+    )
+    .sort()
+    .at(-1);
+  if (!comparisonDate || comparisonDate === input.reportDate) return null;
+  const comparison = await fetchJson(
+    `${baseUrl}/api/reports/${comparisonDate}?_=${cacheBust}`,
+    fetcher,
   );
-  return latest?.data ?? null;
+  return comparison?.data ?? null;
 }
 
 async function main() {

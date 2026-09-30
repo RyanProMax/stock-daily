@@ -241,26 +241,26 @@ function dailyFixture() {
   };
 }
 
-test("market close labels are relative to the selected report date", async () => {
+test("market close labels name the actual session even when an old report is viewed later", async () => {
   const { formatMarketAsOfLabel } = await vite.ssrLoadModule(
     "/src/lib/i18n.ts",
   );
 
   assert.match(
     formatMarketAsOfLabel("2026-07-28", "2026-07-28", "CN", "zh"),
-    /A股数据截至今天（7月28日）收盘/,
+    /A股数据截至2026年7月28日收盘/,
   );
   assert.match(
     formatMarketAsOfLabel("2026-07-27", "2026-07-28", "US", "zh"),
-    /美股数据截至昨天（7月27日）收盘/,
+    /美股数据截至2026年7月27日收盘/,
   );
   assert.match(
     formatMarketAsOfLabel("2026-07-24", "2026-07-27", "US", "zh"),
-    /美股数据截至最近交易日（7月24日）收盘/,
+    /美股数据截至2026年7月24日收盘/,
   );
   assert.match(
     formatMarketAsOfLabel("2026-07-27", "2026-07-28", "US", "en"),
-    /U\.S\. data through yesterday's close \(Jul 27\)/,
+    /U\.S\. data through the Jul 27, 2026 close/,
   );
 });
 

@@ -12,11 +12,11 @@
 - `/api/reports/:date` 返回指定日期完整日报
 - 首页使用单一日期入口切换期次，并通过归档列表回溯
 - 本地 SSR 与本地 API 直接读取线上只读数据，不创建本地 D1 或报告镜像
-- Agent 每日解读重点新闻，标注利好/利空、受影响板块与可验证个股
-- 采集器按本期期数计算 CN/US 各 6 个一级行业价格热度，SSR 按交易日识别连续高热板块
+- 本地多 Agent 每日主动检索并核实市场异动原因，只发布能够从原文定位的归因
+- 采集 CN/US 各 11 个一级行业、代表股和各 8 个 AI 产业链环节的收盘行情
 - 日报顶部按格子展示本周关键事件；只有兑现结果、同一官方来源和核验时间齐全时才标绿打勾
-- 市场状态明确显示数据截至今天、昨天或最近交易日的具体收盘日
-- 每条新闻保留原始标题、最小核验事实、来源 URL、发布时间和模型版本
+- 市场状态显示明确的本地化收盘日期，历史日报不会把旧行情称为今天
+- 每条新闻保留原始标题、最小核验事实、来源 URL 和发布时间
 - macOS 定时唤醒本机 Codex，每天生成早间版、A 股收盘版与晚间版，每周日生成周报并写入 D1
 - 中英文切换、深浅色主题、新闻渐进展开与摘要复制
 - 自托管中英文字体与无横向溢出的移动端布局
@@ -34,17 +34,17 @@ npm run pages:dev
 
 macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 分别生成早间版、A 股收盘版和晚间版：
 
-1. 通过 `stock-analysis-skill` 约定的一次性
+1. 通过一次性
    `stock-analysis-api/scripts/market_data_query.py daily-pack` 获取 S&P 500、
    NASDAQ、DOW、美国 10 年期收益率、上证指数和沪深 300；无需启动 FastAPI，
    固定无持久化，并由 API 统一比较 FRED / Yahoo 与中国指数 fallback；
-2. 并行读取国家统计局、Federal Reserve、BEA、SEC、EIA 等官方发布页或 RSS 与中美财经源；单一来源超时或失败不会阻断其余来源；
-3. 结构化解析 RSS/Atom，清理追踪参数并回读原文；正文使用 Readability 提取最小核验事实，事实缺失则不发布；
-4. 按中文兼容的标题相似度、URL、来源和主题去重，再剔除个人理财、荐股、标题党、日历与汇总稿等噪声；
-5. 工作日每个市场至少 4 条、周末至少 3 条，目标 5 条、最多 6 条；达不到质量下限则整次失败，不用低信号内容凑数；
-6. 采集器按中证全指一级行业与美国 GICS Sector SPDR 计算确定性热度，Codex Agent 只生成结构化新闻与市场解读；
-7. 指数和行业数据必须属于同一交易日，否则保留上一版并等待重试；交易日的 15:00 收盘版只在当日 CN 收盘数据到位后运行，非交易日仍刷新新闻与核验时间；
-8. 三个主时段使用同一 `report_date` 依次覆盖并刷新生成时间，不新增重复期次；同一时段的补偿重试若没有行情或新闻推进则跳过，失败则保留上一版并写入 `ingestion_runs`。
+2. 确定性程序整理指数、一级行业、代表股与 AI 产业链的真实异动；Planner 只据此提出研究问题，不把涨跌事实当作原因；
+3. 每个异动并行启动互不可见的事实研究与因果研究进程，主动检索公告、财报、市场预期、收盘报道和竞争解释；
+4. 程序重新打开最终来源正文，核实页面发布时间与精确摘录。财报数据必须包含类型化实际值、预期值和程序计算的差额；
+5. 独立裁决、成稿、复核和翻译分别使用新的临时 Agent。任何阶段证据不足时不生成凑数卡片；
+6. CN、US 按收盘日独立更新。发布只替换当前市场切片，另一市场已验证内容保持不变；
+7. 所有断点均为忽略版本控制的临时 JSON，不创建本地数据库；
+8. 写入 D1 后必须从线上 API 回读并比较内容哈希，完全一致才标记完成。
 
 `launchd` 只负责到点唤醒；抓取、AI 解读与质量校验都在本机完成，Cloudflare 不运行抓取或模型任务。本机通过 Wrangler 登录态直写 D1。运行审计保留 90 天，日报长期保留。任务契约和运行前提见 [docs/codex-daily-task.md](docs/codex-daily-task.md)。
 
@@ -59,12 +59,21 @@ STOCK_ANALYSIS_UV="/absolute/path/to/uv"
 手工试跑同一流程：
 
 ```bash
-npm run daily:collect
-# Codex 按 docs/codex-daily-task.md 生成 work/daily-report.json
-npm run daily:check
-npm run daily:publish
-npm run daily:verify
+npm run daily:shadow  # 完整运行但不发布
+npm run daily:run     # 只运行并发布 US
+npm run daily:close   # 只运行并发布 CN
+npm run daily:check   # 校验最近一次运行清单与报告
+npm run daily:verify  # 重新回读线上当前市场切片
 ```
+
+定向核验或发布已审核成稿时，显式指定该次运行的 `manifest.json`，输入和报告路径会从清单读取：
+
+```bash
+npm run daily:check -- --manifest work/runs/RUN_KEY/manifest.json
+npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
+```
+
+手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式的已审核成稿可写入，影子报告会被拒绝。当前验证证据及尚未通过的历史回放条件见 [验收记录](specs/verified-recap-workflow/acceptance.md)。
 
 手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
 指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`

@@ -15,6 +15,7 @@ import {
 import { auditReportSources } from "./daily-source-audit.mjs";
 import { auditIndependentReview } from "./daily-review-audit.mjs";
 import { assertReviewPassed } from "./daily-review-check.mjs";
+import { requiresFinancialComparisons } from "./daily-workflow-core.mjs";
 import {
   buildMarketSessions,
   driverDirectionMatches,
@@ -24,6 +25,9 @@ import {
   sectorHeatScore,
   topSectorHeat,
 } from "./sector-heat.mjs";
+import { verifiedExternalSourceType } from "./source-registry.mjs";
+
+export { verifiedExternalSourceType } from "./source-registry.mjs";
 
 const execFileAsync = promisify(execFile);
 const AGENT_MODEL = "openai/codex-scheduled";
@@ -39,67 +43,14 @@ const EVIDENCE_KINDS = new Set([
   "official",
 ]);
 const SOURCE_TYPES = new Set(["first_party", "publisher", "expert"]);
-const FIRST_PARTY_SOURCE_DOMAINS = [
-  "bea.gov",
-  "bls.gov",
-  "cmegroup.com",
-  "csindex.com.cn",
-  "eia.gov",
-  "federalreserve.gov",
-  "gov.cn",
-  "hkex.com.hk",
-  "hkexnews.hk",
-  "nasdaq.com",
-  "nyse.com",
-  "nvidia.com",
-  "pbc.gov.cn",
-  "sec.gov",
-  "salesforce.com",
-  "sse.com.cn",
-  "stats.gov.cn",
-  "szse.cn",
-  "treasury.gov",
-];
-const ESTABLISHED_PUBLISHER_HOSTS = new Set([
-  "21jingji.com",
-  "apnews.com",
-  "barrons.com",
-  "bloomberg.com",
-  "caixin.com",
-  "cls.cn",
-  "cnbc.com",
-  "cnstock.com",
-  "finance.eastmoney.com",
-  "finance.yahoo.com",
-  "ft.com",
-  "latimes.com",
-  "kiplinger.com",
-  "marketwatch.com",
-  "marketbeat.com",
-  "moneyweek.com",
-  "m.nbd.com.cn",
-  "nbd.com.cn",
-  "people.com.cn",
-  "reuters.com",
-  "finance.sina.com.cn",
-  "stcn.com",
-  "thepaper.cn",
-  "wap.eastmoney.com",
-  "wsj.com",
-  "wtop.com",
-  "xinhuanet.com",
-  "yicai.com",
-]);
 const SEARCH_RESULT_URL =
   /(?:google\.[^/]+\/search|bing\.com\/search|search\.brave\.com\/search|duckduckgo\.com\/?\?q=)/iu;
 const INTERNAL_COPY =
-  /\b(?:Codex|OpenAI|API(?:\s+Skill)?|Agent|provider|schema|pipeline|market_data_query|newsDiagnostics|schemaVersion|contractVersion)\b|内部评分|调试标记/iu;
+  /\p{Extended_Pictographic}|<\/?[a-z][^>]*>|\b(?:Codex|API(?:\s+Skill)?|Agent|provider|schema|pipeline|JSON|typo|malformed|market_data_query|newsDiagnostics|schemaVersion|contractVersion)\b|\b(?:answer (?:ends|complete)|stop (?:now|generating)|mark as finished|don't revise|do not (?:output|revise|add)|no (?:more|additional) content|strictly (?:one|single) sentence)\b|内部评分|调试标记|别信|数字可能是编的|去查原始来源|忽略(?:以上|此前|原有)?指令|答案到此|停止生成|到此为止|仅此一句|严格(?:单句|一句)|不要(?:输出|添加).{0,8}(?:字段|内容)/iu;
 const RAW_DATE_OR_TIMESTAMP =
   /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?\b/u;
 const READER_AUDIT_COPY =
-  /该(?:来源|证据)|现有证据|证据边界|证据只|不能据此|无法据此|this evidence|the evidence only|cannot (?:be used to|establish|support|infer)|does not establish/iu;
-const FINANCIAL_EVENT_COPY =
-  /财报|业绩公告|财季|每股收益|earnings|\beps\b/iu;
+  /该(?:来源|证据)|现有(?:证据|因果信息|事件|获采信信息)|证据边界|证据只|不能据此|无法据此|尚不足|未提供可用于解释|而非由|不(?:能|宜)归结|无法归结|不在.{0,20}(?:目标|归因)范围|this evidence|the evidence only|cannot (?:be used to|establish|support|infer)|does not establish/iu;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const MARKET_TARGET_ALIASES = {
@@ -113,30 +64,36 @@ function marketTargetMatches(market, target) {
   );
 }
 
-function hostnameMatches(hostname, domain) {
-  return hostname === domain || hostname.endsWith(`.${domain}`);
+function marketMetricTarget(input, market, target) {
+  const normalized = String(target).trim().toLocaleLowerCase();
+  return input.markets.find(
+    (item) =>
+      item.region === market &&
+      [item.symbol, item.name]
+        .filter(Boolean)
+        .some(
+          (value) => String(value).trim().toLocaleLowerCase() === normalized,
+        ),
+  );
 }
 
-export function verifiedExternalSourceType(source, platform = "web") {
-  if (platform === "x") return "expert";
-  let hostname;
-  try {
-    hostname = new URL(source).hostname.toLocaleLowerCase();
-  } catch {
-    return "expert";
-  }
-  if (
-    FIRST_PARTY_SOURCE_DOMAINS.some((domain) =>
-      hostnameMatches(hostname, domain),
-    )
-  ) {
-    return "first_party";
-  }
-  const publisherHostname = hostname.replace(/^www\./u, "");
-  if (ESTABLISHED_PUBLISHER_HOSTS.has(publisherHostname)) {
-    return "publisher";
-  }
-  return "expert";
+function companyMetricTarget(input, market, target) {
+  const normalized = String(target).trim().toLocaleLowerCase();
+  const matches = input.sectorPerformance
+    .filter((sector) => sector.market === market)
+    .flatMap((sector) =>
+      (sector.constituents ?? [])
+        .filter((company) =>
+          [company.symbol, company.name, company.nameEn]
+            .filter(Boolean)
+            .some(
+              (value) =>
+                String(value).trim().toLocaleLowerCase() === normalized,
+            ),
+        )
+        .map((company) => ({ company, sectorSymbol: sector.symbol })),
+    );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function requireObject(value, label) {
@@ -161,6 +118,7 @@ function requireText(value, label, maxLength, minLength = 2) {
 
 function readerText(value, label, maxLength, minLength = 2) {
   const text = requireText(value, label, maxLength, minLength);
+  if (/\uFFFD/u.test(text)) throw new Error(`${label} 包含乱码替代字符`);
   if (INTERNAL_COPY.test(text)) throw new Error(`${label} 暴露了内部实现术语`);
   if (RAW_DATE_OR_TIMESTAMP.test(text)) {
     throw new Error(`${label} 包含未本地化的时间戳或日期`);
@@ -678,7 +636,6 @@ function validateEvidence(value, input, market, label) {
     const bindings = marketDataBindings(input, market, source);
     if (
       !dataSources.has(source) ||
-      sourceType === "expert" ||
       evidence.platform !== "web" ||
       publishedTime !== Date.parse(session.windowEnd)
     ) {
@@ -693,9 +650,15 @@ function validateEvidence(value, input, market, label) {
     const start = Date.parse(session.windowStart);
     const close = Date.parse(session.windowEnd);
     const deadline = Date.parse(session.wrapDeadline);
+    const factsStart = start - 72 * 60 * 60 * 1_000;
+    const marketWrapDeadline = Math.max(
+      deadline,
+      close + 8 * 60 * 60 * 1_000,
+    );
     if (
-      publishedTime <= start ||
-      publishedTime > deadline ||
+      publishedTime <= factsStart ||
+      publishedTime >
+        (evidence.kind === "market_wrap" ? marketWrapDeadline : close) ||
       dataSources.has(source) ||
       (evidence.kind === "market_wrap" && publishedTime < close) ||
       (evidence.kind !== "market_wrap" && publishedTime > close)
@@ -839,12 +802,25 @@ function chineseInteger(value) {
   return total + current;
 }
 
+const ENGLISH_TENOR_NUMBERS = new Map([
+  ["one", 1], ["two", 2], ["three", 3], ["four", 4], ["five", 5],
+  ["six", 6], ["seven", 7], ["eight", 8], ["nine", 9], ["ten", 10],
+  ["eleven", 11], ["twelve", 12], ["thirteen", 13], ["fourteen", 14],
+  ["fifteen", 15], ["sixteen", 16], ["seventeen", 17], ["eighteen", 18],
+  ["nineteen", 19], ["twenty", 20], ["thirty", 30],
+]);
+
 function sanitizeNumericText(value) {
   return String(value)
     .normalize("NFC")
     .toLocaleLowerCase()
-    .replaceAll(",", "")
-    .replaceAll("，", "")
+    .replace(/(?<=\d)-(?=(?:basis[ -]points?|percent)\b)/gu, " ")
+    .replace(/\bbasis-points?\b/gu, (value) => value.replace("-", " "))
+    .replace(/(?<=\d),(?=\d{3}(?:\D|$))/gu, "")
+    .replace(
+      /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty)(?=-?(?:year|month)s?\b)/gu,
+      (match) => String(ENGLISH_TENOR_NUMBERS.get(match)),
+    )
     .replace(/https:\/\/[^\s"'<>\])}]+/giu, " ")
     .replace(
       /\b\d{4}-\d{1,2}-\d{1,2}(?:t\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:z|[+-]\d{2}:\d{2})?)?\b/giu,
@@ -876,6 +852,11 @@ function claimUnit(before, after) {
   if (/^(?:点|points?\b)/iu.test(tail) || /(?:level|收于|报于|报)\s*$/iu.test(head)) {
     return "level";
   }
+  // English closing wraps usually omit "points" after an index endpoint:
+  // "The Dow rose 1.0% to 52,573" is the same unit as "道指至52,573点".
+  if (/(?:\bdow(?: jones(?: industrial average)?)?|\bnasdaq(?: composite)?|\bs&p\s*500)\s*(?:index\s*)?(?:,\s*which\s+)?(?:rose|fell|gained|declined|climbed|jumped|advanced|dropped|closed|finished|ended)\s*(?:[+-]?\d+(?:\.\d+)?\s*(?:%|percent|points?)\s*)?(?:to|at)\s*$/iu.test(before)) {
+    return "level";
+  }
   if (/^(?:-?months?\b|个?月\b)/iu.test(tail)) {
     return "count";
   }
@@ -894,14 +875,14 @@ function claimUnit(before, after) {
 
 function directionWord(value) {
   if (
-    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|升|\bup\b|\brose\b|\brisen\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b)/iu.test(
+    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|升|\bup\b|\brose\b|\brisen\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bclimbed\b|\bjumped\b|\bsurged\b|\badded\b)/iu.test(
       value,
     )
   ) {
     return "positive";
   }
   if (
-    /(?:下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b)/iu.test(
+    /(?:下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bsank\b|\bdropped\b|\bslid\b|\btumbled\b|\bplunged\b)/iu.test(
       value,
     )
   ) {
@@ -921,17 +902,52 @@ function claimPolarity(raw, before, after, unit) {
   if (unit === "count" && /(?:\bof\b|共)\s*$/iu.test(before)) {
     return "neutral";
   }
+  const introducedAsComparisonBaseline =
+    /(?:相较|相比|对比|较|基准(?:值)?(?:为)?|\bfrom\b|\bversus\b|\bvs\.?\b)[^。；.!?，,]{0,80}$/iu.test(
+      before,
+    );
+  const followedBySeparateSignedDelta =
+    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b))*\s*(?:上涨|上升|增加|提高|下跌|下降|减少|降低|\b(?:rose|increased|gained|climbed|fell|declined|decreased|dropped)\b)(?:\s+by)?\s*[+-]\d/iu.test(
+      after,
+    );
+  if (
+    sign === "neutral" &&
+    (introducedAsComparisonBaseline || followedBySeparateSignedDelta)
+  ) {
+    return "neutral";
+  }
   const prefix = before.match(
-    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|下跌|下降|收跌|跌幅|减少|降低|回落|走低|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|持平|\bflat\b|\bunchanged\b)\s*(?:约|了|为)?\s*$/iu,
+    /(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|下跌|下降|收跌|跌幅|减少|降低|回落|走低|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bclimbed\b|\bjumped\b|\bsurged\b|\badded\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bsank\b|\bdropped\b|\bslid\b|\btumbled\b|\bplunged\b|持平|\bflat\b|\bunchanged\b)\s*(?:约|了|为)?\s*$/iu,
   )?.[0];
-  const suffix = after.match(
-    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|股指|sectors?\b|layers?\b|indicators?\b|indices\b|indexes\b|stocks?\b|companies?\b|items?\b))*\s*(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|涨|下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|持平|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bflat\b|\bunchanged\b)/iu,
+  const linkedPrefix = before.match(
+    /(?:上涨|上升|收涨|增长|增加|走高|下跌|下降|收跌|减少|降低|回落|走低|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bclimbed\b|\bjumped\b|\bsurged\b|\badded\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\bsank\b|\bdropped\b|\bslid\b|\btumbled\b|\bplunged\b)\s*(?:约|了|为)?\s*[+-]?\d+(?:\.\d+)?\s*(?:%|％|点|points?|bp|bps|基点|个百分点)\s*[,，、]?\s*(?:or|即|也就是)?\s*$/iu,
   )?.[0];
-  const word = directionWord(`${prefix ?? ""} ${suffix ?? ""}`);
-  if (sign !== "neutral" && word !== "neutral" && sign !== word) {
+  const punctuationSeparatesNextClause =
+    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|股指|sectors?\b|layers?\b|indicators?\b|indices\b|indexes\b|stocks?\b|companies?\b|items?\b))*\s*[,，、;；]/iu.test(
+      after,
+    );
+  const suffix = punctuationSeparatesNextClause ? undefined : after.match(
+    /^(?:\s*(?:%|％|个百分点|percent(?:age)?(?:\s+points?)?|pct\b|bp|bps|个?\s*基点|basis\s+points?\b|点|points?\b|个|只|项|层|家|条|次|种|行业|板块|环节|股指|sectors?\b|layers?\b|indicators?\b|indices\b|indexes\b|stocks?\b|companies?\b|items?\b))*\s*(?:上涨|上升|收涨|涨幅|增长|增加|改善|走高|涨|下跌|下降|收跌|跌幅|减少|降低|回落|走低|跌|持平|\bup\b|\brose\b|\bgained\b|\badvanced\b|\bincreased\b|\bhigher\b|\bclimbed\b|\bjumped\b|\bsurged\b|\bdown\b|\bfell\b|\blost\b|\bdeclined\b|\bdecreased\b|\blower\b|\bsank\b|\bdropped\b|\bslid\b|\btumbled\b|\bplunged\b|\bflat\b|\bunchanged\b)/iu,
+  )?.[0];
+  const word = directionWord(`${prefix ?? linkedPrefix ?? ""} ${suffix ?? ""}`);
+  const endpointWord = /(?:升至|涨至|增至|提高至|上调至|\b(?:rose|increased|raised|climbed|advanced)\b[^。；.!?]{0,80}\bto\b)\s*(?:约|近|接近|about|nearly)?\s*$/iu.test(
+    before,
+  )
+    ? "positive"
+    : /(?:降至|跌至|减至|降低至|下调至|\b(?:fell|declined|decreased|lowered|dropped)\b[^。；.!?]{0,80}\bto\b)\s*(?:约|近|接近|about|nearly)?\s*$/iu.test(
+          before,
+        )
+      ? "negative"
+      : "neutral";
+  const resolvedWord = endpointWord !== "neutral" ? endpointWord : word;
+  if (
+    sign !== "neutral" &&
+    resolvedWord !== "neutral" &&
+    sign !== resolvedWord
+  ) {
     return "conflict";
   }
-  return sign !== "neutral" ? sign : word;
+  return sign !== "neutral" ? sign : resolvedWord;
 }
 
 export function numericClaims(value) {
@@ -942,18 +958,31 @@ export function numericClaims(value) {
     const raw = match[0];
     const index = match.index;
     const end = index + raw.length;
-    const before = text.slice(Math.max(0, index - 48), index);
+    const before = text.slice(Math.max(0, index - 120), index);
     const after = text.slice(end, Math.min(text.length, end + 48));
-    const unit = claimUnit(before, after);
+    let unit = claimUnit(before, after);
+    const numeric = Number(raw);
+    if (
+      Number.isInteger(numeric) &&
+      numeric >= 1900 &&
+      numeric <= 2100 &&
+      ["bare", "tenor"].includes(unit)
+    ) {
+      unit = "calendar_year";
+    }
     const previous = text[index - 1] ?? "";
     const next = text[end] ?? "";
     if (
       /(?:s&p|csi|star|dgs|标普|沪深|中证|科创)\s*$/iu.test(before) ||
+      (raw === "360" &&
+        (/\b(?:data|headless)\s*$/iu.test(before) ||
+          /^\s*security(?:\s+technology)?\b/iu.test(after))) ||
       /[a-z0-9_]/iu.test(previous) ||
       (/[a-z_]/iu.test(next) && unit !== "tenor") ||
       (unit === "bare" &&
-        (/[\p{L}]/u.test(previous) ||
-          /[\p{L}]/u.test(next)))
+        !/^[+-]/u.test(raw) &&
+        !/差额(?:为)?$/u.test(before) &&
+        (/[\p{L}]/u.test(previous) || /[\p{L}]/u.test(next)))
     ) {
       continue;
     }
@@ -1050,7 +1079,7 @@ function validateDriver(value, input, index) {
   const sectorSymbols = stringArray(
     driver.sectorSymbols,
     `${label}.sectorSymbols`,
-    1,
+    driver.attributionScope === "market" ? 0 : 1,
     4,
     16,
   );
@@ -1061,12 +1090,23 @@ function validateDriver(value, input, index) {
   if (sectorSymbols.some((symbol) => !allowedSymbols.has(symbol))) {
     throw new Error(`${label} 引用了其他市场或不存在的行业`);
   }
+  const companyTarget =
+    driver.attributionScope === "company" && attributionTargets.length === 1
+      ? companyMetricTarget(input, driver.market, attributionTargets[0])
+      : null;
   if (
     (driver.attributionScope === "market" &&
       (attributionTargets.length !== 1 ||
-        !marketTargetMatches(driver.market, attributionTargets[0]))) ||
+        (!marketTargetMatches(driver.market, attributionTargets[0]) &&
+          !marketMetricTarget(
+            input,
+            driver.market,
+            attributionTargets[0],
+          )))) ||
     (driver.attributionScope === "sector" &&
-      attributionTargets.some((target) => !sectorSymbols.includes(target)))
+      attributionTargets.some((target) => !sectorSymbols.includes(target))) ||
+    (driver.attributionScope === "company" &&
+      (!companyTarget || !sectorSymbols.includes(companyTarget.sectorSymbol)))
   ) {
     throw new Error(`${label} 归因范围与目标不一致`);
   }
@@ -1075,7 +1115,24 @@ function validateDriver(value, input, index) {
     sectorSymbols,
     input.sectorPerformance,
   );
-  if (driver.direction !== "mixed" && !sectorDirectionMatches) {
+  const targetMetric =
+    driver.attributionScope === "market"
+      ? marketMetricTarget(input, driver.market, attributionTargets[0])
+      : driver.attributionScope === "company"
+        ? companyTarget?.company
+        : null;
+  const targetDirectionMatches =
+    targetMetric &&
+    (driver.direction === "positive"
+      ? targetMetric.direction === "up"
+      : driver.direction === "negative"
+        ? targetMetric.direction === "down"
+        : targetMetric.direction === "flat");
+  if (
+    driver.direction !== "mixed" &&
+    (driver.attributionScope === "company" || !sectorDirectionMatches) &&
+    !targetDirectionMatches
+  ) {
     throw new Error(`${label} 与行业涨跌方向不一致`);
   }
   if (!Array.isArray(driver.evidence) || driver.evidence.length < 2 || driver.evidence.length > 4) {
@@ -1089,7 +1146,9 @@ function validateDriver(value, input, index) {
   }
   const marketData = evidence.filter((item) => item.kind === "market_data");
   const external = evidence.filter((item) => item.kind !== "market_data");
-  const financialEvent = FINANCIAL_EVENT_COPY.test(`${title} ${summary}`);
+  const financialEvent = requiresFinancialComparisons(
+    `${title} ${summary} ${mechanism}`,
+  );
   const grounding = `${marketGroundingText(input, driver.market)} ${evidenceGroundingText(
     input,
     driver.market,
@@ -1189,22 +1248,40 @@ function validateAiUpdate(value, input, index) {
       (item) => {
         if (item.kind !== "market_data") return false;
         const bindings = marketDataBindings(input, update.market, item.source);
-        const aiBindings = bindings.filter((binding) =>
-          ["ai", "ai_constituent"].includes(binding.scope),
+        const aiBindings = bindings.filter(
+          (binding) => binding.scope === "ai",
         );
-        return aiBindings.some(
-          (binding) =>
-            binding.layer === update.layer &&
-            (binding.scope === "ai_constituent" ||
-              new Set(aiBindings.map((candidate) => candidate.layer)).size === 1),
-        );
+        return bindings.some((binding) => {
+          if (binding.scope !== "ai" || binding.layer !== update.layer) {
+            return false;
+          }
+          const row = binding.data;
+          const copy = `${item.title} ${item.facts}`;
+          const identifiesLayer = [row.name, row.nameEn, row.symbol]
+            .filter(Boolean)
+            .some((name) => copy.includes(name));
+          let sourceUrl;
+          try {
+            sourceUrl = new URL(item.source);
+          } catch {
+            return false;
+          }
+          return (
+            (new Set(aiBindings.map((candidate) => candidate.layer)).size === 1 ||
+              (sourceUrl.hostname === "finance.yahoo.com" &&
+                sourceUrl.pathname.replace(/\/+$/u, "") ===
+                  "/markets/stocks")) &&
+            identifiesLayer &&
+            item.facts.includes(row.change)
+          );
+        });
       },
     )
   ) {
     throw new Error(`${label} 未引用对应 AI 环节的本地行情`);
   }
-  const financialEvent = FINANCIAL_EVENT_COPY.test(
-    `${title} ${summary}`,
+  const financialEvent = requiresFinancialComparisons(
+    `${title} ${summary} ${implication}`,
   );
   const grounding = evidenceGroundingText(input, update.market, evidence);
   const metrics = validateResultComparisons(
@@ -1564,6 +1641,7 @@ function validateTranslation(
   aiUpdates,
   validatedAiChainViews,
   input,
+  strictMarkets = MARKETS,
 ) {
   const translations = requireObject(value, "translations");
   const en = requireObject(translations.en, "translations.en");
@@ -1605,7 +1683,7 @@ function validateTranslation(
           item.metrics,
           `translations.en.drivers[${index}].metrics`,
           grounding,
-          FINANCIAL_EVENT_COPY.test(`${sourceDriver.title} ${sourceDriver.summary}`),
+          requiresFinancialComparisons(`${sourceDriver.title} ${sourceDriver.summary}`),
         ),
         mechanism: readerText(
           item.mechanism,
@@ -1642,7 +1720,7 @@ function validateTranslation(
         item.metrics,
         `translations.en.aiChainUpdates[${index}].metrics`,
         grounding,
-        FINANCIAL_EVENT_COPY.test(
+        requiresFinancialComparisons(
           `${sourceUpdate.title} ${sourceUpdate.summary}`,
         ),
       );
@@ -1724,6 +1802,7 @@ function validateTranslation(
     }
     result.aiChainViews[market] = translatedAiView;
 
+    if (!strictMarkets.includes(market)) continue;
     const marketDriverEvidence = drivers
       .filter((item) => item.market === market)
       .flatMap((item) => item.evidence);
@@ -1770,16 +1849,18 @@ function validateTranslation(
       `translations.en.aiChainUpdates[${index}]`,
     );
   }
-  assertNumbersBounded(
-    `${inputGroundingText(input)} ${[...drivers, ...aiUpdates].flatMap((item) => item.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
-    `${result.headline} ${result.summary}`,
-    "translations.en overview",
-  );
+  if (strictMarkets.length === MARKETS.length) {
+    assertNumbersBounded(
+      `${inputGroundingText(input)} ${[...drivers, ...aiUpdates].flatMap((item) => item.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
+      `${result.headline} ${result.summary}`,
+      "translations.en overview",
+    );
+  }
   return { en: result };
 }
 
-function validateDriverSets(drivers, marketViews) {
-  for (const market of MARKETS) {
+function validateDriverSets(drivers, marketViews, markets = MARKETS) {
+  for (const market of markets) {
     const rows = drivers.filter((driver) => driver.market === market);
     if (rows.length > 2) {
       throw new Error(`${market} 最多包含两条已核验驱动`);
@@ -1800,8 +1881,16 @@ function validateDriverSets(drivers, marketViews) {
   }
 }
 
-export function validateReport(value, input) {
+export function validateReport(
+  value,
+  input,
+  { requireResearchAudit = true, activeMarket = null } = {},
+) {
   const report = requireObject(value, "daily-report");
+  if (activeMarket !== null && !MARKETS.includes(activeMarket)) {
+    throw new Error("activeMarket 无效");
+  }
+  const strictMarkets = activeMarket ? [activeMarket] : MARKETS;
   if (report.contractVersion !== CONTRACT_VERSION) {
     throw new Error(`daily-report 必须使用 ${CONTRACT_VERSION}`);
   }
@@ -1812,17 +1901,23 @@ export function validateReport(value, input) {
     optionalMechanism: true,
   });
   if (!Array.isArray(report.drivers)) throw new Error("drivers 必须是数组");
-  const drivers = report.drivers.map((item, index) =>
+  const driverEntries = report.drivers
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !activeMarket || item?.market === activeMarket);
+  const drivers = driverEntries.map(({ item, index }) =>
     validateDriver(item, input, index),
   );
-  validateDriverSets(drivers, marketViews);
+  validateDriverSets(drivers, marketViews, strictMarkets);
   if (!Array.isArray(report.aiChainUpdates) || report.aiChainUpdates.length > 8) {
     throw new Error("aiChainUpdates 最多八条");
   }
-  const aiChainUpdates = report.aiChainUpdates.map((item, index) =>
+  const aiEntries = report.aiChainUpdates
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !activeMarket || item?.market === activeMarket);
+  const aiChainUpdates = aiEntries.map(({ item, index }) =>
     validateAiUpdate(item, input, index),
   );
-  for (const market of MARKETS) {
+  for (const market of strictMarkets) {
     const rows = aiChainUpdates.filter((item) => item.market === market);
     if (
       rows.length > 4 ||
@@ -1843,20 +1938,98 @@ export function validateReport(value, input) {
       throw new Error(`${market} 证据不足时不得输出 AI 归因机制`);
     }
   }
-  const researchAudit = validateResearchAudit(
-    report.researchAudit,
-    drivers,
-    aiChainUpdates,
-    input,
-  );
+  const researchAudit = requireResearchAudit
+    ? validateResearchAudit(
+        report.researchAudit,
+        drivers,
+        aiChainUpdates,
+        input,
+      )
+    : null;
+  const scopedTranslations = activeMarket
+    ? {
+        ...report.translations,
+        en: {
+          ...report.translations?.en,
+          drivers: driverEntries.map(
+            ({ index }) => report.translations?.en?.drivers?.[index],
+          ),
+          aiChainUpdates: aiEntries.map(
+            ({ index }) => report.translations?.en?.aiChainUpdates?.[index],
+          ),
+        },
+      }
+    : report.translations;
   const translations = validateTranslation(
-    report.translations,
+    scopedTranslations,
     drivers,
     aiChainUpdates,
     aiChainViews,
     input,
+    strictMarkets,
   );
-  for (const market of MARKETS) {
+  let workflowOverview = null;
+  if (report.workflowOverview !== undefined) {
+    const overview = requireObject(
+      report.workflowOverview,
+      "workflowOverview",
+    );
+    if (
+      !MARKETS.includes(overview.market) ||
+      (activeMarket && overview.market !== activeMarket)
+    ) {
+      throw new Error("workflowOverview 与当前市场不一致");
+    }
+    workflowOverview = {
+      market: overview.market,
+      headline: readerAnalysis(
+        overview.headline,
+        "workflowOverview.headline",
+        100,
+        8,
+      ),
+      summary: readerAnalysis(
+        overview.summary,
+        "workflowOverview.summary",
+        420,
+        100,
+      ),
+      headlineEn: readerAnalysis(
+        overview.headlineEn,
+        "workflowOverview.headlineEn",
+        160,
+        5,
+      ),
+      summaryEn: readerAnalysis(
+        overview.summaryEn,
+        "workflowOverview.summaryEn",
+        700,
+        100,
+      ),
+    };
+    const overviewEvidence = [...drivers, ...aiChainUpdates]
+      .filter((item) => item.market === overview.market)
+      .flatMap((item) => item.evidence);
+    const overviewGrounding = `${marketGroundingText(
+      input,
+      overview.market,
+    )} ${aiGroundingText(input, overview.market)} ${evidenceGroundingText(
+      input,
+      overview.market,
+      overviewEvidence,
+    )}`;
+    assertNumbersBounded(
+      overviewGrounding,
+      `${workflowOverview.headline} ${workflowOverview.summary}`,
+      "workflowOverview",
+    );
+    assertNumbersBounded(
+      overviewGrounding,
+      `${workflowOverview.headlineEn} ${workflowOverview.summaryEn}`,
+      "workflowOverview English",
+    );
+  }
+  for (const market of strictMarkets) {
     const marketDriverEvidence = drivers
       .filter((item) => item.market === market)
       .flatMap((item) => item.evidence);
@@ -1882,11 +2055,13 @@ export function validateReport(value, input) {
       `aiChainViews.${market}`,
     );
   }
-  assertNumbersBounded(
-    `${inputGroundingText(input)} ${drivers.flatMap((driver) => driver.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
-    `${headline} ${summary}`,
-    "日报总览",
-  );
+  if (!activeMarket) {
+    assertNumbersBounded(
+      `${inputGroundingText(input)} ${drivers.flatMap((driver) => driver.evidence).map((item) => `${item.title} ${item.facts}`).join(" ")}`,
+      `${headline} ${summary}`,
+      "日报总览",
+    );
+  }
   return {
     contractVersion: CONTRACT_VERSION,
     headline,
@@ -1896,7 +2071,8 @@ export function validateReport(value, input) {
     drivers,
     aiChainUpdates,
     translations,
-    researchAudit,
+    ...(workflowOverview ? { workflowOverview } : {}),
+    ...(researchAudit ? { researchAudit } : {}),
   };
 }
 
@@ -1942,8 +2118,19 @@ function marketOverview(input, drivers, market, interpretation, language = "zh")
   const primary = drivers.find(
     (driver) => driver.market === market && driver.role === "primary",
   );
+  const primaryMarketMetric =
+    primary?.attributionScope === "market" &&
+    primary.attributionTargets.length === 1
+      ? marketMetricTarget(input, market, primary.attributionTargets[0])
+      : null;
+  const tone =
+    primaryMarketMetric?.symbol === "DGS10" && primary?.direction !== "mixed"
+      ? primary.direction === "positive"
+        ? "negative"
+        : "positive"
+      : primary?.direction ?? "mixed";
   return {
-    tone: primary?.direction ?? "mixed",
+    tone,
     interpretation,
     positive: sectorNames(input, drivers, market, "positive", language),
     negative: sectorNames(input, drivers, market, "negative", language),
@@ -2254,6 +2441,11 @@ async function executeSql(sql) {
 
 async function main() {
   const checkOnly = process.argv.includes("--check");
+  if (!checkOnly) {
+    throw new Error(
+      "旧的一体化日报发布入口已停用；请使用 daily-workflow-publish.mjs",
+    );
+  }
   const paths = process.argv
     .slice(2)
     .filter((argument) => argument !== "--check");

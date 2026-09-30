@@ -78,12 +78,15 @@ export function assessDailyFreshness(input, previousReport) {
   }
 
   if (!previousReport) {
+    const advancedMarkets = ["CN", "US"].filter(
+      (market) => marketAsOf[market],
+    );
     return {
       publish: true,
       retryable: false,
       reason: "no_previous_report",
       marketAsOf,
-      advancedMarkets: [],
+      advancedMarkets,
       newStoryCount: 0,
     };
   }
@@ -100,16 +103,12 @@ export function assessDailyFreshness(input, previousReport) {
     previousReport.reportDate !== input.reportDate ||
     previousReport.updateKind !== input.updateKind;
   const materiallyAdvanced = advancedMarkets.length > 0;
-  const publish = checkpointChanged || materiallyAdvanced;
+  const publish = materiallyAdvanced;
 
   return {
     publish,
     retryable: false,
-    reason: materiallyAdvanced
-      ? "material_advance"
-      : checkpointChanged
-        ? "scheduled_checkpoint"
-        : "no_material_advance",
+    reason: materiallyAdvanced ? "material_advance" : "no_material_advance",
     marketAsOf,
     previousMarketAsOf,
     advancedMarkets,

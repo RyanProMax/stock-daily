@@ -1,54 +1,74 @@
 import { spawn } from "node:child_process";
+import { closeSync, openSync, writeSync } from "node:fs";
 
 function usage(message) {
   if (message) console.error(message);
   console.error(
-    "Usage: node scripts/run-with-timeout.mjs --timeout-ms <milliseconds> [--idle-timeout-ms <milliseconds>] -- <command> [args...]",
+    "Usage: node scripts/run-with-timeout.mjs --timeout-ms <milliseconds> [--idle-timeout-ms <milliseconds>] [--stdout-path <path>] -- <command> [args...]",
   );
   process.exit(2);
 }
 
 const args = process.argv.slice(2);
 const separator = args.indexOf("--");
-const timeoutIndex = args.indexOf("--timeout-ms");
-const idleTimeoutIndex = args.indexOf("--idle-timeout-ms");
+const wrapperArgs = separator >= 0 ? args.slice(0, separator) : [];
+const timeoutIndex = wrapperArgs.indexOf("--timeout-ms");
+const idleTimeoutIndex = wrapperArgs.indexOf("--idle-timeout-ms");
+const stdoutPathIndex = wrapperArgs.indexOf("--stdout-path");
 if (
   separator < 0 ||
   timeoutIndex < 0 ||
-  timeoutIndex + 1 >= separator ||
+  timeoutIndex + 1 >= wrapperArgs.length ||
   separator + 1 >= args.length
 ) {
   usage();
 }
 
 const timeoutMs = Number(args[timeoutIndex + 1]);
-if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3_600_000) {
-  usage("--timeout-ms must be an integer between 1 and 3600000");
+if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 7_200_000) {
+  usage("--timeout-ms must be an integer between 1 and 7200000");
 }
 const idleTimeoutMs =
   idleTimeoutIndex >= 0 ? Number(args[idleTimeoutIndex + 1]) : null;
 if (
-  idleTimeoutIndex >= separator ||
-  (idleTimeoutMs !== null &&
-    (!Number.isInteger(idleTimeoutMs) ||
-      idleTimeoutMs < 1 ||
-      idleTimeoutMs > timeoutMs))
+  idleTimeoutMs !== null &&
+  (!Number.isInteger(idleTimeoutMs) ||
+    idleTimeoutMs < 1 ||
+    idleTimeoutMs > timeoutMs)
 ) {
   usage("--idle-timeout-ms must be an integer between 1 and --timeout-ms");
 }
+if (stdoutPathIndex >= 0 && stdoutPathIndex + 1 >= wrapperArgs.length) {
+  usage("--stdout-path must be followed by a path before --");
+}
+const stdoutPath = stdoutPathIndex >= 0 ? args[stdoutPathIndex + 1] : null;
 
 const command = args[separator + 1];
 const commandArgs = args.slice(separator + 2);
 const useProcessGroup = process.platform !== "win32";
+let stdoutFd = null;
+if (stdoutPath) {
+  try {
+    stdoutFd = openSync(stdoutPath, "w", 0o600);
+  } catch (error) {
+    console.error(`Unable to open stdout capture: ${error.message}`);
+    process.exit(2);
+  }
+}
 const child = spawn(command, commandArgs, {
   detached: useProcessGroup,
-  stdio: ["inherit", "pipe", "inherit"],
+  stdio: ["inherit", "pipe", "pipe"],
 });
 
 child.stdout.pipe(process.stdout);
+child.stderr.pipe(process.stderr);
+child.stdout.on("data", (chunk) => {
+  if (stdoutFd !== null) writeSync(stdoutFd, chunk);
+});
 
 let timedOut = false;
 let forwardedSignal = null;
+let spawnFailed = false;
 let forceTimer;
 let timeoutTimer;
 let idleTimer;
@@ -95,6 +115,7 @@ function resetIdleTimer() {
 }
 
 child.stdout.on("data", resetIdleTimer);
+child.stderr.on("data", resetIdleTimer);
 timeoutTimer = setTimeout(() => terminate("SIGTERM", "hard"), timeoutMs);
 resetIdleTimer();
 for (const signal of ["SIGINT", "SIGHUP", "SIGTERM"]) {
@@ -102,8 +123,13 @@ for (const signal of ["SIGINT", "SIGHUP", "SIGTERM"]) {
 }
 
 child.once("error", (error) => {
+  spawnFailed = true;
   clearLimitTimers();
   if (forceTimer) clearTimeout(forceTimer);
+  if (stdoutFd !== null) {
+    closeSync(stdoutFd);
+    stdoutFd = null;
+  }
   console.error(`Unable to start command: ${error.message}`);
   process.exitCode = 127;
 });
@@ -111,6 +137,11 @@ child.once("error", (error) => {
 child.once("close", (code, signal) => {
   clearLimitTimers();
   if (forceTimer) clearTimeout(forceTimer);
+  if (stdoutFd !== null) {
+    closeSync(stdoutFd);
+    stdoutFd = null;
+  }
+  if (spawnFailed) return;
   if (timedOut) {
     process.exitCode = 124;
     return;

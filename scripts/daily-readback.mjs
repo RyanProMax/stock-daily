@@ -29,10 +29,15 @@ async function fetchProductionSnapshot(input, baseUrl, fetcher, attempt) {
   return { health: healthPayload.data, report: reportPayload.data };
 }
 
-export function dailySnapshotIsCurrent(input, { health, report } = {}) {
+export function dailySnapshotIsCurrent(
+  input,
+  { health, report } = {},
+  { acceptedIngestionStatuses = ["completed"] } = {},
+) {
   const collectedAt = Date.parse(input?.collectedAt ?? "");
   const generatedAt = Date.parse(report?.generatedAt ?? "");
   const finishedAt = Date.parse(health?.latestIngestion?.finishedAt ?? "");
+  const acceptedStatuses = new Set(acceptedIngestionStatuses);
   return (
     Number.isFinite(collectedAt) &&
     Number.isFinite(generatedAt) &&
@@ -40,7 +45,7 @@ export function dailySnapshotIsCurrent(input, { health, report } = {}) {
     report?.reportDate === input.reportDate &&
     report?.updateKind === input.updateKind &&
     health?.latestIngestion?.reportDate === input.reportDate &&
-    health?.latestIngestion?.status === "completed" &&
+    acceptedStatuses.has(health?.latestIngestion?.status) &&
     generatedAt >= collectedAt &&
     finishedAt >= collectedAt
   );
@@ -54,6 +59,7 @@ export async function fetchFreshDailySnapshot(
     wait = delay,
     retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
     snapshotLoader,
+    acceptedIngestionStatuses = ["completed"],
   } = {},
 ) {
   let lastSnapshot;
@@ -65,7 +71,13 @@ export async function fetchFreshDailySnapshot(
       lastSnapshot = snapshotLoader
         ? await snapshotLoader(input, attempt)
         : await fetchProductionSnapshot(input, baseUrl, fetcher, attempt);
-      if (dailySnapshotIsCurrent(input, lastSnapshot)) return lastSnapshot;
+      if (
+        dailySnapshotIsCurrent(input, lastSnapshot, {
+          acceptedIngestionStatuses,
+        })
+      ) {
+        return lastSnapshot;
+      }
     } catch (error) {
       lastError = error;
     }

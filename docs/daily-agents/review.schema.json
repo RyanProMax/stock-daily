@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock Daily Market Review V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "market", "verdict", "summary", "claimReviews"],
+  "properties": {
+    "contractVersion": { "type": "string", "const": "stock-daily-market-review-v1" },
+    "market": { "type": "string", "enum": ["CN", "US"] },
+    "verdict": { "type": "string", "enum": ["pass", "revise"] },
+    "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
+    "claimReviews": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/claimReview" } }
+  },
+  "$defs": {
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factualAccuracy", "causalLogic", "evidenceDirectness", "readerUtility"],
+      "properties": {
+        "factualAccuracy": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "causalLogic": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "evidenceDirectness": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "readerUtility": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    },
+    "claimReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimId", "verdict", "defectCodes", "repairStage", "summary", "scores"],
+      "properties": {
+        "claimId": { "type": "string", "minLength": 8, "maxLength": 40 },
+        "verdict": { "type": "string", "enum": ["pass", "revise"] },
+        "defectCodes": { "type": "array", "maxItems": 6, "items": { "type": "string", "enum": ["unsupported_fact", "missing_comparison", "weak_causality", "scope_overreach", "price_restatement", "low_reader_value", "internal_process_copy"] } },
+        "repairStage": { "type": "string", "enum": ["none", "research", "adjudication", "writing"] },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "scores": { "$ref": "#/$defs/scores" }
+      }
+    }
+  }
+}

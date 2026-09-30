@@ -6,14 +6,31 @@ import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { JSDOM } from "jsdom";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
 const MAX_REDIRECTS = 8;
+const MAX_SOURCE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_CURL_PATH =
   process.env.STOCK_DAILY_CURL_BIN ?? "/usr/bin/curl";
 const DOH_HOSTNAME = "cloudflare-dns.com";
 const DOH_ADDRESS = "1.1.1.1";
+const CHINA_LOCAL_TIME_HOSTS = [
+  "21jingji.com",
+  "caixin.com",
+  "cls.cn",
+  "chnfund.com",
+  "cnstock.com",
+  "eastmoney.com",
+  "nbd.com.cn",
+  "people.com.cn",
+  "sina.com.cn",
+  "stcn.com",
+  "thepaper.cn",
+  "xinhuanet.com",
+  "yicai.com",
+];
 
 function externalSources(report) {
   const items = [
@@ -143,7 +160,7 @@ function normalizeHostname(hostname) {
     : hostname;
 }
 
-async function publicDestination(value, resolver) {
+export async function publicDestination(value, resolver) {
   let url;
   try {
     url = new URL(value);
@@ -175,10 +192,11 @@ async function publicDestination(value, resolver) {
   }
   const destination =
     addresses.find(({ family }) => family === 4) ?? addresses[0];
-  return { url, destination };
+  const destinations = [destination, ...addresses.filter((item) => item.address !== destination.address)];
+  return { url, destination, destinations };
 }
 
-async function dohQuery(hostname, type, runner, curlPath) {
+async function dohQuery(hostname, type, runner, curlPath, signal) {
   const query = new URL(`https://${DOH_HOSTNAME}/dns-query`);
   query.searchParams.set("name", hostname);
   query.searchParams.set("type", type);
@@ -203,7 +221,7 @@ async function dohQuery(hostname, type, runner, curlPath) {
       "Accept: application/dns-json",
       query.toString(),
     ],
-    { encoding: "utf8", maxBuffer: 256 * 1024 },
+    { encoding: "utf8", maxBuffer: 256 * 1024, signal },
   );
   const response = JSON.parse(stdout);
   if (response?.Status !== 0 || !Array.isArray(response?.Answer)) return [];
@@ -218,11 +236,11 @@ async function dohQuery(hostname, type, runner, curlPath) {
 
 async function resolveWithDoh(
   hostname,
-  { runner = execFileAsync, curlPath = DEFAULT_CURL_PATH } = {},
+  { runner = execFileAsync, curlPath = DEFAULT_CURL_PATH, signal } = {},
 ) {
-  const ipv4 = await dohQuery(hostname, "A", runner, curlPath);
+  const ipv4 = await dohQuery(hostname, "A", runner, curlPath, signal);
   if (ipv4.length > 0) return ipv4;
-  return dohQuery(hostname, "AAAA", runner, curlPath);
+  return dohQuery(hostname, "AAAA", runner, curlPath, signal);
 }
 
 async function requestHeaders(
@@ -317,6 +335,724 @@ async function requestHeadersWithNode(value, destination) {
     request.once("error", rejectRequest);
     request.end();
   });
+}
+
+async function requestContentWithNode(
+  value,
+  destination,
+  { maxBytes = MAX_SOURCE_BYTES, signal } = {},
+) {
+  const url = new URL(value);
+  const hostname = normalizeHostname(url.hostname);
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpsRequest(
+      url,
+      {
+        method: "GET",
+        family: destination.family,
+        servername: hostname,
+        signal,
+        headers: {
+          Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
+          "Accept-Encoding": "identity",
+          "User-Agent":
+            "Mozilla/5.0 (compatible; StockDailyEvidenceVerifier/1.0)",
+        },
+        lookup: (_lookupHostname, options, callback) => {
+          if (options?.all) {
+            callback(null, [destination]);
+            return;
+          }
+          callback(null, destination.address, destination.family);
+        },
+      },
+      (response) => {
+        const chunks = [];
+        let size = 0;
+        response.on("data", (chunk) => {
+          size += chunk.length;
+          if (size > maxBytes) {
+            request.destroy(
+              new Error(`Source body exceeds ${maxBytes} bytes`),
+            );
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.once("error", rejectRequest);
+        response.once("end", () => {
+          resolveRequest({
+            status: Number(response.statusCode ?? 0),
+            location: response.headers.location,
+            contentType: String(response.headers["content-type"] ?? ""),
+            body: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+    request.setTimeout(30_000, () => {
+      request.destroy(new Error("Source body request timed out"));
+    });
+    request.once("error", rejectRequest);
+    request.end();
+  });
+}
+
+async function requestContentWithCurl(
+  value,
+  destination,
+  {
+    runner = execFileAsync,
+    curlPath = DEFAULT_CURL_PATH,
+    maxBytes = MAX_SOURCE_BYTES,
+    signal,
+  } = {},
+) {
+  const url = new URL(value);
+  const hostname = normalizeHostname(url.hostname);
+  const connectAddress =
+    destination.family === 6
+      ? `[${destination.address}]`
+      : destination.address;
+  const marker = "\nSTOCK_DAILY_CONTENT_META\t";
+  const { stdout } = await runner(
+    curlPath,
+    [
+      "--silent",
+      "--show-error",
+      "--connect-timeout",
+      "10",
+      "--max-time",
+      "30",
+      "--retry",
+      "2",
+      "--retry-all-errors",
+      "--proto",
+      "=https",
+      "--proto-redir",
+      "=https",
+      "--connect-to",
+      `${hostname}:443:${connectAddress}:443`,
+      "--proxy-header",
+      `Host: ${url.hostname}:443`,
+      "--user-agent",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36",
+      "--header",
+      "Accept: text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
+      "--header",
+      "Accept-Encoding: identity",
+      "--max-filesize",
+      String(maxBytes),
+      "--write-out",
+      `${marker}%{http_code}\t%{redirect_url}\t%{content_type}`,
+      url.toString(),
+    ],
+    { encoding: null, maxBuffer: maxBytes + 256 * 1024, signal },
+  );
+  const output = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+  const markerBuffer = Buffer.from(marker);
+  const markerIndex = output.lastIndexOf(markerBuffer);
+  if (markerIndex < 0) throw new Error("响应状态无法识别");
+  const metadata = output
+    .subarray(markerIndex + markerBuffer.length)
+    .toString("utf8")
+    .trim();
+  const [status, location = "", contentType = ""] = metadata.split("\t");
+  if (!/^\d{3}$/u.test(status)) throw new Error("响应状态无法识别");
+  return {
+    status: Number(status),
+    location: location || undefined,
+    contentType,
+    body: output.subarray(0, markerIndex),
+  };
+}
+
+async function requestContentWithFallback(
+  value,
+  destination,
+  options = {},
+) {
+  try {
+    const response = await requestContentWithNode(value, destination, options);
+    if (![403, 429, 472].includes(response.status)) return response;
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? error;
+    }
+    // The pinned curl request below retries transport and TLS failures.
+  }
+  return requestContentWithCurl(value, destination, options);
+}
+
+let entityDecoder;
+function decodeHtmlEntities(value) {
+  // Use the HTML standard's full entity table. In particular, &mdash; and
+  // curly quote entities must compare like the visible article text.
+  entityDecoder ??= new JSDOM("").window.document.createElement("textarea");
+  entityDecoder.innerHTML = value;
+  return entityDecoder.value;
+}
+
+function sourceEncodingCandidates(body, contentType) {
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  const headerCharset = /charset\s*=\s*["']?([^;\s"']+)/iu.exec(
+    contentType,
+  )?.[1];
+  const bomCharset = bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
+    ? "utf-8"
+    : bytes.subarray(0, 2).equals(Buffer.from([0xff, 0xfe]))
+      ? "utf-16le"
+      : bytes.subarray(0, 2).equals(Buffer.from([0xfe, 0xff]))
+        ? "utf-16be"
+        : null;
+  const htmlPrefix = bytes.subarray(0, 16 * 1024).toString("latin1");
+  const metaCharset =
+    /<meta\b[^>]*\bcharset\s*=\s*["']?\s*([^\s"'/>;]+)/iu.exec(
+      htmlPrefix,
+    )?.[1] ??
+    /<meta\b[^>]*\bcontent\s*=\s*["'][^"']*\bcharset\s*=\s*([^\s"';/>]+)/iu.exec(
+      htmlPrefix,
+    )?.[1];
+  return [bomCharset, headerCharset, metaCharset, "utf-8"]
+    .filter(Boolean)
+    .map((value) => value.toLocaleLowerCase());
+}
+
+function decodeSourceBody(body, contentType) {
+  const candidates = [
+    ...new Set(sourceEncodingCandidates(body, contentType)),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return new TextDecoder(candidate, { fatal: true }).decode(body);
+    } catch {
+      // Try the next declared or default encoding.
+    }
+  }
+  return new TextDecoder("utf-8").decode(body);
+}
+
+function comparableArticleUrl(value, source) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(decodeHtmlEntities(value.trim()), source || undefined);
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function jsonLdArticlePublishedValues(decoded, source) {
+  const citedUrl = comparableArticleUrl(source, source);
+  if (!citedUrl) return [];
+  const values = [];
+  const articleTypes = new Set([
+    "article",
+    "newsarticle",
+    "analysisnewsarticle",
+    "reportagenewsarticle",
+    "blogposting",
+    "report",
+  ]);
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const types = (Array.isArray(value["@type"])
+      ? value["@type"]
+      : [value["@type"]]
+    )
+      .filter((item) => typeof item === "string")
+      .map((item) => item.toLocaleLowerCase());
+    const mainEntity = value.mainEntityOfPage;
+    const identities = [
+      value.url,
+      value["@id"],
+      typeof mainEntity === "string" ? mainEntity : null,
+      mainEntity?.url,
+      mainEntity?.["@id"],
+    ]
+      .map((item) => comparableArticleUrl(item, source))
+      .filter(Boolean);
+    if (
+      types.some((type) => articleTypes.has(type)) &&
+      identities.includes(citedUrl) &&
+      typeof value.datePublished === "string"
+    ) {
+      values.push(value.datePublished);
+    }
+    Object.values(value).forEach(visit);
+  };
+  for (const match of decoded.matchAll(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/giu,
+  )) {
+    try {
+      visit(
+        JSON.parse(
+          decodeHtmlEntities(match[1])
+            .replace(/^\s*<!--/u, "")
+            .replace(/-->\s*$/u, "")
+            .trim(),
+        ),
+      );
+    } catch {
+      // Invalid structured data cannot establish a publication timestamp.
+    }
+  }
+  return values;
+}
+
+function fedSpeechArticleDate(body, source) {
+  const url = new URL(source);
+  if (url.hostname !== "www.federalreserve.gov") return null;
+  const date = /^\/newsevents\/speech\/[a-z]+(20\d{6})[a-z]\.htm$/u.exec(url.pathname)?.[1];
+  if (!date) return null;
+  const document = new JSDOM(decodeSourceBody(Buffer.from(body), "text/html")).window.document;
+  const header = document.querySelector("#article > .heading");
+  if (!header?.querySelector("h3.title")?.textContent.trim()) return null;
+  const visible = header.querySelector(".article__time")?.textContent.trim();
+  const parsed = new Date(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const expected = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(parsed);
+  return visible === expected ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : null;
+}
+
+export function fedSpeechPublishedAtCandidates(articleBody, feedBody, source) {
+  const articleDate = fedSpeechArticleDate(articleBody, source);
+  if (!articleDate) return [];
+  const document = new JSDOM(decodeSourceBody(Buffer.from(feedBody), "application/xml"), { contentType: "text/xml" }).window.document;
+  const values = [];
+  for (const item of document.querySelectorAll("rss > channel > item")) {
+    if (
+      item.querySelector("link")?.textContent.trim() !== source ||
+      item.querySelector("guid")?.textContent.trim() !== source ||
+      item.querySelector("category")?.textContent.trim() !== "Speech"
+    ) continue;
+    const raw = item.querySelector("pubDate")?.textContent.trim() ?? "";
+    if (!/(?:GMT|UTC|[+-]\d{4})$/u.test(raw) || !Number.isFinite(Date.parse(raw))) continue;
+    const published = new Date(raw);
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(published);
+    const part = (type) => parts.find((item) => item.type === type).value;
+    if (`${part("year")}-${part("month")}-${part("day")}` === articleDate) values.push(published.toISOString());
+  }
+  return [...new Set(values)];
+}
+
+export function sourcePublishedAtCandidates(
+  body,
+  contentType = "text/html",
+  source = "",
+) {
+  if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
+  const decoded = decodeSourceBody(body, contentType);
+  const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
+  const values = [];
+  const isModificationLabel = (index) =>
+    /(?:更新(?:时间)?|修改(?:时间)?|修订(?:时间)?|updated|modified)\s*(?:于|at|on|time)?\s*$/iu.test(
+      visibleDecoded.slice(Math.max(0, index - 32), index),
+    );
+  const isPublicationLabel = (index) =>
+    /(?:发布(?:时间|日期)?|发表(?:时间|日期)?|刊发(?:时间|日期)?|published|publication\s+date|date\s+published|posted)\s*(?:(?:于|在|at|on|time)|[:：])?\s*(?:<[^>]*>\s*)*$/iu.test(
+      visibleDecoded.slice(Math.max(0, index - 160), index),
+    );
+  const patterns = [
+    /<meta[^>]+(?:property|name)=["'](?:article:published_time|bytedance:published_time|datePublished|pubdate|publishdate|parsely-pub-date)["'][^>]+content=["']([^"']+)["'][^>]*>/giu,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:article:published_time|bytedance:published_time|datePublished|pubdate|publishdate|parsely-pub-date)["'][^>]*>/giu,
+    /<time[^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]+datetime=["']([^"']+)["'][^>]*>/giu,
+    /<time[^>]+datetime=["']([^"']+)["'][^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]*>/giu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of decoded.matchAll(pattern)) values.push(match[1]);
+  }
+  for (const match of visibleDecoded.matchAll(
+    /<(?:time|span|div)[^>]+class=["'][^"']*(?:publish-time|publication-time|article-time)[^"']*["'][^>]*>\s*(20\d{2}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)/giu,
+  )) {
+    values.push(match[1]);
+  }
+  let sourceHostname = "";
+  try {
+    sourceHostname = new URL(source).hostname.toLocaleLowerCase();
+  } catch {
+    // A source URL is optional for metadata-only unit tests.
+  }
+  if (sourceHostname === "cls.cn" || sourceHostname.endsWith(".cls.cn")) {
+    // CLS embeds the current article's publication time as Unix seconds.
+    // Match both routing and article IDs so recommendation timestamps cannot
+    // make an unrelated or stale article appear current.
+    const articleId = /^\/detail\/(\d+)\/?$/u.exec(new URL(source).pathname)?.[1];
+    if (articleId) {
+      for (const match of decoded.matchAll(/<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/giu)) {
+        try {
+          const data = JSON.parse(match[1]);
+          const article = data.props?.pageProps?.articleDetail;
+          if (
+            data.page === "/detail/[id]" &&
+            String(data.query?.id) === articleId &&
+            String(article?.id) === articleId &&
+            Number.isInteger(article.ctime) &&
+            article.ctime >= 946684800 && article.ctime < 4102444800
+          ) {
+            values.push(new Date(article.ctime * 1000).toISOString());
+          }
+        } catch {
+          // An invalid hydration block is not publication metadata.
+        }
+      }
+    }
+  }
+  if (sourceHostname === "21jingji.com" || sourceHostname.endsWith(".21jingji.com")) {
+    // Bind the visible date to this article's heading, not recommended stories
+    // or dates mentioned in the body. The publisher displays China local time.
+    const articleHeader = /<div\b[^>]*class=["']titleHead["'][^>]*>\s*<h1\b[^>]*>[\s\S]*?<\/h1>([\s\S]{0,1200}?)<div\b[^>]*class=["']newsDate["'][^>]*>\s*(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)\s*<\/div>/iu.exec(visibleDecoded);
+    if (articleHeader) values.push(`${articleHeader[2]}T${articleHeader[3]}+08:00`);
+    const authorHeader = /<div\b[^>]*class=["']titleHead["'][^>]*>\s*<h1\b[^>]*>[^<]*<\/h1>\s*<div\b[^>]*class=["']newsAuthor["'][^>]*>[\s\S]{0,1200}?<div\b[^>]*class=["']author-infos["'][^>]*>[\s\S]{0,500}?<span>[^<\d]{0,60}(20\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)\s*<\/span>/iu.exec(visibleDecoded);
+    if (authorHeader) values.push(`${authorHeader[1]}T${authorHeader[2]}+08:00`);
+    const desktopHeader = /<div\b[^>]*class=["']main["'][^>]*>\s*<h1\b[^>]*>[^<]*<\/h1>\s*<h6\b[^>]*>\s*(20\d{2})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})/iu.exec(visibleDecoded);
+    if (desktopHeader) {
+      const [, year, month, day, hour, minute] = desktopHeader;
+      values.push(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:00+08:00`);
+    }
+  }
+  if (sourceHostname === "nbd.com.cn" || sourceHostname.endsWith(".nbd.com.cn")) {
+    for (const match of decoded.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/giu)) {
+      try {
+        const article = JSON.parse(match[1]);
+        if (
+          article["@context"] === "https://ziyuan.baidu.com/contexts/cambrian.jsonld" &&
+          comparableArticleUrl(article["@id"], source) === comparableArticleUrl(source, source) &&
+          typeof article.title === "string" && article.title.trim() &&
+          /^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/u.test(article.pubDate ?? "")
+        ) values.push(`${article.pubDate}+08:00`);
+      } catch {
+        // Invalid or unrelated structured data cannot date this article.
+      }
+    }
+  }
+  if (
+    sourceHostname === "finance.eastmoney.com" ||
+    sourceHostname.endsWith(".eastmoney.com")
+  ) {
+    for (const match of visibleDecoded.matchAll(
+      /<div[^>]+class=["'][^"']*infos[^"']*["'][^>]*>[\s\S]{0,500}?<div[^>]+class=["'][^"']*item[^"']*["'][^>]*>\s*(20\d{2})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/giu,
+    )) {
+      const [, year, month, day, hour, minute, second = "00"] = match;
+      values.push(
+        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:${second}+08:00`,
+      );
+    }
+  }
+  if (
+    sourceHostname === "yicai.com" ||
+    sourceHostname.endsWith(".yicai.com")
+  ) {
+    for (const match of visibleDecoded.matchAll(
+      /["']actime["']\s*,\s*["'](20\d{2}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}(?::?\d{2})?)?)["']/giu,
+    )) {
+      values.push(match[1].replace(/([+-]\d{2})$/u, "$1:00"));
+    }
+  }
+  if (
+    sourceHostname === "stcn.com" ||
+    sourceHostname.endsWith(".stcn.com")
+  ) {
+    for (const match of visibleDecoded.matchAll(
+      /<span[^>]*>\s*来源[：:][\s\S]{0,300}?<span[^>]*>\s*(20\d{2})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*<\/span>/giu,
+    )) {
+      const [, year, month, day, hour, minute, second = "00"] = match;
+      values.push(
+        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:${second}+08:00`,
+      );
+    }
+  }
+  values.push(...jsonLdArticlePublishedValues(decoded, source));
+  for (const match of decoded.matchAll(
+    /ACCEPTANCE-DATETIME(?:>|:)[ \t]*(20\d{12})/giu,
+  )) {
+    const compact = match[1];
+    const year = Number(compact.slice(0, 4));
+    const month = Number(compact.slice(4, 6));
+    const day = Number(compact.slice(6, 8));
+    const hour = Number(compact.slice(8, 10));
+    const minute = Number(compact.slice(10, 12));
+    const second = Number(compact.slice(12, 14));
+    const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    const parts = Object.fromEntries(
+      formatter
+        .formatToParts(new Date(localAsUtc))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    const shownAsUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    values.push(new Date(localAsUtc - (shownAsUtc - localAsUtc)).toISOString());
+  }
+  for (const match of visibleDecoded.matchAll(
+    /(20\d{2})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/gu,
+  )) {
+    if (isModificationLabel(match.index) || !isPublicationLabel(match.index)) {
+      continue;
+    }
+    const [, year, month, day, hour, minute, second = "00"] = match;
+    values.push(
+      `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:${second}+08:00`,
+    );
+  }
+  let chinaLocalTime = false;
+  try {
+    chinaLocalTime = CHINA_LOCAL_TIME_HOSTS.some(
+      (domain) =>
+        sourceHostname === domain || sourceHostname.endsWith(`.${domain}`),
+    );
+  } catch {
+    // A source URL is optional for metadata-only unit tests.
+  }
+  if (chinaLocalTime) {
+    for (const match of visibleDecoded.matchAll(
+      /(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?!\s*(?:Z|[+-]\d{2}:?\d{2}))/gu,
+    )) {
+      if (isModificationLabel(match.index) || !isPublicationLabel(match.index)) {
+        continue;
+      }
+      const [, year, month, day, hour, minute, second = "00"] = match;
+      values.push(
+        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:${second}+08:00`,
+      );
+    }
+  }
+  const parseCandidate = (value) => {
+    const decodedValue = decodeHtmlEntities(value.trim());
+    const offsetFreeChinaTime = chinaLocalTime
+      ? /^(20\d{2})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/u.exec(
+          decodedValue,
+        )
+      : null;
+    if (offsetFreeChinaTime) {
+      const [, year, month, day, hour, minute, second = "00"] =
+        offsetFreeChinaTime;
+      return Date.parse(
+        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}:${second}+08:00`,
+      );
+    }
+    if (!/(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)$/iu.test(decodedValue)) {
+      return Number.NaN;
+    }
+    return Date.parse(decodedValue);
+  };
+  return [
+    ...new Set(
+      values
+        .map(parseCandidate)
+        .filter(Number.isFinite)
+        .map((value) => new Date(value).toISOString()),
+    ),
+  ];
+}
+
+export function sourceBodyText(body, contentType = "text/html") {
+  const decoded = decodeSourceBody(body, contentType);
+  if (!/(?:html|xhtml)/iu.test(contentType)) {
+    return decoded.replace(/\s+/gu, " ").trim();
+  }
+  return decodeHtmlEntities(
+    decoded
+      .replace(/<!--[\s\S]*?-->/gu, " ")
+      .replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ")
+      .replace(/<br\s*\/?>/giu, "\n")
+      .replace(/<\/(?:p|div|article|section|li|h[1-6])>/giu, "\n")
+      .replace(/<[^>]+>/gu, " "),
+  )
+    .replace(/[\t\f\v ]+/gu, " ")
+    .replace(/\s*\n\s*/gu, "\n")
+    .trim();
+}
+
+export function normalizedEvidenceText(value) {
+  return String(value)
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}.+%\-]+/gu, "");
+}
+
+function secSubmissionMetadataUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLocaleLowerCase() !== "www.sec.gov") return null;
+  const match = /^\/Archives\/edgar\/data\/(\d+)\/(\d{18})\/[^/]+$/u.exec(
+    url.pathname,
+  );
+  if (!match) return null;
+  const [, cik, accession] = match;
+  const filingName = `${accession.slice(0, 10)}-${accession.slice(10, 12)}-${accession.slice(12)}.txt`;
+  return `https://www.sec.gov/Archives/edgar/data/${cik}/${accession}/${filingName}`;
+}
+
+export async function readExternalSource(
+  source,
+  {
+    resolver,
+    requester,
+    runner = execFileAsync,
+    curlPath = DEFAULT_CURL_PATH,
+    maxRedirects = MAX_REDIRECTS,
+    maxBytes = MAX_SOURCE_BYTES,
+    signal,
+  } = {},
+) {
+  const resolveDestination =
+    resolver ??
+    ((hostname) => resolveWithDoh(hostname, { runner, curlPath, signal }));
+  const requestContent =
+    requester ??
+    ((value, destination, options) =>
+      requestContentWithFallback(value, destination, {
+        ...options,
+        runner,
+        curlPath,
+        signal,
+      }));
+  let current = source;
+  sourceAttempts: for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+    signal?.throwIfAborted();
+    let resolved;
+    try {
+      resolved = await publicDestination(current, resolveDestination);
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
+      if (String(error?.message ?? "").startsWith("外部证据")) throw error;
+      resolved = await publicDestination(current, (hostname, options) =>
+        dnsLookup(hostname, options),
+      );
+    }
+    let response;
+    // Retry transport failures on another already-validated CDN address. An HTTP
+    // refusal, a size violation or an invalid certificate is not a retry signal.
+    const destinations = resolved.destinations.slice(0, 3);
+    for (let attempt = 0; attempt < destinations.length; attempt += 1) {
+      try {
+        response = await requestContent(resolved.url.toString(), destinations[attempt], { maxBytes, signal });
+        break;
+      } catch (error) {
+        signal?.throwIfAborted();
+        const retryable = [6, 7, 28, 35, 52, 56, "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "ECONNREFUSED", "EAI_AGAIN"].includes(error?.code);
+        if (!retryable) throw error;
+        if (attempt === destinations.length - 1) {
+          // This publisher serves the same fixed article path on its mobile
+          // and desktop sites. Only a transport failure permits this fallback;
+          // the next iteration validates and pins the desktop DNS separately.
+          if (
+            redirectCount < maxRedirects &&
+            resolved.url.hostname === "m.21jingji.com" &&
+            /^\/article\/\d{8}\/herald\/[a-f0-9]{32}\.html$/u.test(resolved.url.pathname)
+          ) {
+            const desktopUrl = new URL(resolved.url);
+            desktopUrl.hostname = "www.21jingji.com";
+            current = desktopUrl.toString();
+            continue sourceAttempts;
+          }
+          throw error;
+        }
+      }
+    }
+    if (response.status >= 200 && response.status < 300) {
+      const contentType = response.contentType || "text/html";
+      if (!/(?:html|xhtml|plain|json)/iu.test(contentType)) {
+        throw new Error(`外部证据正文类型不受支持：${contentType}`);
+      }
+      const text = sourceBodyText(response.body, contentType);
+      if ([...text].length < 80) {
+        throw new Error(`外部证据正文过短：${current}`);
+      }
+      let publishedAtCandidates = sourcePublishedAtCandidates(
+        response.body,
+        contentType,
+        resolved.url.toString(),
+      );
+      if (publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {
+        try {
+          // The page supplies only a date. Use this exact speech's official
+          // RSS item for its actual publication time; never invent midnight.
+          const feed = await publicDestination("https://www.federalreserve.gov/feeds/speeches.xml", resolveDestination);
+          const metadata = await requestContent(feed.url.toString(), feed.destination, { maxBytes, signal });
+          if (metadata.status >= 200 && metadata.status < 300) {
+            publishedAtCandidates = fedSpeechPublishedAtCandidates(response.body, metadata.body, resolved.url.toString());
+          }
+        } catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error;
+          // A missing or invalid feed item leaves the speech time unverified.
+        }
+      }
+      const submissionUrl =
+        publishedAtCandidates.length === 0
+          ? secSubmissionMetadataUrl(resolved.url.toString())
+          : null;
+      if (submissionUrl) {
+        try {
+          signal?.throwIfAborted();
+          const submissionDestination = await publicDestination(
+            submissionUrl,
+            resolveDestination,
+          );
+          const submission = await requestContent(
+            submissionDestination.url.toString(),
+            submissionDestination.destination,
+            { maxBytes, signal },
+          );
+          if (submission.status >= 200 && submission.status < 300) {
+            publishedAtCandidates = sourcePublishedAtCandidates(
+              submission.body,
+              submission.contentType || "text/plain",
+              submissionDestination.url.toString(),
+            );
+          }
+        } catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error;
+          // The exhibit body remains usable, but publication time stays unverified.
+        }
+      }
+      return {
+        source,
+        status: response.status,
+        finalUrl: resolved.url.toString(),
+        contentType,
+        text,
+        publishedAtCandidates,
+      };
+    }
+    if (response.status >= 300 && response.status < 400 && response.location) {
+      if (redirectCount === maxRedirects) {
+        throw new Error(`外部证据重定向次数过多：${source}`);
+      }
+      current = new URL(response.location, resolved.url).toString();
+      continue;
+    }
+    throw new Error(`外部证据返回无效响应（HTTP ${response.status}）：${current}`);
+  }
+  throw new Error(`外部证据重定向次数过多：${source}`);
 }
 
 async function requestHeadersWithSystemDns(

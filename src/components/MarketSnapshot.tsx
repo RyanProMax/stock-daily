@@ -27,6 +27,15 @@ interface SnapshotItemProps {
   language: Language;
 }
 
+function localizeMetricValue(value: string, language: Language) {
+  if (language === "zh") return value;
+  return value
+    .replace(/个百分点/gu, " percentage points")
+    .replace(/个?基点/gu, " basis points")
+    .replace(/（/gu, " (")
+    .replace(/）/gu, ")");
+}
+
 interface Props {
   markets: MarketMetric[];
   sectorView: SectorHeatView;
@@ -228,14 +237,14 @@ function SnapshotEvidenceList({
                         <p>
                           <span>
                             <small>{language === "zh" ? "实际" : "Actual"}</small>
-                            <b>{metric.actual}</b>
+                            <b>{localizeMetricValue(metric.actual, language)}</b>
                           </span>
                           <span>
                             <small>{metric.baselineLabel}</small>
-                            <b>{metric.baseline}</b>
+                            <b>{localizeMetricValue(metric.baseline, language)}</b>
                           </span>
                           <em className={`snapshot-result-${metric.tone}`}>
-                            {metric.delta}
+                            {localizeMetricValue(metric.delta, language)}
                           </em>
                         </p>
                         {metric.note && <small>{metric.note}</small>}

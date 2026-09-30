@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stock Daily Evidence Worker V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "role", "market", "anomalyId", "outcome", "queries", "sources", "alternatives"],
+  "properties": {
+    "contractVersion": { "type": "string", "const": "stock-daily-evidence-worker-v1" },
+    "role": { "type": "string", "enum": ["facts", "causal"] },
+    "market": { "type": "string", "enum": ["CN", "US"] },
+    "anomalyId": { "type": "string", "minLength": 3, "maxLength": 40 },
+    "outcome": { "type": "string", "enum": ["found", "limited", "none"] },
+    "queries": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string", "minLength": 3, "maxLength": 220 } },
+    "sources": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/source" } },
+    "alternatives": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/alternative" } }
+  },
+  "$defs": {
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "actualValue", "actualDisplay", "baselineLabel", "baselineValue", "baselineDisplay", "unit", "higherIsPositive", "note", "sourceUrl"],
+      "properties": {
+        "label": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "actualValue": { "type": "number" },
+        "actualDisplay": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "baselineLabel": { "type": "string", "minLength": 2, "maxLength": 24 },
+        "baselineValue": { "type": "number" },
+        "baselineDisplay": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "unit": { "type": "string", "enum": ["billion_usd", "million_usd", "usd", "hundred_million_cny", "million_cny", "cny", "percent", "basis_points", "count", "other"] },
+        "higherIsPositive": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 180 },
+        "sourceUrl": { "type": "string", "pattern": "^https://", "maxLength": 1200 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sourceLabel", "title", "publishedAt", "kind", "supportingExcerpt", "facts", "scope", "targets", "hypothesisIds", "causalConnection", "comparisons"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://", "maxLength": 1200 },
+        "sourceLabel": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "title": { "type": "string", "minLength": 4, "maxLength": 220 },
+        "publishedAt": { "type": "string", "minLength": 20, "maxLength": 40 },
+        "kind": { "type": "string", "enum": ["official", "event", "market_wrap"] },
+        "supportingExcerpt": { "type": "string", "minLength": 24, "maxLength": 700 },
+        "facts": { "type": "string", "minLength": 20, "maxLength": 1600 },
+        "scope": { "type": "string", "enum": ["market", "sector", "subsector", "ai_layer", "company", "event_only"] },
+        "targets": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 80 } },
+        "hypothesisIds": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 3, "maxLength": 50 } },
+        "causalConnection": { "type": "boolean" },
+        "comparisons": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/comparison" } }
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim", "status", "sourceUrls"],
+      "properties": {
+        "claim": { "type": "string", "minLength": 5, "maxLength": 300 },
+        "status": { "type": "string", "enum": ["supported", "contradicted", "unresolved"] },
+        "sourceUrls": { "type": "array", "maxItems": 4, "items": { "type": "string", "pattern": "^https://", "maxLength": 1200 } }
+      }
+    }
+  }
+}

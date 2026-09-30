@@ -16,12 +16,13 @@ function snapshot({
   updateKind = "close",
   generatedAt = "2026-08-25T08:01:00.000Z",
   finishedAt = generatedAt,
+  status = "completed",
 } = {}) {
   return {
     health: {
       latestIngestion: {
         reportDate: "2026-08-25",
-        status: "completed",
+        status,
         finishedAt,
       },
     },
@@ -55,6 +56,23 @@ test("production readback rejects a stale edition and accepts the current run", 
   assert.equal(result.report.updateKind, "close");
   assert.equal(calls, 2);
   assert.deepEqual(waits, [5]);
+});
+
+test("workflow slice readback may accept running without weakening the completed default", async () => {
+  const running = snapshot({ status: "running" });
+  assert.equal(dailySnapshotIsCurrent(input, running), false);
+  assert.equal(
+    dailySnapshotIsCurrent(input, running, {
+      acceptedIngestionStatuses: ["running", "completed"],
+    }),
+    true,
+  );
+  const result = await fetchFreshDailySnapshot(input, {
+    retryDelaysMs: [0],
+    snapshotLoader: async () => running,
+    acceptedIngestionStatuses: ["running", "completed"],
+  });
+  assert.equal(result.health.latestIngestion.status, "running");
 });
 
 test("production readback stops after the bounded stale-snapshot window", async () => {

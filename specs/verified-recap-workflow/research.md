@@ -1,5 +1,7 @@
 # Verified Market Recap Workflow Research
 
+> Historical research note. The former two-role evaluator design described below was superseded by the isolated multi-Agent state machine in [design.md](design.md); it is retained only as the diagnosis that motivated the refactor.
+
 ## Objective
 
 Build a free, local-Codex-driven daily recap that explains why markets moved without

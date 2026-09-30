@@ -824,9 +824,13 @@ function parseWeeklyRow(row: WeeklyRow): WeeklyReport {
 export async function getDailyArchive(
   db: D1Database,
   limit = 100,
+  atOrBefore: string | null = null,
 ): Promise<ReportListItem[]> {
-  const rows = await db
-    .prepare(
+  const boundedDate =
+    typeof atOrBefore === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(atOrBefore)
+      ? atOrBefore
+      : null;
+  const statement = db.prepare(
       `SELECT
         report_date AS reportDate,
         edition,
@@ -906,10 +910,16 @@ export async function getDailyArchive(
         ) END AS usSignalCount,
         generated_at AS generatedAt
       FROM daily_reports
+      ${boundedDate ? "WHERE report_date <= ?" : ""}
       ORDER BY report_date DESC
       LIMIT ?`,
-    )
-    .bind(Math.min(Math.max(limit, 1), 100))
+    );
+  const rows = await (boundedDate
+    ? statement.bind(
+        boundedDate,
+        Math.min(Math.max(limit, 1), 100),
+      )
+    : statement.bind(Math.min(Math.max(limit, 1), 100)))
     .all<DailyArchiveRow>();
 
   return rows.results.map((row) => {

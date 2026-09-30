@@ -63,9 +63,7 @@ export const copy = {
     thesisHistory: "观点验证",
     whyImportant: "为什么重要",
     marketUpdatedAt: "更新：{time}（北京）",
-    marketAsOfToday: "{market}数据截至今天（{date}）收盘",
-    marketAsOfYesterday: "{market}数据截至昨天（{date}）收盘",
-    marketAsOfLatest: "{market}数据截至最近交易日（{date}）收盘",
+    marketAsOfLatest: "{market}数据截至{date}收盘",
     weekEvents: "本周关键事件",
     eventScheduled: "待公布",
     eventAwaiting: "待公布",
@@ -202,9 +200,7 @@ export const copy = {
     thesisHistory: "Thesis Verification",
     whyImportant: "Why It Matters",
     marketUpdatedAt: "Updated {time} (Beijing)",
-    marketAsOfToday: "{market} data through today's close ({date})",
-    marketAsOfYesterday: "{market} data through yesterday's close ({date})",
-    marketAsOfLatest: "{market} data through the latest trading-day close ({date})",
+    marketAsOfLatest: "{market} data through the {date} close",
     weekEvents: "This Week's Key Events",
     eventScheduled: "Pending",
     eventAwaiting: "Pending",
@@ -585,20 +581,11 @@ export function formatMarketDate(date: string, language: Language) {
 
 export function formatMarketAsOfLabel(
   marketAsOf: string,
-  reportDate: string,
+  _reportDate: string,
   market: MarketRegion,
   language: Language,
 ) {
-  const difference =
-    (Date.parse(`${reportDate}T12:00:00Z`) -
-      Date.parse(`${marketAsOf}T12:00:00Z`)) /
-    86_400_000;
-  const template =
-    difference === 0
-      ? copy[language].marketAsOfToday
-      : difference === 1
-        ? copy[language].marketAsOfYesterday
-        : copy[language].marketAsOfLatest;
+  const template = copy[language].marketAsOfLatest;
   const marketLabel =
     language === "zh"
       ? market === "CN"
@@ -609,7 +596,7 @@ export function formatMarketAsOfLabel(
         : "U.S.";
   return formatTemplate(template, {
     market: marketLabel,
-    date: formatMarketDate(marketAsOf, language),
+    date: formatDate(marketAsOf, language),
   });
 }
 

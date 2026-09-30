@@ -315,11 +315,22 @@ app.get("/api/health", async (c) => {
 
 app.get("/api/reports", async (c) => {
   const requestedLimit = Number(c.req.query("limit") ?? "30");
+  const requestedBefore = c.req.query("before");
+  if (requestedBefore && !datePattern.test(requestedBefore)) {
+    return c.json(
+      { error: { message: "Before must be YYYY-MM-DD.", status: 400 } },
+      400,
+    );
+  }
   const limit = Number.isFinite(requestedLimit)
     ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
     : 30;
   try {
-    const data = await getDailyArchive(database(c.env), limit);
+    const data = await getDailyArchive(
+      database(c.env),
+      limit,
+      requestedBefore ?? null,
+    );
     c.header("Cache-Control", "public, max-age=60, s-maxage=300");
     return c.json({ data, meta: { total: data.length, limit } });
   } catch {

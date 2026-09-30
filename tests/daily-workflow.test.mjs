@@ -9,80 +9,168 @@ import {
 import { yahooSectorPoint } from "../scripts/sector-heat.mjs";
 import { auditStructuredOutputSchema } from "../scripts/structured-output-schema-audit.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
+import { fetchComparisonReport } from "../scripts/daily-freshness.mjs";
+import {
+  handledMarketUpdates,
+  mergeHandledMarketState,
+} from "../scripts/daily-handled-markets.mjs";
 
-test("daily scheduler runs native search in read-only mode before validation and publication", async () => {
-  const scheduler = await readFile(
-    new URL("../scripts/run-codex-daily.sh", import.meta.url),
-    "utf8",
+test("historical comparison selects the newest eligible archived report", async () => {
+  const requests = [];
+  const fetcher = async (url) => {
+    requests.push(url);
+    const response = (status, data) => ({
+      status,
+      ok: status >= 200 && status < 300,
+      json: async () => data,
+    });
+    if (url.includes("/api/reports/2026-08-21?")) return response(404, null);
+    if (url.includes("/api/reports?") && url.includes("before=2026-08-21")) {
+      return response(200, {
+        data: [
+          { reportDate: "2026-08-29" },
+          { reportDate: "2026-08-20" },
+          { reportDate: "2026-08-19" },
+        ],
+      });
+    }
+    if (url.includes("/api/reports/2026-08-20?")) {
+      return response(200, { data: { reportDate: "2026-08-20" } });
+    }
+    return response(404, null);
+  };
+  const report = await fetchComparisonReport(
+    { reportDate: "2026-08-21" },
+    "https://example.test",
+    { fetcher },
   );
-  assert.match(scheduler, /"\$\{CODEX_BIN\}"[\s\\]*--disable plugins/);
-  assert.equal((scheduler.match(/--disable remote_plugin/g) ?? []).length, 2);
-  assert.equal((scheduler.match(/--disable recommended_plugins/g) ?? []).length, 2);
-  assert.equal((scheduler.match(/--disable apps/g) ?? []).length, 2);
+  assert.equal(report.reportDate, "2026-08-20");
   assert.equal(
-    (scheduler.match(/--disable unbounded_connection_retries/g) ?? []).length,
-    2,
+    requests.some((url) =>
+      url.includes("/api/reports?limit=1&before=2026-08-21"),
+    ),
+    true,
   );
-  assert.equal((scheduler.match(/--disable in_app_updates/g) ?? []).length, 2);
-  assert.equal((scheduler.match(/--disable tui_app_server/g) ?? []).length, 2);
-  assert.equal((scheduler.match(/--search exec/g) ?? []).length, 2);
-  assert.match(
-    scheduler,
-    /\/Applications\/ChatGPT\.app\/Contents\/Resources\/codex/,
+  assert.equal(
+    requests.some((url) => url.includes("/api/reports/2026-08-29?")),
+    false,
   );
-  assert.match(scheduler, /--sandbox read-only/);
-  assert.match(scheduler, /--json/);
-  assert.match(scheduler, /--output-schema "\$\{REPORT_SCHEMA_FILE\}"/);
-  assert.match(
-    scheduler,
-    /--output-last-message "\$\{REPORT_FILE\}"[\s\S]*?> "\$\{AGENT_EVENTS_FILE\}"/,
-  );
+});
 
-  const collect = scheduler.indexOf("npm run daily:collect");
-  const codex = scheduler.indexOf('"${CODEX_BIN}"');
-  const audit = scheduler.indexOf("node scripts/daily-agent-audit.mjs");
-  const sourceAudit = scheduler.indexOf("node scripts/daily-source-audit.mjs");
-  const check = scheduler.indexOf("npm run daily:check");
-  const independentReview = scheduler.indexOf(
-    '--output-schema "${REVIEW_SCHEMA_FILE}"',
-  );
-  const reviewAudit = scheduler.indexOf("node scripts/daily-review-audit.mjs");
-  const reviewCheck = scheduler.indexOf("node scripts/daily-review-check.mjs");
-  const publish = scheduler.indexOf("npm run daily:publish");
-  const verify = scheduler.indexOf("node scripts/daily-verify.mjs");
+test("daily scheduler delegates to isolated ephemeral market agents", async () => {
+  const [scheduler, workflow, publisher] = await Promise.all([
+    readFile(new URL("../scripts/run-codex-daily.sh", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/daily-workflow.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/daily-workflow-publish.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(scheduler, /scripts\/daily-workflow\.mjs/);
+  assert.doesNotMatch(scheduler, /codex-daily-agent-prompt|daily-review-prompt/);
+  assert.match(workflow, /"--ephemeral"/);
+  assert.match(workflow, /definition\.search \? \["--search"\] : \[\]\),\s*"exec"/);
+  assert.match(workflow, /"--ignore-user-config"/);
+  assert.match(workflow, /"--sandbox",\s*"read-only"/);
+  assert.match(workflow, /role: "facts"/);
+  assert.match(workflow, /role: "causal"/);
+  assert.match(workflow, /role: "reviewer"/);
+  assert.match(workflow, /randomUUID\(\)/);
+  assert.match(workflow, /Promise\.all\(\[/);
+  const thirdRepairIndex = workflow.indexOf("repairRound <= 3");
   assert.ok(
-    collect < codex &&
-      codex < audit &&
-      audit < sourceAudit &&
-      sourceAudit < check &&
-      check < independentReview &&
-      independentReview < reviewAudit &&
-      reviewAudit < reviewCheck,
+    thirdRepairIndex >= 0 &&
+      thirdRepairIndex < workflow.indexOf("const failedIds = new Set", thirdRepairIndex),
+    "three stage-directed repair rounds must run before an otherwise valid single card is dropped",
   );
-  assert.ok(reviewCheck < publish && publish < verify);
-  assert.match(scheduler, /MAX_RESEARCH_ATTEMPTS="\$\{STOCK_DAILY_MAX_RESEARCH_ATTEMPTS:-3\}"/);
-  assert.match(scheduler, /STOCK_DAILY_RESEARCH_TIMEOUT_SECONDS:-900/);
-  assert.match(scheduler, /STOCK_DAILY_REVIEW_TIMEOUT_SECONDS:-600/);
-  assert.match(scheduler, /STOCK_DAILY_RESEARCH_IDLE_TIMEOUT_SECONDS:-300/);
-  assert.match(scheduler, /STOCK_DAILY_REVIEW_IDLE_TIMEOUT_SECONDS:-240/);
-  assert.match(scheduler, /STOCK_DAILY_RESEARCH_REASONING_EFFORT:-low/);
-  assert.equal(
-    (scheduler.match(/model_reasoning_effort=\\"\$\{RESEARCH_REASONING_EFFORT\}\\"/g) ?? []).length,
-    1,
+  assert.match(workflow, /DEFAULT_RESEARCH_BUDGET_MS = 20 \* 60/);
+  assert.match(workflow, /DEFAULT_WORKFLOW_TIMEOUT_MS = 45 \* 60/);
+  assert.match(workflow, /this\.searchQueryCount > 12/);
+  assert.match(scheduler, /freshness_status != 0 && freshness_status != 10/);
+  assert.match(scheduler, /--timeout-ms 5700000/);
+  assert.doesNotMatch(scheduler, /const handled = item\.status === "no_claims"/);
+  assert.match(scheduler, /result\.status === "pending_no_claims"/);
+  assert.match(scheduler, /last-handled-market-as-of\.json/);
+  assert.match(scheduler, /--handled-market-as-of/);
+  assert.match(
+    scheduler,
+    /requested_date.*shadow_run.*workflow_args\+=\(--force-markets\)/s,
   );
-  assert.equal(
-    (scheduler.match(/model_reasoning_effort="medium"/g) ?? []).length,
-    1,
-  );
-  assert.equal((scheduler.match(/run-with-timeout\.mjs/g) ?? []).length, 1);
-  assert.equal((scheduler.match(/--timeout-ms/g) ?? []).length, 2);
-  assert.equal((scheduler.match(/--idle-timeout-ms/g) ?? []).length, 2);
-  assert.match(scheduler, /research_exit == 124/);
-  assert.match(scheduler, /review_exit == 124/);
-  assert.match(scheduler, /while \(\( attempt <= MAX_RESEARCH_ATTEMPTS \)\)/);
-  assert.match(scheduler, /Research review failed after \$\{MAX_RESEARCH_ATTEMPTS\} attempts; publication skipped/);
+  assert.match(scheduler, /scripts\/daily-handled-markets\.mjs/);
+  assert.doesNotMatch(scheduler, /LAST_HANDLED_FILE/);
+  assert.match(scheduler, /result\.status === "skipped"\) process\.exit\(12\)/);
+  assert.match(scheduler, /publication_status == 12[\s\S]*compensation trigger/);
+  assert.match(scheduler, /process\.exit\(fullyPublished \? 0 : 1\)/);
+  assert.match(workflow, /manifestPath: result\.manifestPath/);
+  assert.match(workflow, /recovered = await verifyWorkflowReadback/);
+  assert.match(workflow, /existing\.outputHash === stableHash\(cached\)/);
+  assert.match(publisher, /fetchFreshDailySnapshot/);
+  assert.match(publisher, /workflowMarketContentHash/);
   assert.match(scheduler, /kill -0 "\$\{stale_lock_pid\}"/);
   assert.match(scheduler, /printf "%s\\n" "\$\$" > "\$\{LOCK_PID_FILE\}"/);
+});
+
+test("handled-market checkpoints use production-confirmed dates from runs and recoveries", () => {
+  const result = {
+    results: [
+      {
+        status: "ready",
+        market: "US",
+        marketAsOf: "2026-08-21",
+        publication: {
+          status: "superseded",
+          marketAsOf: { CN: "2026-08-21", US: "2026-08-22" },
+        },
+      },
+      {
+        status: "ready",
+        market: "CN",
+        marketAsOf: "2026-08-24",
+        publication: { status: "pending" },
+      },
+    ],
+    recoveries: [
+      {
+        status: "published",
+        market: "CN",
+        marketAsOf: { CN: "2026-08-23", US: "2026-08-22" },
+      },
+      {
+        status: "pending",
+        market: "CN",
+        marketAsOf: "2026-08-24",
+      },
+    ],
+  };
+
+  assert.deepEqual(handledMarketUpdates(result), {
+    CN: "2026-08-23",
+    US: "2026-08-22",
+  });
+  assert.deepEqual(
+    mergeHandledMarketState({ CN: "2026-08-24", US: "2026-08-20" }, result),
+    { CN: "2026-08-24", US: "2026-08-22" },
+  );
+});
+
+test("handled-market checkpoints never fall back to an unconfirmed attempted date", () => {
+  assert.deepEqual(
+    handledMarketUpdates({
+      results: [
+        {
+          status: "ready",
+          market: "US",
+          marketAsOf: "2026-08-29",
+          publication: { status: "published" },
+        },
+      ],
+      recoveries: [
+        {
+          status: "deferred",
+          market: "CN",
+          marketAsOf: "2026-08-29",
+        },
+      ],
+    }),
+    {},
+  );
 });
 
 test("destructive report replacement requires search and source audits", async () => {
@@ -98,113 +186,99 @@ test("destructive report replacement requires search and source audits", async (
   assert.match(replacement, /--confirm-delete-all-daily/);
 });
 
-test("the publication boundary cannot bypass search or source audits", async () => {
-  const publisher = await readFile(
-    new URL("../scripts/daily-publish.mjs", import.meta.url),
-    "utf8",
-  );
-  const reportValidation = publisher.lastIndexOf("const report = validateReport(");
-  const searchAudit = publisher.lastIndexOf("auditCodexRun(eventsText, report, input)");
-  const sourceAudit = publisher.lastIndexOf("await auditReportSources(report)");
-  const reviewAudit = publisher.lastIndexOf(
-    "auditIndependentReview(reviewEventsText, review, report)",
-  );
-  const reviewCheck = publisher.lastIndexOf("assertReviewPassed(review, report)");
-  const publication = publisher.lastIndexOf(
-    "executeSql(completedSql(input, report)",
-  );
-  assert.ok(reportValidation >= 0);
-  assert.ok(searchAudit > reportValidation);
-  assert.ok(sourceAudit > searchAudit);
-  assert.ok(reviewAudit > sourceAudit);
-  assert.ok(reviewCheck > reviewAudit);
-  assert.ok(publication > reviewCheck);
+test("the publication boundary accepts only an audited multi-agent manifest", async () => {
+  const [legacyPublisher, publisher] = await Promise.all([
+    readFile(new URL("../scripts/daily-publish.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/daily-workflow-publish.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(legacyPublisher, /旧的一体化日报发布入口已停用/);
+  assert.match(publisher, /auditWorkflowManifest\(manifest, reportText\)/);
+  assert.match(publisher, /manifest\.deliveryMode !== "publish"/);
+  assert.match(publisher, /fetchFreshDailySnapshot/);
+  assert.match(publisher, /生产回读与多 Agent 报告不一致/);
 });
 
 test("shadow mode validates a real report without writing Cloudflare state", async () => {
-  const scheduler = await readFile(
-    new URL("../scripts/run-codex-daily.sh", import.meta.url),
-    "utf8",
-  );
-  const shadowBranch = scheduler.match(
-    /if \[\[ "\$\{shadow_run\}" == true \]\]; then([\s\S]*?)fi/,
-  )?.[1];
-  assert.ok(shadowBranch);
-  assert.match(shadowBranch, /publication skipped/);
-  assert.match(shadowBranch, /exit 0/);
-  assert.doesNotMatch(shadowBranch, /daily:publish|daily-verify/);
+  const [scheduler, workflow] = await Promise.all([
+    readFile(new URL("../scripts/run-codex-daily.sh", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/daily-workflow.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(scheduler, /workflow_args\+=\(--shadow\)/);
+  assert.match(workflow, /if \(publish && !shadow\)/);
+  assert.match(workflow, /deliveryMode = shadow/);
 });
 
 test("daily task uses market results as search leads instead of a news pool", async () => {
-  const [prompt, task, collector, schema] = await Promise.all([
+  const [planner, facts, causal, writer, task, collector, schema] = await Promise.all([
     readFile(
-      new URL("../docs/codex-daily-agent-prompt.md", import.meta.url),
+      new URL("../docs/daily-agents/planner.md", import.meta.url),
       "utf8",
     ),
     readFile(
-      new URL("../docs/codex-daily-task.md", import.meta.url),
+      new URL("../docs/daily-agents/facts-researcher.md", import.meta.url),
       "utf8",
     ),
     readFile(
-      new URL("../scripts/daily-collect.mjs", import.meta.url),
+      new URL("../docs/daily-agents/causal-researcher.md", import.meta.url),
       "utf8",
     ),
     readFile(
-      new URL("../docs/daily-report.schema.json", import.meta.url),
+      new URL("../docs/daily-agents/writer.md", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../docs/codex-daily-task.md", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/daily-collect.mjs", import.meta.url), "utf8"),
+    readFile(
+      new URL("../docs/daily-agents/draft.schema.json", import.meta.url),
       "utf8",
     ).then(JSON.parse),
   ]);
-  assert.match(prompt, /实时网页搜索/);
-  assert.match(prompt, /至少执行四类独立的窄搜索/);
-  assert.match(prompt, /找不到充分证据时[^\n]*输出空的驱动数组/);
-  assert.match(prompt, /不得生成“原因未证实”/);
-  assert.match(prompt, /至少三个彼此不同的候选原因/);
-  assert.match(prompt, /支持证据和反证/);
-  assert.match(prompt, /`mechanism` 必须为 `null`/);
-  assert.doesNotMatch(prompt, /不要联网/);
+  assert.match(planner, /three genuinely competing hypotheses/);
+  assert.match(facts, /actual and consensus\/baseline values/);
+  assert.match(causal, /competing explanations/);
+  assert.match(causal, /same-day event plus a price move is not enough/);
+  assert.match(causal, /different registered publisher/);
+  assert.match(causal, /excludedSources/);
+  assert.match(writer, /100–220 Chinese characters/);
+  assert.match(writer, /不能据此声称/);
   assert.match(task, /主动(?:研究|检索)/);
   assert.doesNotMatch(collector, /news-pipeline|x-intelligence/);
   assert.match(collector, /marketBriefs/);
   assert.equal(
     schema.properties.contractVersion.const,
-    "codex-market-research-v11",
+    "stock-daily-market-draft-v1",
   );
-  assert.ok(schema.required.includes("researchAudit"));
-  assert.equal(schema.$defs.researchMarket.properties.hypotheses.minItems, 3);
   assert.equal(schema.$defs.driver.properties.mechanism.minLength, 100);
   assert.equal(schema.$defs.aiUpdate.properties.implication.minLength, 100);
-  assert.equal(schema.$defs.translatedDriver.properties.mechanism.minLength, 100);
-  assert.equal(schema.$defs.translatedAiUpdate.properties.implication.minLength, 100);
   assert.equal(schema.$defs.driver.properties.summary.minLength, 100);
+  assert.equal(schema.$defs.driver.properties.summary.maxLength, 220);
   assert.equal(schema.$defs.aiUpdate.properties.summary.minLength, 100);
-  assert.ok(schema.$defs.driver.required.includes("metrics"));
-  assert.ok(schema.$defs.aiUpdate.required.includes("metrics"));
-  assert.ok(schema.$defs.translatedDriver.required.includes("metrics"));
-  assert.ok(schema.$defs.translatedAiUpdate.required.includes("metrics"));
-  assert.match(prompt, /财报、业绩或指引催化必须填写至少两项 `metrics`/);
-  assert.match(prompt, /严禁写“该来源只验证”“证据边界”“不能据此”/);
-  assert.match(prompt, /至少一百个字符/);
 });
 
-test("each retry reads the previous validation failure", async () => {
-  const prompt = await readFile(
-    new URL("../docs/codex-daily-agent-prompt.md", import.meta.url),
+test("resume and repair are scoped to immutable stage artifacts", async () => {
+  const workflow = await readFile(
+    new URL("../scripts/daily-workflow.mjs", import.meta.url),
     "utf8",
   );
-  assert.match(prompt, /work\/daily-attempt-error\.txt/);
-  assert.match(prompt, /不得重复使用其中打不开的 URL/);
+  // Checkpoint hashes and changed-file rejection are exercised behaviorally
+  // by the multi-agent harness, including research batch preflight.
+  assert.match(workflow, /role = repairReview \? "repair" : "writer"/);
+  assert.match(workflow, /repairIssues/);
+  assert.doesNotMatch(workflow, /previousDraft: repairReview\.draft, review:/);
 });
 
 test("Codex output schemas satisfy strict structured-output requirements", async () => {
-  const [reportSchema, reviewSchema] = await Promise.all([
-    readFile(new URL("../docs/daily-report.schema.json", import.meta.url), "utf8").then(JSON.parse),
-    readFile(new URL("../docs/daily-review.schema.json", import.meta.url), "utf8").then(JSON.parse),
-  ]);
-  assert.equal(auditStructuredOutputSchema(reportSchema).status, "valid");
-  assert.equal(auditStructuredOutputSchema(reviewSchema).status, "valid");
-
-  const invalid = structuredClone(reportSchema);
-  invalid.$defs.aiChainView.required = invalid.$defs.aiChainView.required.filter(
+  const names = ["plan", "evidence", "adjudication", "draft", "review", "translation"];
+  const schemas = await Promise.all(
+    names.map((name) =>
+      readFile(new URL(`../docs/daily-agents/${name}.schema.json`, import.meta.url), "utf8").then(JSON.parse),
+    ),
+  );
+  for (const schema of schemas) {
+    assert.equal(auditStructuredOutputSchema(schema).status, "valid");
+  }
+  const invalid = structuredClone(schemas[3]);
+  invalid.$defs.aiView.required = invalid.$defs.aiView.required.filter(
     (key) => key !== "mechanism",
   );
   assert.throws(
@@ -213,7 +287,7 @@ test("Codex output schemas satisfy strict structured-output requirements", async
   );
 });
 
-test("daily policy refreshes scheduled checkpoints without news-pool state", () => {
+test("daily policy publishes only when at least one market advances", () => {
   assert.equal(
     dailyCutoffAt("2026-08-25", "morning"),
     "2026-08-25T01:00:00.000Z",
@@ -248,8 +322,8 @@ test("daily policy refreshes scheduled checkpoints without news-pool state", () 
   evening.updateKind = "evening";
   evening.cutoffAt = dailyCutoffAt(evening.reportDate, "evening");
   const checkpoint = assessDailyFreshness(evening, previous);
-  assert.equal(checkpoint.publish, true);
-  assert.equal(checkpoint.reason, "scheduled_checkpoint");
+  assert.equal(checkpoint.publish, false);
+  assert.equal(checkpoint.reason, "no_material_advance");
   assert.equal(checkpoint.newStoryCount, 0);
 });
 

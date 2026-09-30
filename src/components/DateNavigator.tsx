@@ -9,6 +9,7 @@ import {
 } from "react-aria-components";
 import { ArrowLeft, ArrowRight, ChevronDown } from "lucide-react";
 import type { Language, ReportListItem } from "../types";
+import { formatDate } from "../lib/i18n";
 
 interface Props {
   archive: ReportListItem[];
@@ -41,9 +42,10 @@ export default function DateNavigator({
 
   function optionLabel(item: ReportListItem) {
     const edition = String(item.edition).padStart(2, "0");
+    const date = formatDate(item.reportDate, language);
     return language === "zh"
-      ? `${item.reportDate} · 第 ${edition} 期`
-      : `${item.reportDate} · Edition ${edition}`;
+      ? `${date} · 第 ${edition} 期`
+      : `${date} · Edition ${edition}`;
   }
 
   return (
