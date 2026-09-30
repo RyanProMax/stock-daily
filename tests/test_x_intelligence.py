@@ -33,6 +33,12 @@ def create_account_db(path: Path, *, lock_until: datetime | None = None) -> None
 
 
 class XIntelligenceTests(unittest.TestCase):
+    def test_specific_kol_mechanism_is_kept_without_numeric_filler(self) -> None:
+        thesis = "I think demand growth and the inventory bottleneck affect pricing and margins; published orders and deliveries will determine whether earnings expectations can be sustained."
+        self.assertTrue(x_intelligence.is_selected_post(thesis, "expert"))
+        self.assertFalse(x_intelligence.is_selected_post("Very bullish, this could be huge and a game changer for all investors. " * 3, "expert"))
+        self.assertTrue(x_intelligence.is_selected_post("Bond valuation remains vulnerable because inflation and interest rates raise financing costs, while credit conditions offset some of the pressure on equity markets.", "expert"))
+
     def test_queue_state_reports_ready_account(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "accounts.db"

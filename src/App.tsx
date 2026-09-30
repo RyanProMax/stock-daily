@@ -470,6 +470,7 @@ function DailyPage({ data }: { data: DailyPageData }) {
           sectorView={data.sectorHeat}
           sectorPerformance={report.sectorPerformance}
           aiChainPerformance={report.aiChainPerformance}
+          recap={report.recaps?.[data.market]}
           drivers={marketDrivers}
           aiUpdates={marketAiUpdates}
           market={data.market}

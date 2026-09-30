@@ -1,9 +1,12 @@
 import { ExternalLink } from "lucide-react";
 import { formatTemplate } from "../lib/i18n";
+import RecapDetails from "./RecapDetails";
 import type {
   AiChainConstituent,
   AiChainMetric,
   AiChainUpdate,
+  CompleteRecap,
+  RecapEntry,
   DriverEvidence,
   Language,
   MarketDriver,
@@ -41,6 +44,7 @@ interface Props {
   sectorView: SectorHeatView;
   sectorPerformance?: SectorHeatMetric[];
   aiChainPerformance?: AiChainMetric[];
+  recap?: CompleteRecap;
   drivers: MarketDriver[];
   aiUpdates: AiChainUpdate[];
   market: MarketRegion;
@@ -93,9 +97,11 @@ function RepresentativeList({
 function AiSnapshotItem({
   metric,
   language,
+  entry,
 }: {
   metric: AiChainMetric;
   language: Language;
+  entry?: RecapEntry;
 }) {
   const changeLabel = language === "zh" ? `（${metric.change}）` : `(${metric.change})`;
   return (
@@ -111,6 +117,7 @@ function AiSnapshotItem({
       {metric.constituents && (
         <RepresentativeList constituents={metric.constituents} language={language} />
       )}
+      <RecapDetails entry={entry} language={language} market={metric.market} />
     </article>
   );
 }
@@ -118,9 +125,11 @@ function AiSnapshotItem({
 function SectorSnapshotItem({
   metric,
   language,
+  entry,
 }: {
   metric: SectorHeatMetric;
   language: Language;
+  entry?: RecapEntry;
 }) {
   const changeLabel = language === "zh" ? `（${metric.change}）` : `(${metric.change})`;
   return (
@@ -136,6 +145,7 @@ function SectorSnapshotItem({
       {metric.constituents && (
         <RepresentativeList constituents={metric.constituents} language={language} />
       )}
+      <RecapDetails entry={entry} language={language} market={metric.market} />
     </article>
   );
 }
@@ -337,6 +347,7 @@ export default function MarketSnapshot({
   sectorView,
   sectorPerformance,
   aiChainPerformance,
+  recap,
   drivers,
   aiUpdates,
   market,
@@ -355,6 +366,7 @@ export default function MarketSnapshot({
   const aiChain = aiChainPerformance?.filter(
     (metric) => metric.market === market,
   );
+  const recapByTarget = new Map(recap?.entries.map((entry) => [entry.target, entry]) ?? []);
   const marketEvidence: SnapshotEvidenceItem[] = drivers
     .filter((driver) => driver.role === "primary")
     .map((driver) => ({
@@ -407,12 +419,15 @@ export default function MarketSnapshot({
           ))}
         </div>
         <SnapshotEvidenceList
-          items={marketEvidence}
+          items={recap ? [] : marketEvidence}
           labels={labels}
           language={language}
           market={market}
-          emptyState={emptyMarketAttribution}
+          emptyState={recap ? undefined : emptyMarketAttribution}
         />
+        {recap && <div className="recap-market"><RecapDetails entry={recap.entries.find((entry) => entry.kind === "market")} language={language} market={market} />
+          {recap.socialStatus !== "consulted" && <p className="recap-pending">{recap.socialStatus === "unavailable" ? (language === "zh" ? "X 原文暂无法核实，未引用相关观点。" : "Original X posts could not be verified; related perspectives are unavailable.") : (language === "zh" ? "本期未发现可核实的相关 X 观点。" : "No relevant verified X perspectives were found for this session.")}</p>}
+        </div>}
       </section>
 
       {completeSectors ? (
@@ -426,11 +441,12 @@ export default function MarketSnapshot({
                 key={`${market}:${sector.symbol}`}
                 metric={sector}
                 language={language}
+                entry={recapByTarget.get(sector.symbol)}
               />
             ))}
           </div>
           <SnapshotEvidenceList
-            items={sectorEvidence}
+            items={recap ? [] : sectorEvidence}
             labels={labels}
             language={language}
             market={market}
@@ -488,11 +504,12 @@ export default function MarketSnapshot({
                 key={`${market}:${metric.layer}`}
                 metric={metric}
                 language={language}
+                entry={recapByTarget.get(metric.symbol)}
               />
             ))}
           </div>
           <SnapshotEvidenceList
-            items={aiEvidence}
+            items={recap ? [] : aiEvidence}
             labels={labels}
             language={language}
             market={market}

@@ -36,6 +36,8 @@ import {
   recoverPendingPublications,
 } from "../scripts/daily-workflow.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
+import { recapFixture } from "./complete-recap-fixture.mjs";
+import { validateCompleteRecap } from "../scripts/complete-recap.mjs";
 
 test("standalone publisher reaches recovery readback without a circular module deadlock", async () => {
   const fixture = await publicationFixture();
@@ -158,6 +160,92 @@ test("latest workflow alias retains evidence and can be checked independently", 
     JSON.parse(await readFile(resolve(projectDir, "work/artifacts/evidence-ledger.json"), "utf8")),
     JSON.parse(await readFile(resolve(fixture.manifestPath, "../artifacts/evidence-ledger.json"), "utf8")),
   );
+});
+
+async function completePublicationFixture() {
+  const fixture = await publicationFixture();
+  const f = recapFixture();
+  const recap = validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { requireComplete: true });
+  const manifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+  const report = JSON.parse(await readFile(fixture.reportPath, "utf8"));
+  const review = { market: "US", entries: recap.entries.map((entry) => ({ target: entry.target, verdict: "pass", scores: { factualAccuracy: 5, causality: 4, magnitude: 4, sourceIndependence: 5, readerUtility: 4 } })) };
+  report.recaps = { US: recap };
+  const reportText = JSON.stringify(report) + "\n";
+  manifest.reportHash = stableHash(reportText);
+  manifest.coverageRequired = true;
+  manifest.recapLedgerHash = stableHash(f.ledger);
+  manifest.tradingHash = stableHash(f.tradingData);
+  manifest.socialHash = stableHash(f.social);
+  manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
+  manifest.stages["recap-verification"] = { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(f.ledger) };
+  for (const [i, role, value] of [[0, "recap_writer", f.raw], [1, "recap_reviewer", review]]) {
+    const key = i === 0 ? manifest.recapApproval.writerStage : manifest.recapApproval.reviewerStage;
+    const run = { ...manifest.agentRuns[0], key, role, agentRunId: `recap-agent-${i}`, outputHash: stableHash(JSON.stringify(value) + "\n") };
+    manifest.agentRuns.push(run);
+    manifest.stages[key] = run;
+  }
+  const root = resolve(fixture.manifestPath, "../artifacts");
+  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
+  await writeFile(resolve(root, `${manifest.recapApproval.writerStage}.json`), JSON.stringify(f.raw) + "\n");
+  await writeFile(resolve(root, `${manifest.recapApproval.reviewerStage}.json`), JSON.stringify(review) + "\n");
+  await writeFile(fixture.reportPath, reportText);
+  await writeFile(fixture.manifestPath, JSON.stringify(manifest));
+  return { ...fixture, report, manifest, review, root };
+}
+
+test("comprehensive publication and readback include all sector explanations", async () => {
+  const fixture = await completePublicationFixture();
+  const input = JSON.parse(await readFile(fixture.inputPath, "utf8"));
+  const prepared = refreshInactiveAnalysis(validateReport(fixture.report, input, { requireResearchAudit: false, activeMarket: "US" }), null, "US");
+  const production = { ...JSON.parse(buildReportContent(input, prepared)), reportDate: input.reportDate, headline: prepared.headline, summary: prepared.summary, agentModel: "openai/codex-multi-agent" };
+  let writes = 0;
+  const result = await publishWorkflowReport(fixture, { comparisonRead: async () => null, execute: async () => { writes++; }, readback: async () => ({ report: production }) });
+  assert.equal(result.status, "published");
+  assert.equal(writes, 1);
+  assert.equal(production.recaps.US.entries.length, 20);
+  assert.equal((await verifyWorkflowReadback(fixture, { readback: async () => ({ report: production }) })).status, "published");
+  production.recaps.US.entries[0].magnitude += " altered";
+  await assert.rejects(verifyWorkflowReadback(fixture, { readback: async () => ({ report: production }), retryEqualMarketAsOfMismatch: true }), /不一致/);
+});
+
+test("the comprehensive latest alias retains exact independent writer and review artifacts", async () => {
+  const fixture = await completePublicationFixture();
+  const projectDir = await mkdtemp(resolve(tmpdir(), "stock-daily-complete-alias-"));
+  await persistWorkflowArtifacts(fixture, projectDir);
+  const result = await checkWorkflowArtifacts({ manifestPath: resolve(projectDir, "work/daily-workflow-manifest.json") });
+  assert.equal(result.status, "valid");
+});
+
+test("recap evidence, low review scores and rewritten reader claims stop before network writes", async () => {
+  for (const mutation of ["ledger", "review", "report", "trading"]) {
+    const f = await completePublicationFixture();
+    if (mutation === "ledger") await writeFile(resolve(f.root, "recap-ledger.json"), '{"sources":[]}');
+    if (mutation === "trading") await writeFile(resolve(f.root, "recap-trading-data.json"), '{"entries":[]}');
+    if (mutation === "review") {
+      f.review.entries[0].scores.magnitude = 3;
+      f.manifest.recapApproval.reviewHash = stableHash(f.review);
+      await writeFile(resolve(f.root, "recap-review.json"), JSON.stringify(f.review));
+    }
+    if (mutation === "report") {
+      f.report.recaps.US.entries[0].why += " another claim";
+      const reportText = JSON.stringify(f.report) + "\n";
+      f.manifest.reportHash = stableHash(reportText);
+      await writeFile(f.reportPath, reportText);
+    }
+    await writeFile(f.manifestPath, JSON.stringify(f.manifest));
+    let writes = 0;
+    await assert.rejects(publishWorkflowReport(f, { comparisonRead: async () => null, execute: async () => { writes++; } }), /哈希|审稿|不一致/);
+    assert.equal(writes, 0);
+  }
+});
+
+test("scheduled recovery excludes old reports without full coverage", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "stock-daily-old-recovery-"));
+  await publicationFixture(resolve(directory, "old-run"));
+  let writes = 0;
+  const result = await recoverPendingPublications(directory, { requireCompleteRecap: true, verify: async () => { writes++; }, publishApproved: async () => { writes++; } });
+  assert.deepEqual(result, []);
+  assert.equal(writes, 0);
 });
 
 test("published canonical content passes independent readback and an idempotent retry", async () => {

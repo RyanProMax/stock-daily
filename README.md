@@ -12,7 +12,7 @@
 - `/api/reports/:date` 返回指定日期完整日报
 - 首页使用单一日期入口切换期次，并通过归档列表回溯
 - 本地 SSR 与本地 API 直接读取线上只读数据，不创建本地 D1 或报告镜像
-- 本地多 Agent 每日主动检索并核实市场异动原因，只发布能够从原文定位的归因
+- 本地隔离研究固定覆盖大盘、11 个行业、8 个 AI 环节，核实方向、传导及涨跌幅受限或放大；所有目标通过证据和独立复核后才发布
 - 采集 CN/US 各 11 个一级行业、代表股和各 8 个 AI 产业链环节的收盘行情
 - 日报顶部按格子展示本周关键事件；只有兑现结果、同一官方来源和核验时间齐全时才标绿打勾
 - 市场状态显示明确的本地化收盘日期，历史日报不会把旧行情称为今天
@@ -73,7 +73,7 @@ npm run daily:check -- --manifest work/runs/RUN_KEY/manifest.json
 npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
 ```
 
-手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式的已审核成稿可写入，影子报告会被拒绝。当前验证证据及尚未通过的历史回放条件见 [验收记录](specs/verified-recap-workflow/acceptance.md)。
+手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式的已审核成稿可写入，影子报告会被拒绝。旧流程验证见 [历史验收记录](specs/verified-recap-workflow/acceptance.md)，完整板块复盘实跑与页面验收见 [完整复盘验收记录](specs/complete-sector-recap/acceptance.md)。
 
 手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
 指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`

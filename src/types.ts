@@ -317,6 +317,40 @@ export interface Story {
   signal?: PricingSignal;
 }
 
+export interface RecapSource {
+  id: string;
+  url: string;
+  label: string;
+  publishedAt: string;
+  verifiedAt: string;
+  kind?: "market_data";
+}
+
+export interface RecapEntry {
+  target: string;
+  kind: "market" | "sector" | "ai_layer";
+  status: "explained" | "partial" | "unresolved";
+  confidence: "high" | "medium" | "low";
+  why: string;
+  whyEn: string;
+  magnitude: string;
+  magnitudeEn: string;
+  invalidateIf: string;
+  invalidateIfEn: string;
+  sources: RecapSource[];
+  alternatives: Array<{ text: string; textEn: string; status: "supported" | "contradicted" | "unresolved"; sources: RecapSource[] }>;
+  opinions: Array<{ text: string; textEn: string; authorHandle: string; url: string; publishedAt: string; sources: RecapSource[] }>;
+}
+
+export interface CompleteRecap {
+  contractVersion?: string;
+  market: MarketRegion;
+  marketAsOf: string;
+  status: "complete" | "partial";
+  socialStatus: "consulted" | "no_relevant_posts" | "unavailable";
+  entries: RecapEntry[];
+}
+
 export interface DailyReport {
   contractVersion?: string;
   reportDate: string;
@@ -337,6 +371,7 @@ export interface DailyReport {
   aiChainPerformance?: AiChainMetric[];
   drivers?: MarketDriver[];
   aiChainUpdates?: AiChainUpdate[];
+  recaps?: Partial<Record<MarketRegion, CompleteRecap>>;
   stories: Story[];
   agentModel: string;
   isSample: boolean;

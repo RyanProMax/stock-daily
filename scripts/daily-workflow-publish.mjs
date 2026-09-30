@@ -5,16 +5,20 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   auditWorkflowManifest,
+  AGENT_FILESYSTEM_ISOLATION,
   hasCausalPassage,
   hasEarningsPerShareComparison,
   assertComparisonNotesInExcerpt,
   marketInputHash,
+  researchMarketEnvelope,
   stableHash,
   trimReaderSummary,
 } from "./daily-workflow-core.mjs";
 import { fetchComparisonReport } from "./daily-freshness.mjs";
 import { fetchFreshDailySnapshot } from "./daily-readback.mjs";
 import { marketAsOfFromInput } from "./daily-policy.mjs";
+import { validateCompleteRecap, validateRecapReview } from "./complete-recap.mjs";
+import { validateRecapTradingData } from "./recap-market-data.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -245,6 +249,7 @@ function marketSlice(report, market) {
     .filter(({ item }) => item.market === market)
     .map(({ index }) => index);
   return {
+    ...(report.recaps?.[market] ? { recap: report.recaps[market] } : {}),
     marketAsOf: report.marketAsOf?.[market],
     marketView: report.marketViews?.[market],
     aiChainView: report.aiChainViews?.[market],
@@ -392,6 +397,10 @@ export function refreshInactiveAnalysis(
     " ",
   );
   const report = structuredClone(preparedReport);
+  if (report.recaps || productionReport.recaps) report.recaps = {
+    ...(report.recaps?.[activeMarket] ? { [activeMarket]: report.recaps[activeMarket] } : {}),
+    ...(productionReport.recaps?.[inactiveMarket] ? { [inactiveMarket]: productionReport.recaps[inactiveMarket] } : {}),
+  };
   report.marketViews[inactiveMarket] = readerView(
     productionReport.marketViews[inactiveMarket],
   );
@@ -454,6 +463,10 @@ export function preserveInactiveStoredSlice(
     throw new Error(`生产报告缺少 ${inactiveMarket} 行情日期，禁止覆盖`);
   }
   const merged = structuredClone(candidateContent);
+  if (merged.recaps || productionReport.recaps) merged.recaps = {
+    ...(merged.recaps?.[activeMarket] ? { [activeMarket]: merged.recaps[activeMarket] } : {}),
+    ...(productionReport.recaps?.[inactiveMarket] ? { [inactiveMarket]: productionReport.recaps[inactiveMarket] } : {}),
+  };
   merged.marketAsOf[inactiveMarket] =
     productionReport.marketAsOf[inactiveMarket];
   merged.marketViews[inactiveMarket] =
@@ -502,7 +515,25 @@ export function preserveInactiveStoredSlice(
   return merged;
 }
 
-export async function auditWorkflowCausalEvidence({ manifest, report, manifestPath }) {
+export async function auditWorkflowCausalEvidence({ manifest, report, manifestPath, input }) {
+  if (manifest.coverageRequired) {
+    if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
+    const root = resolve(dirname(resolve(manifestPath)), "artifacts");
+    const [ledger, social, draft, review, tradingData] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
+    if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash) throw new Error("完整复盘证据、日线、原文或独立审稿哈希不一致");
+    validateRecapTradingData(tradingData, researchMarketEnvelope(input, manifest.market));
+    if (!Object.values(manifest.stages ?? {}).some((stage) => stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger))) throw new Error("完整复盘证据尚未通过原文验证");
+    for (const [role, field, expected] of [["recap_writer", "writerStage", draft], ["recap_reviewer", "reviewerStage", review]]) {
+      const key = manifest.recapApproval?.[field];
+      const stage = manifest.stages?.[key];
+      if (typeof key !== "string" || !/^[a-z0-9-]+$/u.test(key) || stage?.role !== role || stage.status !== "completed" || !(manifest.agentRuns ?? []).some((run) => run.key === key && run.agentRunId === stage.agentRunId && run.role === role && run.status === "completed" && run.filesystemIsolation === AGENT_FILESYSTEM_ISOLATION)) throw new Error("完整复盘缺少对应成稿的独立写作或审稿进程");
+      const text = await readFile(resolve(root, `${key}.json`), "utf8");
+      if (stableHash(text) !== stage.outputHash || stableHash(JSON.parse(text)) !== stableHash(expected)) throw new Error("完整复盘成稿或审稿与独立进程产物不一致");
+    }
+    const recap = validateCompleteRecap(draft, researchMarketEnvelope(input, manifest.market), ledger, social, { requireComplete: true, tradingData });
+    validateRecapReview(review, recap);
+    if (stableHash(recap) !== manifest.recapApproval?.recapHash || stableHash(report.recaps?.[manifest.market]) !== stableHash(recap)) throw new Error("发布复盘与已批准完整复盘不一致");
+  }
   const ledger = JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/evidence-ledger.json"), "utf8"));
   if (!Object.values(manifest.stages ?? {}).some((stage) =>
     stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger)
@@ -548,7 +579,7 @@ async function loadWorkflowArtifacts({ inputPath, reportPath, manifestPath }) {
   ) {
     throw new Error("发布输入与多 Agent 运行清单不一致");
   }
-  await auditWorkflowCausalEvidence({ manifest, report, manifestPath });
+  await auditWorkflowCausalEvidence({ manifest, report, manifestPath, input });
   return { input, report, manifest, reportText };
 }
 
@@ -827,6 +858,7 @@ export async function publishWorkflowReport(
     "overview",
     "marketViews",
     "aiChainViews",
+    "recaps",
     "updateKind",
     "marketAsOf",
     "marketSessions",

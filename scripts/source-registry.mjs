@@ -112,12 +112,17 @@ function hostnameMatches(hostname, domain) {
 
 export function verifiedExternalSourceType(source, platform = "web") {
   if (platform === "x") return "expert";
-  let hostname;
+  let hostname, pathname;
   try {
-    hostname = new URL(source).hostname.toLocaleLowerCase();
+    const url = new URL(source);
+    hostname = url.hostname.toLocaleLowerCase();
+    pathname = url.pathname.toLocaleLowerCase();
   } catch {
     return "expert";
   }
+  // Exchange-hosted editorial and syndicated releases are reporting, not an
+  // issuer/regulator's primary disclosure merely because of the host name.
+  if (hostnameMatches(hostname, "nasdaq.com") && /^\/(?:articles|press-release|news-and-insights)(?:\/|-|$)/u.test(pathname)) return "publisher";
   if (
     FIRST_PARTY_SOURCE_DOMAINS.some((domain) =>
       hostnameMatches(hostname, domain),

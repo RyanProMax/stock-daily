@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import {
@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   AGENT_FILESYSTEM_ISOLATION,
   WORKFLOW_VERSION,
@@ -23,6 +24,7 @@ import {
   auditWorkflowManifest,
   marketEnvelope,
   marketInputHash,
+  publicComparison,
   researchMarketEnvelope,
   mergeMarketReport,
   parseAgentEvents,
@@ -50,19 +52,41 @@ import {
   validateReport,
 } from "./daily-publish.mjs";
 import { publishableExternalSourceDomains } from "./source-registry.mjs";
+import { collectXIntelligence } from "./x-intelligence.mjs";
+import {
+  assessRecapEvidenceCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
+  validateRecapReview, verifySocialLeads,
+} from "./complete-recap.mjs";
+import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
 const TIMEOUT_RUNNER = resolve(PROJECT_DIR, "scripts/run-with-timeout.mjs");
 const DEFAULT_WORKFLOW_TIMEOUT_MS = 45 * 60 * 1_000;
 const DEFAULT_RESEARCH_BUDGET_MS = 20 * 60 * 1_000;
+const COMPLETE_RECAP_TIMEOUT_MS = 55 * 60 * 1_000;
+const COMPLETE_RECAP_RESEARCH_MS = 35 * 60 * 1_000;
 const DEFAULT_RESEARCH_TIMEOUT_MS = 5 * 60 * 1_000;
 const DEFAULT_STAGE_TIMEOUT_MS = 4 * 60 * 1_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 1_000;
 const AGENT_SANDBOX_ROOT = resolve(tmpdir(), "stock-daily-agent-sandboxes");
 const MACOS_SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+const CLI_FEATURES = new Map();
+const DISABLED_FEATURES = ["plugins", "remote_plugin", "recommended_plugins", "apps", "unbounded_connection_retries", "in_app_updates", "tui_app_server"];
+
+export function compatibleFeatureArgs(featureList) {
+  const supported = new Set(String(featureList).split(/\r?\n/u).map((line) => line.trim().split(/\s+/u)[0]));
+  return DISABLED_FEATURES.filter((feature) => supported.has(feature)).flatMap((feature) => ["--disable", feature]);
+}
+
+async function cliFeatureArgs(binary) {
+  if (!CLI_FEATURES.has(binary)) CLI_FEATURES.set(binary, promisify(execFile)(binary, ["features", "list"], { timeout: 10_000, maxBuffer: 128 * 1_024 }).then(({ stdout }) => compatibleFeatureArgs(stdout)));
+  return CLI_FEATURES.get(binary);
+}
 
 const STAGES = {
+  recap_writer: { prompt: "recap-writer.md", schema: "recap.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
+  recap_reviewer: { prompt: "recap-reviewer.md", schema: "recap-review.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   planner: {
     prompt: "planner.md",
     schema: "plan.schema.json",
@@ -172,6 +196,7 @@ async function readJson(path) {
 async function resolveCodexBinary() {
   const candidates = [
     process.env.STOCK_DAILY_CODEX_BIN,
+    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     "/opt/homebrew/bin/codex",
     "/usr/local/bin/codex",
@@ -207,10 +232,11 @@ export function assertFreshRepairQueries(planned, actual, label) {
 export function budgetedReviewerResearchFailures(
   researchFailures,
   searchQueryCount,
+  limit = 12,
 ) {
   const availableRepairs = Math.max(
     0,
-    Math.floor((12 - searchQueryCount) / 4),
+    Math.floor((limit - searchQueryCount) / 4),
   );
   return researchFailures.slice(0, availableRepairs);
 }
@@ -239,9 +265,10 @@ export function assertResearchBatchBudget(
   anomalies,
   stages = {},
   suffix = "",
+  limit = 12,
 ) {
   const required = pendingResearchQueryCost(anomalies, stages, suffix);
-  if (searchQueryCount + required > 12) {
+  if (searchQueryCount + required > limit) {
     throw new Error("剩余搜索预算不足以恢复全部待完成的并行研究");
   }
   return required;
@@ -254,9 +281,9 @@ export async function settleAgentResults(promises) {
   return results.map((result) => result.value);
 }
 
-export function researchRepairFitsBudget(repairRole, searchQueryCount) {
+export function researchRepairFitsBudget(repairRole, searchQueryCount, limit = 12) {
   const required = repairRole === "both" ? 4 : 2;
-  return searchQueryCount + required <= 12;
+  return searchQueryCount + required <= limit;
 }
 
 function looseSearchQueries(eventsText) {
@@ -837,16 +864,17 @@ export class MarketWorkflow {
     previousReport,
     codexBin,
     deliveryMode = "none",
+    completeRecap = false,
     batchMarkets = [market],
     workRoot = resolve(PROJECT_DIR, "work/runs"),
     now = () => new Date(),
     workflowTimeoutMs = Number(
       process.env.STOCK_DAILY_WORKFLOW_TIMEOUT_MS ??
-        DEFAULT_WORKFLOW_TIMEOUT_MS,
+        (completeRecap ? COMPLETE_RECAP_TIMEOUT_MS : DEFAULT_WORKFLOW_TIMEOUT_MS),
     ),
     researchBudgetMs = Number(
       process.env.STOCK_DAILY_RESEARCH_BUDGET_MS ??
-        DEFAULT_RESEARCH_BUDGET_MS,
+        (completeRecap ? COMPLETE_RECAP_RESEARCH_MS : DEFAULT_RESEARCH_BUDGET_MS),
     ),
     sourceVerifier = verifyResearchSources,
   }) {
@@ -858,12 +886,14 @@ export class MarketWorkflow {
       throw new Error(`Unknown workflow delivery mode: ${deliveryMode}`);
     }
     this.deliveryMode = deliveryMode;
+    this.completeRecap = completeRecap;
     this.batchMarkets = [...new Set(batchMarkets)].sort();
     this.now = now;
     this.envelope = researchMarketEnvelope(input, market);
+    this.searchQueryLimit = completeRecap ? 12 + 4 * recapTargets(this.envelope).length : 12;
     this.inputHash = marketInputHash(input, market);
     this.workRoot = workRoot;
-    this.baseRunKey = `${market}-${this.envelope.marketAsOf}-${this.inputHash.slice(0, 12)}-${deliveryMode}`;
+    this.baseRunKey = `${market}-${this.envelope.marketAsOf}-${this.inputHash.slice(0, 12)}-${deliveryMode}${completeRecap ? "-complete" : ""}`;
     this.runKey = this.baseRunKey;
     this.runDir = resolve(this.workRoot, this.runKey);
     this.manifestPath = resolve(this.runDir, "manifest.json");
@@ -905,7 +935,7 @@ export class MarketWorkflow {
   async selectNoClaimRetryAttempt() {
     const needsFreshResearch = (manifest) => manifest.status === "no_claims" || (
       manifest.status === "failed" &&
-      /搜索.*预算不足|研究已耗尽.*预算|四十五分钟硬停止/u.test(manifest.lastError ?? "")
+      /搜索.*预算不足|研究已耗尽.*预算|(?:四十五|五十五)分钟硬停止|整体预算耗尽|复盘(?:证据)?覆盖不完整/u.test(manifest.lastError ?? "")
     );
     if (!(await exists(this.manifestPath))) return;
     let baseManifest;
@@ -1028,6 +1058,7 @@ export class MarketWorkflow {
       marketInputHash: this.inputHash,
       runKey: this.runKey,
       deliveryMode: this.deliveryMode,
+      coverageRequired: this.completeRecap,
       batchRunId: this.input.runId,
       batchMarkets: this.batchMarkets,
       sourceAccess: availability,
@@ -1255,7 +1286,7 @@ export class MarketWorkflow {
     const consumed = this.budgetElapsed(priorSessions);
     const remaining = this.workflowTimeoutMs - consumed;
     if (remaining < 30_000) {
-      throw new Error("多 Agent 工作流已耗尽持久化的四十五分钟预算");
+      throw new Error(`多 Agent 工作流已耗尽持久化的${this.completeRecap ? "五十五" : "四十五"}分钟预算`);
     }
     const startedAt = this.now().toISOString();
     priorSessions.push({
@@ -1309,6 +1340,7 @@ export class MarketWorkflow {
     validate,
     promptSuffix = "",
     maxAttempts = 3,
+    withProvenance = false,
   }) {
     let lastError;
     const attempts = Array.from({ length: maxAttempts }, (_value, index) => index + 1)
@@ -1336,7 +1368,8 @@ export class MarketWorkflow {
             ? `${promptSuffix}\n\n# Deterministic validation repair\nThe previous isolated output was rejected for this exact reason: ${String(deterministicFeedback).slice(0, 600)}. Return a fresh result that fixes this defect without changing supported facts.\n`
             : promptSuffix,
         });
-        return await this.validateAgentStage(key, () => validate(run.output));
+        const output = await this.validateAgentStage(key, () => validate(run.output));
+        return withProvenance ? { output, key } : output;
       } catch (error) {
         lastError = error;
         deterministicFeedback =
@@ -1435,7 +1468,7 @@ export class MarketWorkflow {
     const consumed = this.budgetElapsed(sessions);
     const remaining = this.researchBudgetMs - consumed;
     if (remaining < 30_000) {
-      throw new Error("多 Agent 研究已耗尽持久化的二十分钟预算");
+      throw new Error(`多 Agent 研究已耗尽持久化的${this.completeRecap ? "三十五" : "二十"}分钟预算`);
     }
     const startedAt = this.now().toISOString();
     this.manifest.researchStartedAt ??= startedAt;
@@ -1486,6 +1519,7 @@ export class MarketWorkflow {
         market: this.market, marketAsOf: this.envelope.marketAsOf,
         session: this.envelope.session, sourceDomains: this.researchSourceDomains,
         ...(exclusions.length ? { excludedSources: exclusions } : {}), anomaly,
+        ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       };
       return ["facts", "causal"].map(async (role, index) => {
         const key = anomalyResearchStageKeys(anomaly, suffix)[index];
@@ -1493,7 +1527,7 @@ export class MarketWorkflow {
         if (await this.readAgentCheckpoint({ key, ...fingerprint })) reusable[key] = { status: "completed" };
       });
     }));
-    return assertResearchBatchBudget(this.searchQueryCount + this.reservedSearchQueryCount, anomalies, reusable, suffix);
+    return assertResearchBatchBudget(this.searchQueryCount + this.reservedSearchQueryCount, anomalies, reusable, suffix, this.searchQueryLimit);
   }
 
   async runAgent({
@@ -1513,8 +1547,8 @@ export class MarketWorkflow {
     const eventsPath = resolve(this.runDir, "events", `${key}.jsonl`);
     const checkpoint = await this.readAgentCheckpoint({ key, promptHash, schemaHash });
     if (checkpoint) return checkpoint;
-    if (definition.search && this.searchQueryCount + this.reservedSearchQueryCount + 2 > 12) {
-      throw new Error("单市场十二条搜索预算不足以启动新的两条查询");
+    if (definition.search && this.searchQueryCount + this.reservedSearchQueryCount + 2 > this.searchQueryLimit) {
+      throw new Error("单市场搜索预算不足以启动新的两条查询");
     }
     // Reserve after checking the real checkpoint fingerprint, not just its
     // completed flag: changed prompts or tampered files require fresh searches.
@@ -1524,12 +1558,13 @@ export class MarketWorkflow {
       const remaining = definition.search
         ? Math.min(this.remainingTime(), this.remainingResearchTime())
         : this.remainingTime();
-      if (remaining < 30_000) throw new Error("多 Agent 工作流达到四十五分钟硬停止");
-      const configured = definition.search
+      if (remaining < 30_000) throw new Error("多 Agent 工作流整体预算耗尽");
+      const featureArgs = await cliFeatureArgs(this.codexBin);
+      const configured = definition.timeoutMs ?? (definition.search
         ? DEFAULT_RESEARCH_TIMEOUT_MS
-        : DEFAULT_STAGE_TIMEOUT_MS;
+        : DEFAULT_STAGE_TIMEOUT_MS);
       const timeoutMs = Math.max(30_000, Math.min(configured, remaining - 10_000));
-      const idleTimeoutMs = Math.min(DEFAULT_IDLE_TIMEOUT_MS, timeoutMs);
+      const idleTimeoutMs = Math.min(definition.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS, timeoutMs);
       const agentRunId = randomUUID();
       const startedAt = this.now().toISOString();
       const sandboxDir = await mkdtemp(
@@ -1553,20 +1588,7 @@ export class MarketWorkflow {
       await this.saveManifest();
       progress(`${this.market} ${key} Agent started`);
       const codexArgs = [
-        "--disable",
-        "plugins",
-        "--disable",
-        "remote_plugin",
-        "--disable",
-        "recommended_plugins",
-        "--disable",
-        "apps",
-        "--disable",
-        "unbounded_connection_retries",
-        "--disable",
-        "in_app_updates",
-        "--disable",
-        "tui_app_server",
+        ...featureArgs,
         ...(definition.search ? ["--search"] : []),
         "exec",
         "--ephemeral",
@@ -1729,14 +1751,14 @@ export class MarketWorkflow {
       for (const query of events.queries) this.searchQueries.add(query);
       this.searchQueryCount += events.searchCount;
       this.manifest.searchQueryCount = this.searchQueryCount;
-      if (this.searchQueryCount > 12) {
+      if (this.searchQueryCount > this.searchQueryLimit) {
         this.manifest.stages[key] = {
           ...this.manifest.stages[key],
           status: "failed",
           error: `search_budget_exceeded:${this.searchQueryCount}`,
         };
         await this.saveManifest();
-        throw new Error(`单市场搜索超过十二条：${this.searchQueryCount}`);
+        throw new Error(`单市场搜索超过预算 ${this.searchQueryLimit}：${this.searchQueryCount}`);
       }
       await this.saveManifest();
       await rm(sandboxDir, { recursive: true, force: true });
@@ -1869,6 +1891,7 @@ export class MarketWorkflow {
       sourceDomains: this.researchSourceDomains,
       ...(exclusions.length ? { excludedSources: exclusions } : {}),
       anomaly,
+      ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
     };
     const researchKeys = anomalyResearchStageKeys(anomaly, suffix);
     const previouslyConsumedQueries = this.consumedQueriesBefore(researchKeys);
@@ -1993,7 +2016,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v9",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v10",
       researchOutputs,
     });
     const key = `evidence-verification-${inputHash.slice(0, 8)}`;
@@ -2039,10 +2062,10 @@ export class MarketWorkflow {
     progress(`${this.market} evidence verification started`);
     const remainingMs = this.remainingTime();
     if (remainingMs <= 0) {
-      throw new Error("多 Agent 工作流达到四十五分钟硬停止");
+      throw new Error(`多 Agent 工作流达到${this.completeRecap ? "五十五" : "四十五"}分钟硬停止`);
     }
     const controller = new AbortController();
-    const timeoutError = new Error("多 Agent 工作流达到四十五分钟硬停止");
+    const timeoutError = new Error(`多 Agent 工作流达到${this.completeRecap ? "五十五" : "四十五"}分钟硬停止`);
     let timeoutId;
     const hardStop = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -2438,6 +2461,7 @@ export class MarketWorkflow {
     const budgetedResearchFailures = budgetedReviewerResearchFailures(
       researchFailures,
       this.searchQueryCount,
+      this.searchQueryLimit,
     );
     const budgetedClaimIds = new Set(
       budgetedResearchFailures.map((item) => item.claimId),
@@ -2518,7 +2542,7 @@ export class MarketWorkflow {
         const stage = this.manifest.stages[key];
         if (stage?.status !== "invalid" || !/queries.*(?:交易日|市场标记|市场或跨市场标记)/u.test(stage.error ?? "")) continue;
         try {
-          const payload = { market: this.market, marketAsOf: this.envelope.marketAsOf, session: this.envelope.session, sourceDomains: this.researchSourceDomains, ...(this.excludedSources.length ? { excludedSources: this.excludedSources } : {}), anomaly };
+          const payload = { market: this.market, marketAsOf: this.envelope.marketAsOf, session: this.envelope.session, sourceDomains: this.researchSourceDomains, ...(this.excludedSources.length ? { excludedSources: this.excludedSources } : {}), anomaly, ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}) };
           const fingerprint = await agentStageFingerprint(role, payload, this.researchPromptSuffix(anomaly, role));
           if (stage.promptHash !== fingerprint.promptHash || stage.schemaHash !== fingerprint.schemaHash) continue;
           const [outputText, eventsText] = await Promise.all([
@@ -2553,6 +2577,7 @@ export class MarketWorkflow {
     const envelopePath = resolve(this.runDir, "artifacts/market-envelope.json");
     await atomicJson(envelopePath, this.envelope);
     const plan = await this.marketPlan();
+    const completeRecap = this.completeRecap ? await this.runCompleteRecap() : null;
     await this.revalidateResearchQueryCheckpoints(plan);
 
     let selected = plan.anomalies.slice(0, 2);
@@ -2594,7 +2619,7 @@ export class MarketWorkflow {
         )
       ) {
         if (repair) {
-          if (!researchRepairFitsBudget(repair.repairRole, this.searchQueryCount)) {
+          if (!researchRepairFitsBudget(repair.repairRole, this.searchQueryCount, this.searchQueryLimit)) {
             repair = null;
           }
         }
@@ -2635,7 +2660,7 @@ export class MarketWorkflow {
     if (
       adjudication.claimCards.length === 0 &&
       plan.anomalies[2] &&
-      this.searchQueryCount <= 8
+      this.searchQueryCount <= this.searchQueryLimit - 4
     ) {
       selected = [...selected, plan.anomalies[2]];
       researchOutputs = [
@@ -2752,6 +2777,7 @@ export class MarketWorkflow {
       await this.translateDraft(cards, draft),
     );
     const { report, translation } = finalReport;
+    if (completeRecap) report.recaps = { ...this.previousReport?.recaps, [this.market]: completeRecap };
     await atomicJson(resolve(this.runDir, "artifacts/translation.json"), translation);
     const reportPath = resolve(this.runDir, "artifacts/daily-report.json");
     const reportText = `${JSON.stringify(report, null, 2)}\n`;
@@ -2778,6 +2804,73 @@ export class MarketWorkflow {
       agentRunCount: this.manifest.agentRuns.length,
       verifiedSourceCount: ledger.sources.length,
     };
+  }
+
+  async runCompleteRecap() {
+    const socialPath = resolve(this.runDir, "artifacts/social-ledger.json");
+    let social;
+    if (await exists(socialPath)) {
+      const stored = await readJson(socialPath);
+      if (this.manifest.socialHash === stableHash(stored)) social = stored;
+    }
+    if (!social) {
+      const registry = await readJson(resolve(PROJECT_DIR, "data/ai-x-sources.json"));
+      social = verifySocialLeads(
+        await collectXIntelligence(Date.parse(this.envelope.session.wrapDeadline)),
+        registry, this.envelope,
+      );
+      await atomicJson(socialPath, social);
+      this.manifest.socialHash = stableHash(social);
+      await this.saveManifest();
+    }
+    this.socialLeads = social;
+    const tradingPath = resolve(this.runDir, "artifacts/recap-trading-data.json");
+    let tradingData;
+    if (await exists(tradingPath)) {
+      const stored = await readJson(tradingPath);
+      if (this.manifest.tradingHash === stableHash(stored)) tradingData = validateRecapTradingData(stored, this.envelope);
+    }
+    if (!tradingData) {
+      tradingData = await collectRecapTradingData(this.envelope);
+      await atomicJson(tradingPath, tradingData);
+      this.manifest.tradingHash = stableHash(tradingData);
+      await this.saveManifest();
+    }
+    const plan = completeRecapPlan(this.envelope, tradingData);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-plan.json"), plan);
+    const observations = recapObservations(this.envelope, tradingData);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-observations.json"), observations);
+    await this.revalidateResearchQueryCheckpoints(plan);
+    const outputs = [];
+    // Four targets at a time: each has independent facts/causal processes.
+    // A failed sibling must settle before this market can report failure.
+    for (let i = 0; i < plan.anomalies.length; i += 4) {
+      const batch = plan.anomalies.slice(i, i + 4);
+      await this.assertResearchCapacity(batch);
+      outputs.push(...(await settleAgentResults(batch.map((anomaly) => this.researchAnomaly(anomaly)))).flat());
+    }
+    const ledger = await this.verifyEvidence(outputs);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
+    this.manifest.recapLedgerHash = stableHash(ledger);
+    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
+    this.manifest.recapCoverage = coverage;
+    await this.saveManifest();
+    if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
+    const financialComparisons = ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length);
+    const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social };
+    const recapOptions = { tradingData };
+    const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "social-ledger.json", "recap-trading-data.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
+    await atomicJson(resolve(this.runDir, "artifacts/recap-draft.json"), writer.output);
+    const recap = validateCompleteRecap(writer.output, this.envelope, ledger, social, recapOptions);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-normalized.json"), recap);
+    const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "social-ledger.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
+    const review = reviewer.output;
+    await atomicJson(resolve(this.runDir, "artifacts/recap-review.json"), review);
+    this.manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(writer.output), reviewHash: stableHash(review), writerStage: writer.key, reviewerStage: reviewer.key, status: recap.status };
+    await this.saveManifest();
+    validateCompleteRecap(writer.output, this.envelope, ledger, social, { ...recapOptions, requireComplete: true });
+    return recap;
   }
 }
 
@@ -3081,12 +3174,13 @@ export async function recoverPendingPublications(
     finalize = finalizeWorkflowIngestion,
     retire = failWorkflowIngestion,
     manifestPaths = null,
+    requireCompleteRecap = false,
   } = {},
 ) {
   const recovered = [];
   const selectedPaths = manifestPaths ? new Set(manifestPaths.map((path) => resolve(path))) : null;
   const pendingItems = (await pendingPublicationManifests(workRoot))
-    .filter((item) => !selectedPaths || selectedPaths.has(item.manifestPath));
+    .filter((item) => (!selectedPaths || selectedPaths.has(item.manifestPath)) && (!requireCompleteRecap || item.manifest.coverageRequired === true));
   const publicationRecords = await publicationManifestRecords(workRoot);
   const blockedSessions = new Set();
   for (let index = 0; index < pendingItems.length; index += 1) {
@@ -3362,6 +3456,10 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
       resolve(artifactsDir, name),
     );
   }
+  const manifest = await readJson(result.manifestPath);
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+    await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
+  }
   await writeFile(
     resolve(projectDir, "work/daily-report.json"),
     await readFile(result.reportPath, "utf8"),
@@ -3370,7 +3468,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
   // Publish the latest-run alias only once both its review and evidence exist.
   await atomicJson(
     resolve(projectDir, "work/daily-workflow-manifest.json"),
-    await readJson(result.manifestPath),
+    manifest,
   );
 }
 
@@ -3387,7 +3485,7 @@ export async function runDailyWorkflow({
 } = {}) {
   const input = validateInput(await readJson(resolve(inputPath)));
   const recoveries = publish && !shadow
-    ? await recoverPendingPublications(workRoot)
+    ? await recoverPendingPublications(workRoot, { requireCompleteRecap: true })
     : [];
   let previousReport = reportAtOrBeforeDate(
     await fetchComparisonReport(input, baseUrl),
@@ -3463,6 +3561,7 @@ export async function runDailyWorkflow({
       previousReport,
       codexBin: binary,
       deliveryMode,
+      completeRecap: true,
       batchMarkets: markets,
       workRoot,
     });

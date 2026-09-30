@@ -97,5 +97,35 @@
     "layers": ["chips", "memory", "servers", "interconnect", "data_center", "cloud", "applications", "robotics"],
     "identityEvidence": "https://x.com/xiaomustock",
     "canonicalDomains": []
+  },
+  {
+    "handle": "LizAnnSonders",
+    "label": "Liz Ann Sonders",
+    "authority": "expert",
+    "markets": ["CN", "US"],
+    "layers": [],
+    "identityEvidence": "https://advisorservices.schwab.com/story/jobs-data-fed-patience-ais-next-market-shock",
+    "canonicalDomains": ["schwab.com"],
+    "coverage": ["macro", "sector", "rates", "breadth"]
+  },
+  {
+    "handle": "SteveSosnick",
+    "label": "Steve Sosnick",
+    "authority": "expert",
+    "markets": ["CN", "US"],
+    "layers": [],
+    "identityEvidence": "https://www.interactivebrokers.com/campus/?p=99354",
+    "canonicalDomains": ["interactivebrokers.com"],
+    "coverage": ["macro", "sector", "rates", "breadth"]
+  },
+  {
+    "handle": "KevRGordon",
+    "label": "Kevin Gordon",
+    "authority": "expert",
+    "markets": ["CN", "US"],
+    "layers": [],
+    "identityEvidence": "https://advisorservices.schwab.com/story/mixed-signals-moving-targets",
+    "canonicalDomains": ["schwab.com"],
+    "coverage": ["macro", "sector", "rates", "breadth"]
   }
 ]

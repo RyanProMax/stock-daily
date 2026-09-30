@@ -82,9 +82,9 @@ test("daily scheduler delegates to isolated ephemeral market agents", async () =
   );
   assert.match(workflow, /DEFAULT_RESEARCH_BUDGET_MS = 20 \* 60/);
   assert.match(workflow, /DEFAULT_WORKFLOW_TIMEOUT_MS = 45 \* 60/);
-  assert.match(workflow, /this\.searchQueryCount > 12/);
+  assert.match(workflow, /this\.searchQueryCount > this\.searchQueryLimit/);
   assert.match(scheduler, /freshness_status != 0 && freshness_status != 10/);
-  assert.match(scheduler, /--timeout-ms 5700000/);
+  assert.match(scheduler, /--timeout-ms 6900000/);
   assert.doesNotMatch(scheduler, /const handled = item\.status === "no_claims"/);
   assert.match(scheduler, /result\.status === "pending_no_claims"/);
   assert.match(scheduler, /last-handled-market-as-of\.json/);

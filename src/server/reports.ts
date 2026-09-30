@@ -737,6 +737,7 @@ function parseDailyRow(row: DailyRow): DailyReport {
     aiChainViews: content.aiChainViews,
     drivers: content.drivers ?? [],
     aiChainUpdates: content.aiChainUpdates ?? [],
+    recaps: content.recaps,
     stories: content.stories ?? [],
     isSample: content.isSample ?? false,
     translations: content.translations,

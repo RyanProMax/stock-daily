@@ -2871,10 +2871,10 @@ test("query checkpoint recovery verifies artifacts and preserves consumed search
   assert.equal((await workflow.runAgent(invocation)).resumed, true);
   workflow.manifest.stages[key].promptHash = "obsolete-prompt";
   workflow.searchQueryCount = 11;
-  await assert.rejects(workflow.runAgent(invocation), /十二条搜索预算/);
+  await assert.rejects(workflow.runAgent(invocation), /搜索预算不足/);
   workflow.searchQueryCount = 10;
   workflow.reservedSearchQueryCount = 2;
-  await assert.rejects(workflow.runAgent(invocation), /十二条搜索预算/);
+  await assert.rejects(workflow.runAgent(invocation), /搜索预算不足/);
   assert.equal(workflow.reservedSearchQueryCount, 2);
   workflow.reservedSearchQueryCount = 0;
   workflow.searchQueryCount = 8;

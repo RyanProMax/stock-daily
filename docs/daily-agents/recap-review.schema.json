@@ -1,0 +1,90 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "market",
+    "entries"
+  ],
+  "properties": {
+    "market": {
+      "type": "string",
+      "enum": [
+        "CN",
+        "US"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "verdict",
+          "scores",
+          "reason"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "revise"
+            ]
+          },
+          "scores": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "factualAccuracy",
+              "causality",
+              "magnitude",
+              "sourceIndependence",
+              "readerUtility"
+            ],
+            "properties": {
+              "factualAccuracy": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "causality": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "magnitude": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "sourceIndependence": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "readerUtility": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              }
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 1000
+          }
+        }
+      },
+      "maxItems": 20,
+      "minItems": 20
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

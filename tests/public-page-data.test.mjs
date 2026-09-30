@@ -9,6 +9,8 @@ import {
   validateReport,
 } from "../scripts/daily-publish.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
+import { recapFixture } from "./complete-recap-fixture.mjs";
+import { validateCompleteRecap } from "../scripts/complete-recap.mjs";
 
 let vite;
 
@@ -48,6 +50,8 @@ test("daily HTML and hydration data exclude internal attribution fields", async 
   report.translations.en.aiChainUpdates[0].implication = "INTERNAL AI COPY";
   report.translations.en.aiChainViews.CN.mechanism = "INTERNAL VIEW COPY";
   report.researchAudit = { internalCopy };
+  const recapInput = recapFixture();
+  report.recaps = { US: validateCompleteRecap(recapInput.raw, recapInput.envelope, recapInput.ledger, recapInput.social) };
 
   const data = {
     kind: "daily",
@@ -66,6 +70,11 @@ test("daily HTML and hydration data exclude internal attribution fields", async 
   assert.equal(Object.hasOwn(readerData.report, "agentModel"), false);
   assert.equal(Object.hasOwn(readerData.report, "contractVersion"), false);
   assert.equal(Object.hasOwn(readerData.report, "researchAudit"), false);
+  assert.equal(Object.hasOwn(readerData.report.recaps.US, "contractVersion"), false);
+  assert.equal(readerData.report.recaps.US.entries.length, 20);
+  const { getDailyReport } = await vite.ssrLoadModule("/src/server/reports.ts");
+  const parsed = await getDailyReport({ prepare: () => ({ first: async () => ({ ...report, content: JSON.stringify(report) }) }) });
+  assert.deepEqual(parsed.recaps, report.recaps);
   assert.equal(Object.hasOwn(readerData.report.drivers[0], "mechanism"), false);
   assert.equal(
     Object.hasOwn(readerData.report.aiChainUpdates[0], "implication"),
@@ -85,6 +94,6 @@ test("daily HTML and hydration data exclude internal attribution fields", async 
     html,
     /该来源|不能据此|INTERNAL (?:DRIVER|AI|VIEW) COPY|openai\/codex-scheduled|researchAudit|contractVersion/,
   );
-  assert.match(html, /snapshot-causal-summary/);
+  assert.match(html, /recap-content/);
   assert.match(html, /stock-daily-data/);
 });

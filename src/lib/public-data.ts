@@ -56,6 +56,11 @@ export function publicDailyReport(report: DailyReport): DailyReport {
 
   return {
     ...readerFields,
+    recaps: report.recaps ? Object.fromEntries(Object.entries(report.recaps).map(([market, recap]) => {
+      if (!recap) return [market, recap];
+      const { contractVersion: _version, ...fields } = recap;
+      return [market, fields];
+    })) : undefined,
     aiChainViews: report.aiChainViews
       ? Object.fromEntries(
           Object.entries(report.aiChainViews).map(([market, view]) => {

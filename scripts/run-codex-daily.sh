@@ -31,9 +31,12 @@ export PATH="${node_bin_dir}:${BASE_PATH}"
 
 codex_bin="${STOCK_DAILY_CODEX_BIN:-}"
 if [[ -z "${codex_bin}" ]]; then
-  bundled_codex="/Applications/ChatGPT.app/Contents/Resources/codex"
+  bundled_codex="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+  legacy_bundled_codex="/Applications/ChatGPT.app/Contents/Resources/codex"
   if [[ -x "${bundled_codex}" ]]; then
     codex_bin="${bundled_codex}"
+  elif [[ -x "${legacy_bundled_codex}" ]]; then
+    codex_bin="${legacy_bundled_codex}"
   else
     codex_bin="$(command -v codex 2>/dev/null || true)"
   fi
@@ -163,7 +166,7 @@ fi
   fi
   /bin/rm -f "${RESULT_FILE}"
   node "${TIMEOUT_RUNNER}" \
-    --timeout-ms 5700000 \
+    --timeout-ms 6900000 \
     --idle-timeout-ms 900000 \
     -- node scripts/daily-workflow.mjs "${workflow_args[@]}" > "${RESULT_FILE}"
   /bin/cat "${RESULT_FILE}"

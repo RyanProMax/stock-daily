@@ -63,7 +63,7 @@ function text(value, label, min = 1, max = 2_000) {
   return result;
 }
 
-function readerText(value, label, min, max) {
+export function readerText(value, label, min, max) {
   const result = text(value, label, min, max);
   if (/\uFFFD/u.test(result)) throw new Error(`${label} 包含乱码替代字符`);
   if (INTERNAL_COPY.test(result) || AUDIT_COPY.test(result)) {
@@ -807,13 +807,15 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
   const queries = stringArray(result.queries, `${role}.queries`, 2, 2);
   const metric = anomalyMetric(envelope, anomaly.kind, anomaly.target);
   if (!metric) throw new Error(`${role} 研究目标不在确定性市场输入中`);
-  const companyNames = [
+  const knownCompanies = [
     ...(anomaly.kind === "company" ? [metric] : []),
     ...(metric.constituents ?? []),
     ...eligibleCrossMarketLeads(envelope)
       .filter((lead) => metric.layer && lead.layer === metric.layer)
       .flatMap((lead) => lead.representativeMoves),
-  ].flatMap((item) => [item.name, item.nameEn]).filter((name) => typeof name === "string" && name.length >= 3);
+  ];
+  const companyNames = knownCompanies.flatMap((item) => [item.name, item.nameEn]).filter((name) => typeof name === "string" && name.length >= 3);
+  const companyTickers = envelope.market === "US" ? knownCompanies.map(item => item.symbol).filter(symbol => typeof symbol === "string" && /^[A-Z]{1,6}(?:[.-][A-Z])?$/u.test(symbol)) : [];
   const namesCompany = (query) => companyNames.some((name) => query.toLocaleLowerCase().includes(name.toLocaleLowerCase()));
   if (!targetedRepair) assertPlanQueries(
     queries.slice(0, 1),
@@ -825,10 +827,13 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
   );
   for (const queryIndex of targetedRepair ? [0, 1] : [1]) {
     const query = queries[queryIndex];
-    const namesKnownCompany = namesCompany(query);
+    const namesKnownCompany = namesCompany(query) || companyTickers.some(symbol => new RegExp(`\\b${symbol.replaceAll(".", "\\.")}\\b`, "u").test(query));
+    // A verified US sector ETF is itself an explicit market identifier.
+    // Custom AI basket/series codes must still retain a market name.
+    const namesUsSectorEtf = envelope.market === "US" && anomaly.kind === "sector" && /^XL(?:[A-Z]|RE)$/u.test(anomaly.target) && new RegExp(`\\b${anomaly.target}\\b`, "iu").test(query);
     if (
       !/(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年\d{1,2}月\d{1,2}日|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?[,\s]+20\d{2})/iu.test(query) ||
-      (!/\b(?:CN|US|U\.S\.|Wall Street|Dow Jones|DJI|SPX|IXIC|Nasdaq|S&P|Treasury)\b|A股|中国|美股|上证|沪深|科创|创业板/iu.test(query) && !namesKnownCompany)
+      (!/\b(?:CN|US|U\.S\.|Wall Street|Dow Jones|DJI|SPX|IXIC|Nasdaq|S&P|Treasury)\b|A股|中国|美股|上证|沪深|科创|创业板/iu.test(query) && !namesKnownCompany && !namesUsSectorEtf)
     ) {
       throw new Error(
         `${role}.queries[${queryIndex}] 必须保留明确的交易日和所研究市场或跨市场标记`,
@@ -1150,7 +1155,7 @@ function numericMentions(value) {
   }));
 }
 
-function assertFactsNumbersInExcerpt(source) {
+export function assertFactsNumbersInExcerpt(source) {
   const excerptMentions = numericMentions(source.supportingExcerpt);
   const factCopy = [source.facts, ...(source.comparisons ?? []).map((item) => item.note ?? "")].join(" ");
   const missing = numericMentions(factCopy).filter(
@@ -2013,7 +2018,7 @@ function claimMap(cards) {
   return new Map(cards.map((item) => [item.id, item]));
 }
 
-function assertFinancialCopyIncludesMetrics(copy, claim, label) {
+export function assertFinancialCopyIncludesMetrics(copy, claim, label) {
   const claimRequiresComparisons = requiresFinancialComparisons(
     `${claim.title} ${claim.factSummary} ${claim.causalStatement ?? ""}`,
   );
@@ -2050,7 +2055,7 @@ function numericValueSet(value) {
   );
 }
 
-function assertNumbersGrounded(copy, grounding, label) {
+export function assertNumbersGrounded(copy, grounding, label) {
   const allowed = numericValueSet(grounding);
   for (const value of numericValueSet(copy)) {
     if (!allowed.has(value)) {
@@ -2802,7 +2807,7 @@ export function auditWorkflowManifest(manifest, reportText) {
   ) {
     throw new Error("Agent 隔离或完成记录无效");
   }
-  const reviewerRuns = value.agentRuns.filter((item) => item.role === "reviewer");
+  const reviewerRuns = value.agentRuns.filter((item) => ["reviewer", "recap_reviewer"].includes(item.role));
   if (
     reviewerRuns.some((item) =>
       (item.inputArtifacts ?? []).some((path) => /events|prompt/iu.test(path)),

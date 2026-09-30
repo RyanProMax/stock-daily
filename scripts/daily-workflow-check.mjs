@@ -56,7 +56,7 @@ export async function checkWorkflowArtifacts({
   ) {
     throw new Error("检查输入与多 Agent 运行清单不一致");
   }
-  await auditWorkflowCausalEvidence({ manifest, report, manifestPath: resolvedManifestPath });
+  await auditWorkflowCausalEvidence({ manifest, report, manifestPath: resolvedManifestPath, input });
   const validatedReport = validateReport(report, input, {
     requireResearchAudit: false,
     activeMarket: manifest.market,

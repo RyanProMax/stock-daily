@@ -108,7 +108,10 @@ function aiRows(asOf) {
         direction: direction(change),
         asOf,
         source: `https://quotes.example.com/ai/${market}/${layer}`,
-        constituents: constituents(market, `ai-${layer}`, asOf),
+        constituents: constituents(market, `ai-${layer}`, asOf).map(item => {
+          const constituentChange = Number(item.change.slice(0, -1)) + change - 0.25;
+          return { ...item, change: changeText(constituentChange), direction: direction(constituentChange) };
+        }),
       };
     }),
   );

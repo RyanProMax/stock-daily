@@ -38,15 +38,23 @@ CONCRETE_FACT_PATTERN = re.compile(
     r"introduc(?:e|ed|es|ing)|ship(?:ped|s|ping)?|deliver(?:ed|y|ies)|available|"
     r"availability|capacity|production|price|pricing|revenue|earnings|profit|guidance|"
     r"sales|demand|supply|inventory|benchmark|throughput|latency|bandwidth|yield|"
-    r"investment|funding|acquisition|partnership|roadmap|forecast|estimate)\b|"
+    r"investment|funding|acquisition|partnership|roadmap|forecast|estimate|"
+    r"inflation|employment|payrolls|tariffs|treasury|bonds|credit|breadth|"
+    r"positioning|options|volatility|valuation|interest rates)\b|"
     r"订单|合同|协议|客户|发布|推出|交付|出货|量产|产能|产量|价格|报价|营收|"
     r"收入|利润|业绩|指引|销量|需求|供应|库存|带宽|时延|良率|投资|融资|收购|"
-    r"合作|路线图|预测|统计",
+    r"合作|路线图|预测|统计|通胀|就业|关税|国债|债券|信用|市场广度|期权|波动率|估值|利率",
     re.IGNORECASE,
 )
 NUMERIC_FACT_PATTERN = re.compile(
     r"(?:\$|¥|￥)?\d+(?:\.\d+)?(?:\s?%|\s?(?:billion|million|trillion|"
     r"gb|tb|pb|mw|gw|nm|bps?|亿美元|亿元|万元|万台|亿颗|万颗))",
+    re.IGNORECASE,
+)
+CAUSAL_THESIS_PATTERN = re.compile(
+    r"\b(?:because|due to|pricing|valuation|margin|cash flow|inventory|backlog|"
+    r"bottleneck|supply constraint|demand growth|discount rate)\b|"
+    r"由于|因为|估值|利润率|现金流|库存|订单积压|供给瓶颈|需求增长|贴现率|传导",
     re.IGNORECASE,
 )
 
@@ -217,7 +225,12 @@ def is_selected_post(text: str, authority: str) -> bool:
     ):
         return False
     if authority == "expert":
-        return has_concrete_fact and has_numeric_fact and not VAGUE_OPINION_PATTERN.search(normalized)
+        # A specific mechanism can be useful without a number. It remains an
+        # attributed opinion until the report corroborates its factual premise.
+        return has_concrete_fact and (
+            (has_numeric_fact and not VAGUE_OPINION_PATTERN.search(normalized))
+            or bool(CAUSAL_THESIS_PATTERN.search(normalized))
+        ) and not PROMOTION_PATTERN.search(normalized)
     return has_concrete_fact or has_numeric_fact
 
 

@@ -2072,6 +2072,7 @@ export function validateReport(
     aiChainUpdates,
     translations,
     ...(workflowOverview ? { workflowOverview } : {}),
+    ...(report.recaps ? { recaps: report.recaps } : {}),
     ...(researchAudit ? { researchAudit } : {}),
   };
 }
@@ -2297,6 +2298,7 @@ export function buildReportContent(input, report) {
     stories: [],
     translations,
     isSample: false,
+    ...(report.recaps ? { recaps: report.recaps } : {}),
   });
 }
 
