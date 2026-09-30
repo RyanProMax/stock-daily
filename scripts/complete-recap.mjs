@@ -99,7 +99,7 @@ export function completeRecapPlan(envelope, tradingData = null) {
       const companyNames = movers.map(item => envelope.market === "CN" ? item.name : item.nameEn ?? item.name).join(" ");
       const targetNames = `${name}${companyNames ? ` ${companyNames}` : ""}`;
       return {
-        id, kind: metric.kind, target: metric.symbol,
+        id, kind: metric.kind, target: metric.symbol, researchPurpose: "comprehensive_recap",
         observation: metric,
         quantitativeObservations: observations.get(metric.symbol),
         title: name, observedMove: `${name} ${metric.change}`,
@@ -167,7 +167,7 @@ export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = nu
   const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
   const entries = completeRecapPlan(envelope).anomalies.map(anomaly => {
     const sources = ledger.sources.filter(source => source.anomalyId === anomaly.id && source.targets.includes(anomaly.target));
-    const facts = sources.filter(source => source.role === "facts" && source.sourceType === "first_party");
+    const facts = sources.filter(source => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background");
     const causal = sources.filter(source => source.role === "causal" && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
     const magnitude = causal.filter(source => SIZE_EVIDENCE.test(source.supportingExcerpt));
     const measured = observations.get(anomaly.target).magnitudeEvidence;
@@ -203,7 +203,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const causal = cause.filter((source) => source.anomalyId === anomaly.id && source.role === "causal" && source.targets.includes(target.symbol) && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
     if (raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
     if (raw.status === "explained") {
-      if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
+      if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
       if (!size.some((source) => source.anomalyId === anomaly.id && source.role === "causal" && SIZE_EVIDENCE.test(source.supportingExcerpt)) && !hasMeasuredMagnitude(measured, measurementIds)) throw new Error(`${target.symbol} 缺少成交、振幅、分化或相反力量的直接证据或完整幅度观测`);
       if (raw.confidence === "low") throw new Error(`${target.symbol} 低置信归因不能视为完成`);
       if (raw.confidence === "high") {

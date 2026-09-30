@@ -5,9 +5,9 @@ import {
   verifiedExternalSourceLabel,
   verifiedExternalSourceType,
 } from "./source-registry.mjs";
-import { isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
+import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v30";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v31";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -892,11 +892,11 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
         originalUrl: url,
         sourceLabel: text(source.sourceLabel, `${role}.sourceLabel`, 2, 80),
         title: text(source.title, `${role}.title`, 4, 220),
-        publishedAt: isCalendarDate(source.publishedAt) && role === "facts" && source.kind === "official" && verifiedExternalSourceType(url) === "first_party"
+        publishedAt: isCalendarDate(source.publishedAt) && role === "facts" && ["official", "background"].includes(source.kind) && verifiedExternalSourceType(url) === "first_party"
           ? source.publishedAt : dateTime(source.publishedAt, `${role}.publishedAt`),
         kind: enumValue(
           source.kind,
-          ["official", "event", "market_wrap"],
+          ["official", "event", "market_wrap", ...(anomaly.researchPurpose === "comprehensive_recap" ? ["background"] : [])],
           `${role}.kind`,
         ),
         supportingExcerpt: text(
@@ -930,6 +930,7 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
         role,
         anomalyId: anomaly.id,
       };
+      if (candidate.kind === "background" && (role !== "facts" || verifiedExternalSourceType(url) !== "first_party" || comparisons.length)) throw new Error("背景机制只能来自一手披露，不能产出本期财务对比或价格因果结论");
       if (
         (role === "causal" && !candidate.causalConnection) ||
         (role === "facts" && candidate.causalConnection)
@@ -1027,6 +1028,7 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
 }
 
 function sourceTimeInEvidenceWindow(source, envelope, value) {
+  if (source.kind === "background") return backgroundEvidenceInWindow(value, envelope);
   const published = Date.parse(value);
   const start = Date.parse(envelope.session.windowStart);
   const close = Date.parse(envelope.session.windowEnd);
@@ -1049,8 +1051,8 @@ function sourceTimeInEvidenceWindow(source, envelope, value) {
 
 function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], sourceType) {
   if (isCalendarDate(source.publishedAt)) {
-    if (source.role !== "facts" || source.kind !== "official" || sourceType !== "first_party" || !dateCandidates.includes(source.publishedAt)) throw new Error(`${source.originalUrl} 日期级正式发布与一手原文不一致`);
-    if (!officialReleaseDateInWindow(source.publishedAt, envelope)) throw new Error(`${source.originalUrl} 正式发布日期不在交易窗口内`);
+    if (source.role !== "facts" || !["official", "background"].includes(source.kind) || sourceType !== "first_party" || !dateCandidates.includes(source.publishedAt)) throw new Error(`${source.originalUrl} 日期级正式发布与一手原文不一致`);
+    if (!(source.kind === "background" ? backgroundEvidenceInWindow(source.publishedAt, envelope) : officialReleaseDateInWindow(source.publishedAt, envelope))) throw new Error(`${source.originalUrl} 正式发布日期不在交易窗口内或背景已过期`);
     return source.publishedAt;
   }
   if (candidates.length === 0) {
@@ -1347,8 +1349,10 @@ export async function verifyResearchSources(
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
-        const opened = await reader(candidate.originalUrl, { signal });
+        const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024 } : {}) });
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
+        if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publishedAt = verifiedSourceTime(
           candidate,
           envelope,
@@ -1390,10 +1394,22 @@ export async function verifyResearchSources(
           envelope,
           candidate.targets[0],
         );
+        let backgroundSubjects;
+        if (candidate.kind === "background") {
+          const metric = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance].find(item => item.symbol === candidate.targets[0]);
+          const expectedScope = envelope.sectorPerformance.includes(metric) ? "sector" : envelope.aiChainPerformance.includes(metric) ? "ai_layer" : "market";
+          if (candidate.scope !== "company" && candidate.scope !== expectedScope) throw new Error("背景披露的适用范围与对应目标不一致");
+          const industryAuthorities = ["commerce.gov", "conference-board.org", "eia.gov", "energy.gov", "federalreserve.gov", "gov.cn", "miit.gov.cn", "ndrc.gov.cn", "stats.gov.cn"];
+          const sourceHost = new URL(opened.finalUrl).hostname;
+          if (expectedScope === "ai_layer" && candidate.scope !== "company" && !industryAuthorities.some(domain => sourceHost === domain || sourceHost.endsWith(`.${domain}`))) throw new Error("发行人或单家公司披露不能自动扩大为整个 AI 环节的背景机制");
+          backgroundSubjects = candidate.scope === "company" ? (metric?.constituents ?? []).filter(item => bodySupportsDeterministicTarget(candidate.supportingExcerpt, envelope, item.symbol)).map(item => item.symbol) : excerptSupportsTarget ? [candidate.targets[0]] : [];
+          if (!backgroundSubjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
+          if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|regulat\w*|risks?)\b/iu.test(candidate.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+        }
         if (candidate.role === "causal" && !excerptSupportsTarget) {
           throw new Error("因果支持段落未出现确定性归因目标的代码或名称");
         }
-        if (candidate.role === "facts" && !excerptSupportsTarget) {
+        if (candidate.role === "facts" && candidate.kind !== "background" && !excerptSupportsTarget) {
           normalizedCandidate = {
             ...normalizedCandidate,
             scope: "event_only",
@@ -1427,6 +1443,7 @@ export async function verifyResearchSources(
             earningsContextChecked: true,
             comparisonNotesChecked: true,
             timingChecked: true,
+            ...(backgroundSubjects ? { backgroundSubjects, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,

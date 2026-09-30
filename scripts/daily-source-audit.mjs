@@ -877,11 +877,20 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
   for (const match of decoded.matchAll(/<meta[^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]*>/giu)) values.push(match[1]);
   for (const match of decoded.matchAll(/<time[^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]+datetime=["'](\d{4}-\d{2}-\d{2})["'][^>]*>/giu)) values.push(match[1]);
   for (const match of decoded.matchAll(/<time[^>]+datetime=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]*>/giu)) values.push(match[1]);
+  let url;
+  try { url = new URL(source); } catch { return []; }
+  if (url.hostname === "www.sec.gov" && /^\/Archives\/edgar\/data\/\d+\/\d+\/[^/]+\.html?$/u.test(url.pathname)) {
+    const header = sourceBodyText(body, contentType).slice(0, 4_096);
+    const filed = /(?:^|\n)As filed with the U\.S\. Securities and Exchange Commission on\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\n|$)/u.exec(header);
+    if (filed) {
+      const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const month = months.indexOf(filed[1]);
+      if (month >= 0) values.push(`${filed[3]}-${String(month + 1).padStart(2, "0")}-${filed[2].padStart(2, "0")}`);
+    }
+  }
   // This exact first-party series labels the date of its current release as
   // "Updated". It is a date-only release record, not generic modification
   // metadata or an invented intraday publication time.
-  let url;
-  try { url = new URL(source); } catch { return []; }
   if (url.hostname === "www.conference-board.org" && url.pathname === "/topics/tags.cfm" && url.searchParams.get("parent") === "consumer-confidence") {
     const visible = sourceBodyText(body, contentType);
     const match = /US Consumer Confidence[^\n]*\nLatest Press Release\nUpdated:\s*(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\n|$)/u.exec(visible);
@@ -902,6 +911,7 @@ export function sourceBodyText(body, contentType = "text/html") {
   return decodeHtmlEntities(
     decoded
       .replace(/<!--[\s\S]*?-->/gu, " ")
+      .replace(/<ix:header\b[^>]*>[\s\S]*?<\/ix:header\s*>/giu, " ")
       .replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ")
       .replace(/<br\s*\/?>/giu, "\n")
       .replace(/<\/(?:p|div|article|section|li|h[1-6])>/giu, "\n")
