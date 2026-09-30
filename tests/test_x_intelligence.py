@@ -28,11 +28,55 @@ def create_account_db(path: Path, *, lock_until: datetime | None = None) -> None
         )
         connection.execute(
             "INSERT INTO accounts VALUES (1, ?, NULL, ?)",
-            (locks, '{"auth_token":"verified"}'),
+            (locks, '{"auth_token":"verified","ct0":"verified"}'),
         )
 
 
 class XIntelligenceTests(unittest.TestCase):
+    def chunk_runtime(self):
+        def original(text):
+            if "entry-client-logged-out" in text:
+                raise RuntimeError("Logged-out X web app")
+            if "/x-web/" in text:
+                return ["modern-bundle"]
+            raise RuntimeError("X web scripts not found")
+        module = SimpleNamespace(
+            get_scripts_list=original,
+            ASSET_URL_RE=x_intelligence.re.compile(r"https://[\w.-]+/x-web/[\w./-]+\.js"),
+            script_url=lambda name, digest: f"https://abs.twimg.com/responsive-web/client-web/{name}.{digest}.js",
+        )
+        x_intelligence.install_chunk_hash_compatibility(module)
+        return module
+
+    def test_legacy_chunk_hash_lengths_and_name_maps(self):
+        module = self.chunk_runtime()
+        urls = module.get_scripts_list('maps={1:"abcdef0",2:"0123456789abcdef",3:"deadbee"};names={1:"main",2:"ondemand.s",3:"other"}')
+        self.assertEqual(urls, [
+            "https://abs.twimg.com/responsive-web/client-web/main.abcdef0a.js",
+            "https://abs.twimg.com/responsive-web/client-web/ondemand.s.0123456789abcdefa.js",
+            "https://abs.twimg.com/responsive-web/client-web/other.deadbeea.js",
+        ])
+        self.assertEqual(module.get_scripts_list('2:"0123456789abcdef"'), ["https://abs.twimg.com/responsive-web/client-web/2.0123456789abcdefa.js"])
+
+    def test_modern_and_logged_out_bundles_keep_original_checks(self):
+        module = self.chunk_runtime()
+        self.assertEqual(module.get_scripts_list('https://abs.twimg.com/x-web/assets/entry-client.js'), ["modern-bundle"])
+        with self.assertRaisesRegex(RuntimeError, "Logged-out"):
+            module.get_scripts_list('https://abs.twimg.com/x-web/assets/entry-client-logged-out.js')
+        for text in ['challenge only', '1:"0123456789abcdef0"', '1:"ABCDEF0"']:
+            with self.subTest(text=text), self.assertRaisesRegex(RuntimeError, "not found"):
+                module.get_scripts_list(text)
+
+    def test_partial_authentication_is_not_a_ready_search_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "accounts.db"
+            create_account_db(db_path)
+            with sqlite3.connect(db_path) as connection:
+                connection.execute("UPDATE accounts SET cookies = ?", ('{"auth_token":"verified"}',))
+            state = x_intelligence.search_queue_state(db_path)
+        self.assertEqual(state["authenticated_count"], 0)
+        self.assertFalse(state["available"])
+
     def test_discovery_distinguishes_empty_response_from_filtered_posts(self) -> None:
         reference = datetime(2026, 9, 29, 22, 0, tzinfo=timezone.utc)
         source = {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["US"], "layers": []}
@@ -118,6 +162,16 @@ class XIntelligenceTests(unittest.TestCase):
                     x_intelligence.classify_search_error(RuntimeError(message)),
                     expected,
                 )
+
+    def test_swallowed_library_failures_are_not_reported_as_no_posts(self):
+        failure = x_intelligence.library_failure_category('XClIdParseError: X web scripts not found; username=private-pool-name; queue=SearchTimeline')
+        self.assertEqual(failure, "parser_error")
+        self.assertEqual(x_intelligence.search_result_status(0, {failure}), "parser_error")
+        self.assertEqual(x_intelligence.library_failure_category("XClIdAccountError: Logged-out X web app"), "auth_failed")
+        self.assertIsNone(x_intelligence.library_failure_category("Unrelated note; username=login-reader; queue=SearchTimeline"))
+        self.assertEqual(x_intelligence.search_result_status(0, set()), "empty_response")
+        self.assertEqual(x_intelligence.search_result_status(104, set()), "ok")
+        self.assertNotIn("private-pool-name", failure)
 
     def test_selected_post_requires_concrete_fact(self) -> None:
         promotion = (

@@ -6,6 +6,9 @@ Determine whether a reliable same-session source explicitly connects the candida
 
 # Success criteria
 
+- When `macroContext` is supplied, use its independently measured rate changes to test a plausible discount-rate/financing channel and the strongest contrary observation. Treasury par yields and intraday benchmark-bond quotes have different instruments/times; a small difference is not automatically false reporting. The structured observation is not a causal passage or a timestamped news article, and a later feed revision cannot establish what was known during the session. Do not infer a sector cause from simultaneous moves.
+- Supplied `socialLeads` verify original attribution only. Test relevant KOL theses against same-session reporting and first-party facts; retain disagreement and never replace the required price connection with an author's popularity.
+
 - Search completed-session market wraps and established financial reporting.
 - For U.S. moves, explicitly inspect dated AP, Reuters, Yahoo Finance, and established “stock market today” wrap results; for China moves, inspect established same-session closing and sector-wrap reporting. Prefer the wrap whose body names the exact sector, index, yield, AI layer, or representative constituents and states the cause.
 - Cite only a final page whose hostname matches one of the supplied `sourceDomains`. Prefer accessible established financial publishers. The supplied list excludes publishers repeatedly refusing articles in this session; never substitute another URL from an excluded publisher. Other domains cannot pass publication verification.

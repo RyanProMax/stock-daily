@@ -58,6 +58,7 @@ import {
   validateRecapReview, verifySocialLeads,
 } from "./complete-recap.mjs";
 import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
+import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -900,6 +901,7 @@ export class MarketWorkflow {
         (completeRecap ? COMPLETE_RECAP_RESEARCH_MS : DEFAULT_RESEARCH_BUDGET_MS),
     ),
     sourceVerifier = verifyResearchSources,
+    macroCollector = collectRecapMacroData,
   }) {
     this.input = validateInput(input);
     this.market = market;
@@ -934,6 +936,7 @@ export class MarketWorkflow {
     this.reservedSearchQueryCount = 0;
     this.saveQueue = Promise.resolve();
     this.sourceVerifier = sourceVerifier;
+    this.macroCollector = macroCollector;
     this.verifiedEvidenceCache = new Map();
     this.excludedSources = [];
     this.researchSourceDomains = publishableExternalSourceDomains();
@@ -1543,6 +1546,7 @@ export class MarketWorkflow {
         session: this.envelope.session, sourceDomains: this.researchSourceDomains,
         ...(exclusions.length ? { excludedSources: exclusions } : {}), anomaly,
         ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
+        ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps } : {}),
       };
       return ["facts", "causal"].map(async (role, index) => {
         const key = anomalyResearchStageKeys(anomaly, suffix)[index];
@@ -1915,6 +1919,7 @@ export class MarketWorkflow {
       ...(exclusions.length ? { excludedSources: exclusions } : {}),
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
+      ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps } : {}),
     };
     const researchKeys = anomalyResearchStageKeys(anomaly, suffix);
     const previouslyConsumedQueries = this.consumedQueriesBefore(researchKeys);
@@ -1924,14 +1929,14 @@ export class MarketWorkflow {
         key: researchKeys[0],
         role: "facts",
         payload,
-        inputArtifacts: ["market-envelope.json", "plan.json"],
+        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json"] : ["market-envelope.json", "plan.json"],
         promptSuffix: this.researchPromptSuffix(anomaly, "facts", suffix),
       }),
       this.runAgent({
         key: researchKeys[1],
         role: "causal",
         payload,
-        inputArtifacts: ["market-envelope.json", "plan.json"],
+        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json"] : ["market-envelope.json", "plan.json"],
         promptSuffix: this.researchPromptSuffix(anomaly, "causal", suffix),
       }),
     ]);
@@ -2847,6 +2852,20 @@ export class MarketWorkflow {
       await this.saveManifest();
     }
     this.socialLeads = social;
+    const macroPath = resolve(this.runDir, "artifacts/recap-macro-data.json");
+    let macroData;
+    if (await exists(macroPath)) {
+      const stored = await readJson(macroPath);
+      if (this.manifest.macroHash === stableHash(stored)) macroData = validateRecapMacroData(stored, this.envelope);
+    }
+    if (!macroData) {
+      macroData = validateRecapMacroData(await this.macroCollector(this.envelope), this.envelope);
+      await atomicJson(macroPath, macroData);
+      this.manifest.macroHash = stableHash(macroData);
+      await this.saveManifest();
+    }
+    this.macroData = macroData;
+    await atomicJson(resolve(this.runDir, "artifacts/recap-macro-context.json"), { context: macroData.context, gaps: macroData.gaps });
     const tradingPath = resolve(this.runDir, "artifacts/recap-trading-data.json");
     let tradingData;
     if (await exists(tradingPath)) {
@@ -2894,13 +2913,13 @@ export class MarketWorkflow {
     await this.saveManifest();
     if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
     const financialComparisons = ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length);
-    const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social };
+    const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps };
     const recapOptions = { tradingData };
-    const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "social-ledger.json", "recap-trading-data.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
+    const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
     await atomicJson(resolve(this.runDir, "artifacts/recap-draft.json"), writer.output);
     const recap = validateCompleteRecap(writer.output, this.envelope, ledger, social, recapOptions);
     await atomicJson(resolve(this.runDir, "artifacts/recap-normalized.json"), recap);
-    const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "social-ledger.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
+    const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "social-ledger.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
     const review = reviewer.output;
     await atomicJson(resolve(this.runDir, "artifacts/recap-review.json"), review);
     this.manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(writer.output), reviewHash: stableHash(review), writerStage: writer.key, reviewerStage: reviewer.key, status: recap.status };
@@ -3493,7 +3512,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
-  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }
   await writeFile(

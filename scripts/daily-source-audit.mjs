@@ -921,6 +921,7 @@ export async function readExternalSource(
     maxRedirects = MAX_REDIRECTS,
     maxBytes = MAX_SOURCE_BYTES,
     signal,
+    structured = false,
   } = {},
 ) {
   const resolveDestination =
@@ -980,6 +981,13 @@ export async function readExternalSource(
     }
     if (response.status >= 200 && response.status < 300) {
       const contentType = response.contentType || "text/html";
+      if (structured) {
+        const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+        if (!["application/json", "application/xml", "text/xml", "text/plain"].includes(mediaType)) {
+          throw new Error(`结构化一手数据返回无效正文类型：${contentType}`);
+        }
+        return { source, status: response.status, finalUrl: resolved.url.toString(), contentType, rawBody: response.body };
+      }
       if (!/(?:html|xhtml|plain|json)/iu.test(contentType)) {
         throw new Error(`外部证据正文类型不受支持：${contentType}`);
       }

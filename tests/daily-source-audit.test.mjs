@@ -12,6 +12,27 @@ import {
 } from "../scripts/daily-source-audit.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
 
+test("structured first-party reads retain exact bytes without inventing article publication metadata", async () => {
+  const raw = Buffer.from('<feed><date>2026-09-29</date><yield>5.26</yield></feed>');
+  const options = {
+    structured: true,
+    resolver: async () => [{ address: "8.8.8.8", family: 4 }],
+    requester: async () => ({ status: 200, contentType: "text/xml; charset=UTF-8", body: raw }),
+  };
+  const result = await readExternalSource("https://home.treasury.gov/data", options);
+  assert.equal(result.rawBody, raw);
+  assert.equal(result.contentType, "text/xml; charset=UTF-8");
+  assert.equal(result.publishedAtCandidates, undefined);
+  for (const contentType of ["text/html", "text/html; note=application/xml", "application/xml-unsafe"]) {
+    await assert.rejects(readExternalSource("https://home.treasury.gov/data", { ...options, requester: async () => ({ status: 200, contentType, body: raw }) }), /正文类型/);
+  }
+  let calls = 0;
+  await assert.rejects(readExternalSource("https://home.treasury.gov/data", { ...options, resolver: async () => [{ address: "127.0.0.1", family: 4 }], requester: async () => { calls++; } }), /内网/);
+  assert.equal(calls, 0);
+  await assert.rejects(readExternalSource("https://home.treasury.gov/data", { ...options, requester: async () => { calls++; return { status: 403 }; } }), /HTTP 403/);
+  assert.equal(calls, 1);
+});
+
 test("Fed speech timing binds the article date and exact official RSS identity", async () => {
   const source = "https://www.federalreserve.gov/newsevents/speech/warsh20260828a.htm";
   const article = `<div id="article"><div class="heading col-xs-12"><p class="article__time">August 28, 2026</p><h3 class="title">In Our Time</h3></div><p>A speech about the policy outlook, economic activity and the current balance of risks.</p></div>`;

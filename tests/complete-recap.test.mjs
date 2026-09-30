@@ -218,12 +218,14 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     await workflow.initialize();
     workflow.manifest.socialHash = stableHash(f.social);
     workflow.manifest.tradingHash = stableHash(f.tradingData);
+    workflow.manifest.macroHash = stableHash(f.macroData);
     await writeFile(resolve(workflow.runDir, "artifacts/social-ledger.json"), JSON.stringify(f.social));
     await writeFile(resolve(workflow.runDir, "artifacts/recap-trading-data.json"), JSON.stringify(f.tradingData));
+    await writeFile(resolve(workflow.runDir, "artifacts/recap-macro-data.json"), JSON.stringify(f.macroData));
     workflow.assertResearchCapacity = async () => {};
     const contexts = [];
     workflow.researchAnomaly = async anomaly => {
-      contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains] });
+      contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains], macroData: structuredClone(workflow.macroData) });
       return [{ anomalyId: anomaly.id, role: "facts", sources: [] }];
     };
     await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);

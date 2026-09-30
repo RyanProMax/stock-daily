@@ -19,6 +19,7 @@ import { fetchFreshDailySnapshot } from "./daily-readback.mjs";
 import { marketAsOfFromInput } from "./daily-policy.mjs";
 import { validateCompleteRecap, validateRecapReview } from "./complete-recap.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
+import { validateRecapMacroData } from "./recap-macro-data.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -519,9 +520,10 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
   if (manifest.coverageRequired) {
     if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
     const root = resolve(dirname(resolve(manifestPath)), "artifacts");
-    const [ledger, social, draft, review, tradingData] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
-    if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash) throw new Error("完整复盘证据、日线、原文或独立审稿哈希不一致");
+    const [ledger, social, draft, review, tradingData, macroData] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
+    if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash || stableHash(macroData) !== manifest.macroHash) throw new Error("完整复盘证据、日线、宏观数据、原文或独立审稿哈希不一致");
     validateRecapTradingData(tradingData, researchMarketEnvelope(input, manifest.market));
+    validateRecapMacroData(macroData, researchMarketEnvelope(input, manifest.market));
     if (!Object.values(manifest.stages ?? {}).some((stage) => stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger))) throw new Error("完整复盘证据尚未通过原文验证");
     for (const [role, field, expected] of [["recap_writer", "writerStage", draft], ["recap_reviewer", "reviewerStage", review]]) {
       const key = manifest.recapApproval?.[field];

@@ -6,6 +6,9 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 
 # Success criteria
 
+- When `macroContext` is supplied, it contains code-verified Treasury par-yield observations and differences in basis points. Use it to choose and test a relevant common-factor hypothesis; never invent its publication time or output the rolling data page as a timestamped article. Its feed revision is not a historical publication vintage. News yield quotes can refer to another instrument/time and must retain their own stated basis. Missing `macroContext` is an explicit data gap. This context does not establish the cause of any sector's return or replace the required event verification.
+- Supplied `socialLeads` are original, identity/time-checked discovery leads. A relevant thesis can guide the adaptive search, but its factual premise still needs the exact first-party release. Do not output an X post as verified event facts.
+
 - Search official filings, exchanges, regulators, issuer pages, and established financial publishers.
 - For a U.S. sector, index, or yield move without a named first-party event, inspect a dated completed-session wrap from an accessible registered publisher. Use the adaptive query to verify the concrete event discovered there. Do not spend it on an undated aggregator or keep cycling through publishers listed as unavailable.
 - For an index, rate, or yield anomaly, prioritize the factual event and quantified repricing named by same-session market coverage. Do not return an official release merely because it appeared in the seed when it has no demonstrated connection to the observed move.

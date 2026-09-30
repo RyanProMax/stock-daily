@@ -22,5 +22,6 @@ export function recapFixture(market = "US") {
     invalidateIf: "若后续订单披露显示需求没有改善，应重新评估这项判断。", invalidateIfEn: "Reassess if subsequent orders do not confirm the improvement in demand.",
   })) };
   const tradingData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], entries: [], gaps: tradingRequests(envelope).map(item => ({ symbol: item.symbol, reason: "Test fixture has no trading history; never infer volume or range from it." })) };
-  return { envelope, plan, ledger, social, raw, tradingData };
+  const macroData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], context: null, gaps: [{ series: "daily_treasury_yield_curve", reason: "Test fixture has no official yield observations." }] };
+  return { envelope, plan, ledger, social, raw, tradingData, macroData };
 }

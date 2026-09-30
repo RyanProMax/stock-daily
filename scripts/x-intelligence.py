@@ -64,6 +64,37 @@ def version_tuple(value: str) -> tuple[int, int, int]:
     return tuple(int(part) if part.isdigit() else 0 for part in (parts + ["0", "0"])[:3])
 
 
+def install_chunk_hash_compatibility(xclid: Any) -> None:
+    """Apply upstream twscrape PR #328 locally for the pinned 0.20.0 runtime.
+
+    This only reconstructs ordinary public script URLs from a received app
+    page. The original modern-bundle and logged-out checks stay in force.
+    No installed package, account, cookie, or challenge response is changed.
+    """
+    original = xclid.get_scripts_list
+
+    def get_scripts_list(text: str) -> list[str]:
+        if xclid.ASSET_URL_RE.search(text):
+            return original(text)
+        hashes = {
+            match.group(1): match.group(2)
+            for match in re.finditer(r'(\d+):"((?:[0-9a-f]{16}|[0-9a-f]{7}))"', text)
+        }
+        if not hashes:
+            return original(text)
+        names = {
+            match.group(1): match.group(2)
+            for match in re.finditer(r'(\d+):"([A-Za-z0-9_.-]+)"', text)
+            if not re.fullmatch(r"(?:[0-9a-f]{16}|[0-9a-f]{7})", match.group(2))
+        }
+        return [
+            xclid.script_url(names.get(chunk_id, chunk_id), hash_value + "a")
+            for chunk_id, hash_value in hashes.items()
+        ]
+
+    xclid.get_scripts_list = get_scripts_list
+
+
 def utc_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
@@ -115,8 +146,9 @@ def search_queue_state(db_path: Path, now: datetime | None = None) -> dict[str, 
             cookies = json.loads(raw_cookies or "{}")
         except json.JSONDecodeError:
             cookies = {}
-        if cookies:
-            authenticated_count += 1
+        if not isinstance(cookies, dict) or not cookies.get("auth_token") or not cookies.get("ct0"):
+            continue
+        authenticated_count += 1
         try:
             locks = json.loads(raw_locks or "{}")
         except json.JSONDecodeError:
@@ -192,6 +224,26 @@ def classify_search_error(exc: BaseException) -> str:
     ):
         return "network_error"
     return "search_error"
+
+
+def library_failure_category(message: str) -> str | None:
+    """Keep categories only; library messages can include private pool names."""
+    message = message.split("; username=", 1)[0]
+    if "XClIdParseError" in message:
+        return "parser_error"
+    if "XClIdAccountError" in message or "Missing authentication cookies" in message:
+        return "auth_failed"
+    category = classify_search_error(RuntimeError(message))
+    return None if category == "search_error" else category
+
+
+def search_result_status(raw_count: int, failures: set[str]) -> str:
+    if raw_count:
+        return "ok"
+    for category in ("auth_failed", "access_denied", "rate_limited", "network_error", "parser_error", "cooldown"):
+        if category in failures:
+            return category
+    return "empty_response"
 
 
 def extract_external_urls(tweet: Any, text: str) -> list[str]:
@@ -317,6 +369,9 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
         return unavailable("dependency_missing", "curl HTTP backend is unavailable")
     try:
         from twscrape import API
+        from twscrape import xclid
+        from twscrape.logger import logger
+        install_chunk_hash_compatibility(xclid)
     except Exception as exc:
         return unavailable("dependency_missing", f"twscrape import failed: {exc.__class__.__name__}")
 
@@ -372,6 +427,13 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
     )
     items: list[dict[str, Any]] = []
     search_diagnostics: dict[str, Any] = {"rawPostCount": 0, "filteredPostCount": 0}
+    library_failures: set[str] = set()
+
+    def observe_failure(message: Any) -> None:
+        category = library_failure_category(message.record["message"])
+        if category is not None:
+            library_failures.add(category)
+
     for attempt in range(2):
         api = API(
             str(db_path),
@@ -379,6 +441,7 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
             wait_timeout=SEARCH_WAIT_TIMEOUT_SECONDS,
             wait_interval=1,
         )
+        observer = logger.add(observe_failure, level="WARNING")
         try:
             items = await search_items(
                 api,
@@ -412,10 +475,12 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
                 if queue_available:
                     continue
             return unavailable(status, f"X public search failed: {exc.__class__.__name__}")
+        finally:
+            logger.remove(observer)
 
     unique = {item["url"]: item for item in items}
     return {
-        "status": "ok" if search_diagnostics["rawPostCount"] else "empty_response",
+        "status": search_result_status(search_diagnostics["rawPostCount"], library_failures),
         **search_diagnostics,
         "sourceCount": len(sources),
         "candidateCount": len(unique),
