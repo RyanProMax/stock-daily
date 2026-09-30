@@ -2907,7 +2907,7 @@ export class MarketWorkflow {
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
     await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
     this.manifest.recapLedgerHash = stableHash(ledger);
-    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger);
+    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData });
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();

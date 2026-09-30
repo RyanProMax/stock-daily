@@ -11,6 +11,7 @@ import {
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
+import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
 const SIZE_EVIDENCE = /成交|量能|缩量|放量|振幅|波幅|盘中|涨跌家数|抵消|对冲|分化|权重|\b(?:volume|turnover|intraday|range|breadth|offset|counter|divergen|weight|narrow|restrain|limit)\w*/iu;
@@ -77,6 +78,7 @@ export function recapObservations(envelope, tradingData = null) {
         roundingTolerance: "0.01 个百分点 (0.01 percentage points)",
       };
     }
+    observation.magnitudeEvidence = magnitudeEvidenceForObservation(observation);
     return observation;
   });
 }
@@ -161,18 +163,20 @@ function ids(values, sources, label, min = 1) {
   return values.map((id) => sources.get(id));
 }
 
-export function assessRecapEvidenceCoverage(envelope, ledger) {
+export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = null } = {}) {
+  const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
   const entries = completeRecapPlan(envelope).anomalies.map(anomaly => {
     const sources = ledger.sources.filter(source => source.anomalyId === anomaly.id && source.targets.includes(anomaly.target));
     const facts = sources.filter(source => source.role === "facts" && source.sourceType === "first_party");
     const causal = sources.filter(source => source.role === "causal" && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
     const magnitude = causal.filter(source => SIZE_EVIDENCE.test(source.supportingExcerpt));
+    const measured = observations.get(anomaly.target).magnitudeEvidence;
     const gaps = [];
     if (!facts.length) gaps.push("official_facts");
     if (!causal.length) gaps.push("target_causality");
-    if (!magnitude.length) gaps.push("magnitude");
+    if (!magnitude.length && !hasMeasuredMagnitude(measured)) gaps.push("magnitude");
     if (!facts.some(fact => causal.some(cause => cause.url !== fact.url))) gaps.push("independent_origin");
-    return { target: anomaly.target, status: gaps.length ? "incomplete" : "eligible_for_review", gaps, evidenceIds: sources.map(source => source.id) };
+    return { target: anomaly.target, status: gaps.length ? "incomplete" : "eligible_for_review", gaps, evidenceIds: sources.map(source => source.id), magnitudeSupport: magnitude.length ? "reported" : hasMeasuredMagnitude(measured) ? "measured" : "missing", magnitudeObservationIds: measured.records.map(item => item.id) };
   });
   return { market: envelope.market, marketAsOf: envelope.marketAsOf, eligibleCount: entries.filter(entry => !entry.gaps.length).length, requiredCount: entries.length, entries };
 }
@@ -190,25 +194,31 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     if (!["explained", "partial", "unresolved"].includes(raw.status) || !["high", "medium", "low"].includes(raw.confidence)) throw new Error(`${target.symbol} 复盘状态无效`);
     if (raw.status !== "explained" && raw.confidence === "high") throw new Error(`${target.symbol} 证据不足不能标为高置信`);
     const cause = ids(raw.evidenceIds, sourceMap, target.symbol, raw.status === "unresolved" ? 0 : 2);
-    const size = ids(raw.magnitudeEvidenceIds, sourceMap, `${target.symbol} 波幅`, raw.status === "explained" ? 1 : 0);
+    const size = ids(raw.magnitudeEvidenceIds, sourceMap, `${target.symbol} 波幅`, 0);
+    const measured = observations.get(target.symbol).magnitudeEvidence;
+    const measurementIds = raw.magnitudeObservationIds ?? [];
+    if (!Array.isArray(measurementIds)) throw new Error(`${target.symbol} 幅度观测引用无效`);
     const anomaly = completeRecapPlan(envelope).anomalies.find((item) => item.target === target.symbol);
     if ([...cause, ...size].some((source) => source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) throw new Error(`${target.symbol} 引用了其他目标的证据`);
     const causal = cause.filter((source) => source.anomalyId === anomaly.id && source.role === "causal" && source.targets.includes(target.symbol) && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
     if (raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
     if (raw.status === "explained") {
       if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
-      if (!size.some((source) => source.anomalyId === anomaly.id && source.role === "causal" && SIZE_EVIDENCE.test(source.supportingExcerpt))) throw new Error(`${target.symbol} 缺少成交、振幅、分化或相反力量的直接证据`);
+      if (!size.some((source) => source.anomalyId === anomaly.id && source.role === "causal" && SIZE_EVIDENCE.test(source.supportingExcerpt)) && !hasMeasuredMagnitude(measured, measurementIds)) throw new Error(`${target.symbol} 缺少成交、振幅、分化或相反力量的直接证据或完整幅度观测`);
       if (raw.confidence === "low") throw new Error(`${target.symbol} 低置信归因不能视为完成`);
       if (raw.confidence === "high") {
         const publishers = cause.filter(source => source.sourceType === "publisher");
         if (new Set(publishers.map(source => new URL(source.url).hostname)).size < 2 || new Set(publishers.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
       }
     }
-    let grounding = [JSON.stringify(target), JSON.stringify(observations.get(target.symbol)), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
+    const { magnitudeEvidence, ...marketObservation } = observations.get(target.symbol);
+    let grounding = [JSON.stringify(target), JSON.stringify(marketObservation), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);
     const whyEn = readerText(raw.whyEn, `${target.symbol} whyEn`, 40, 1_800);
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);
     const magnitudeEn = readerText(raw.magnitudeEn, `${target.symbol} magnitudeEn`, 40, 1_200);
+    const selectedMeasurements = validateMagnitudeObservationIds(measurementIds, measured, { copy: magnitude, copyEn: magnitudeEn });
+    grounding += " " + JSON.stringify(selectedMeasurements.map(item => item.values));
     const financialCopy = `${why} ${whyEn} ${magnitude} ${magnitudeEn}`;
     if (/财报|季报|年报|每股收益|营收|季度(?:业绩|结果)|盈利指引|\b(?:EPS|revenue|quarterly results|financial results|earnings guidance)\b/iu.test(financialCopy) && requiresFinancialComparisons(financialCopy)) {
       const comparisons = cause.flatMap((source) => source.comparisons ?? []).filter(item => /每股|营收|收入|利润|盈利|指引|\b(?:EPS|revenue|sales|profit|income|earnings|guidance)\b/iu.test(item.label));
@@ -224,7 +234,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       assertNumbersGrounded(copy, grounding, `${target.symbol} 复盘数字`);
       assertFactsNumbersInExcerpt({ facts: copy, supportingExcerpt: grounding });
     }
-    if (raw.status === "unresolved" && (raw.evidenceIds.length || raw.magnitudeEvidenceIds.length)) throw new Error(`${target.symbol} 未归因状态不得夹带因果结论`);
+    if (raw.status === "unresolved" && (raw.evidenceIds.length || raw.magnitudeEvidenceIds.length || measurementIds.length)) throw new Error(`${target.symbol} 未归因状态不得夹带因果结论`);
     const alternatives = (raw.alternatives ?? []).map((item) => {
       if (!["supported", "contradicted", "unresolved"].includes(item.status)) throw new Error("竞争解释状态无效");
       const sources = ids(item.evidenceIds, sourceMap, "竞争解释", item.status === "unresolved" ? 0 : 1);

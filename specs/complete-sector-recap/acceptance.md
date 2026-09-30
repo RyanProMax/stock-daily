@@ -91,6 +91,14 @@ The screenshots use separated **layout fixtures** with controlled prose and sour
 
 The goal is not marked complete by these implementation checks.
 
+## Measured magnitude evidence
+
+The recap now admits separately identified frozen measurements for magnitude, while retaining the official-fact and target-specific causal-source gates. An observed index/ETF must reference both its opening-gap/open-to-close path and its real intraday range; an explicitly equal-weight basket can reference its positive/negative arithmetic contributions. Both languages must show the required signed values and units. Volume alone cannot complete magnitude, measurements cannot supply a cause, and basket extremes/sector weights remain unobserved. Independent review must assess the explanation, not merely accept attached numbers.
+
+The regression suite passed 326 Node tests and 12 Python tests, TypeScript and production build. New adversarial cases reject cross-target/fake/duplicate references, missing English numbers, reversed signs, range units changed to percentage points, unreferenced measurements, and volume-only completion. Previously frozen original bars were independently revalidated in a separate measurement preflight for September 30 China and September 29 US: all 20 targets in each market had the required measured magnitude basis. With no news ledger, causal eligibility remained zero in both markets, as required. The preflight is recorded in work/complete-recap-2026-09-30-magnitude-preflight.json and is not a new researched/approved report or publication.
+
+The real US Technology ETF illustrates the distinction: an approximately +0.78% opening gap and −0.79% open-to-close component nearly canceled, while its actual intraday range was approximately 1.14%. Calling the approximately −0.02% closing change a narrow intraday range would be false. These measurements explain the net arithmetic; they do not identify the economic cause of the reversal.
+
 ## Date precision and first-party identity review
 
 Official issuer domains now derive from the existing reviewed identity registry. AMD, Micron, Dell, CoreWeave and Vertiv are accepted as issuer sources; specialist commentary sites remain expert sources. Conference Board is registered separately as an original statistical release authority.

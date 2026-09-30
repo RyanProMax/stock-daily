@@ -39,6 +39,7 @@
           "magnitudeEn",
           "evidenceIds",
           "magnitudeEvidenceIds",
+          "magnitudeObservationIds",
           "alternatives",
           "opinions",
           "invalidateIf",
@@ -105,6 +106,11 @@
             },
             "maxItems": 10,
             "minItems": 0
+          },
+          "magnitudeObservationIds": {
+            "type": "array",
+            "maxItems": 5,
+            "items": { "type": "string", "minLength": 1, "maxLength": 100 }
           },
           "alternatives": {
             "type": "array",

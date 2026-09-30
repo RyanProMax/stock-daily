@@ -7,7 +7,7 @@ import {
 } from "./source-registry.mjs";
 import { isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v29";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v30";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =

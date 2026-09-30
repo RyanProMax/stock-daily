@@ -17,7 +17,7 @@ export function recapFixture(market = "US") {
     whyEn: `${anomaly.observation.nameEn ?? anomaly.title}: the issuer confirmed changes in demand and financing conditions. The closing report connects those changes to this target: improved demand supports earnings expectations while borrowing costs work in the opposite direction. This remains an interpretation of the documented reaction.`,
     magnitude: "需求改善和融资成本形成相反力量，较低的成交量限制了上涨延续；这里解释的是收盘涨跌幅，不把它当作盘中振幅。",
     magnitudeEn: "Offsetting borrowing costs and lower volume limited the advance. The close-to-close return and intraday trading range measure different features of the session.",
-    evidenceIds: [`${index}-facts`, `${index}-causal`], magnitudeEvidenceIds: [`${index}-causal`],
+    evidenceIds: [`${index}-facts`, `${index}-causal`], magnitudeEvidenceIds: [`${index}-causal`], magnitudeObservationIds: [],
     alternatives: [{ text: "融资成本上升可能限制需求改善所带来的盈利预期提升。", textEn: "Higher borrowing costs may offset improved earnings expectations.", status: "supported", evidenceIds: [`${index}-causal`] }], opinions: [],
     invalidateIf: "若后续订单披露显示需求没有改善，应重新评估这项判断。", invalidateIfEn: "Reassess if subsequent orders do not confirm the improvement in demand.",
   })) };
