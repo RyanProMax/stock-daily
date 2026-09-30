@@ -17,9 +17,11 @@ import {
 import { fetchComparisonReport } from "./daily-freshness.mjs";
 import { fetchFreshDailySnapshot } from "./daily-readback.mjs";
 import { marketAsOfFromInput } from "./daily-policy.mjs";
-import { validateCompleteRecap, validateRecapReview } from "./complete-recap.mjs";
+import { validateCompleteRecap, validateRecapReview, recapTargets, completeRecapPlan } from "./complete-recap.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { validateRecapMacroData } from "./recap-macro-data.mjs";
+import { validateRecapAttribution } from "./recap-attribution.mjs";
+import { validateRecapTransmissionData } from "./recap-transmission-data.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -520,19 +522,23 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
   if (manifest.coverageRequired) {
     if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
     const root = resolve(dirname(resolve(manifestPath)), "artifacts");
-    const [ledger, social, draft, review, tradingData, macroData] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
+    const [ledger, social, draft, review, tradingData, macroData, attribution, transmission] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json", "recap-attribution.json", "recap-transmission-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
     if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash || stableHash(macroData) !== manifest.macroHash) throw new Error("完整复盘证据、日线、宏观数据、原文或独立审稿哈希不一致");
     validateRecapTradingData(tradingData, researchMarketEnvelope(input, manifest.market));
     validateRecapMacroData(macroData, researchMarketEnvelope(input, manifest.market));
+    if (stableHash(transmission) !== manifest.transmissionHash) throw new Error("完整复盘行业背景原文哈希不一致");
+    validateRecapTransmissionData(transmission, researchMarketEnvelope(input, manifest.market), completeRecapPlan(researchMarketEnvelope(input, manifest.market), tradingData));
+    if (stableHash(attribution) !== manifest.recapAttributionHash) throw new Error("完整复盘事件传导审查哈希不一致");
+    validateRecapAttribution(attribution, researchMarketEnvelope(input, manifest.market), recapTargets(researchMarketEnvelope(input, manifest.market)), ledger, { requireComplete: true });
     if (!Object.values(manifest.stages ?? {}).some((stage) => stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger))) throw new Error("完整复盘证据尚未通过原文验证");
-    for (const [role, field, expected] of [["recap_writer", "writerStage", draft], ["recap_reviewer", "reviewerStage", review]]) {
+    for (const [role, field, expected] of [["recap_attributor", "attributionStage", attribution], ["recap_writer", "writerStage", draft], ["recap_reviewer", "reviewerStage", review]]) {
       const key = manifest.recapApproval?.[field];
       const stage = manifest.stages?.[key];
       if (typeof key !== "string" || !/^[a-z0-9-]+$/u.test(key) || stage?.role !== role || stage.status !== "completed" || !(manifest.agentRuns ?? []).some((run) => run.key === key && run.agentRunId === stage.agentRunId && run.role === role && run.status === "completed" && run.filesystemIsolation === AGENT_FILESYSTEM_ISOLATION)) throw new Error("完整复盘缺少对应成稿的独立写作或审稿进程");
       const text = await readFile(resolve(root, `${key}.json`), "utf8");
       if (stableHash(text) !== stage.outputHash || stableHash(JSON.parse(text)) !== stableHash(expected)) throw new Error("完整复盘成稿或审稿与独立进程产物不一致");
     }
-    const recap = validateCompleteRecap(draft, researchMarketEnvelope(input, manifest.market), ledger, social, { requireComplete: true, tradingData });
+    const recap = validateCompleteRecap(draft, researchMarketEnvelope(input, manifest.market), ledger, social, { requireComplete: true, tradingData, attribution });
     validateRecapReview(review, recap);
     if (stableHash(recap) !== manifest.recapApproval?.recapHash || stableHash(report.recaps?.[manifest.market]) !== stableHash(recap)) throw new Error("发布复盘与已批准完整复盘不一致");
   }

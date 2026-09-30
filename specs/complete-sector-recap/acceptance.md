@@ -2,6 +2,18 @@
 
 **Implementation checks pass. Real comprehensive report acceptance remains unsuccessful. No shadow report or layout fixture was published.**
 
+## Qualified attribution and a fresh September 29 shadow
+
+The separate attribution assessment is implemented before writing, with independent final semantic review and publication revalidation. It preserves official root, independent reaction and structural exposure IDs; checks exact event anchors, chronology, all four AI subjects and economic direction; caps inferred copy at medium confidence and requires explicit inference labels in both languages. Missing chains and measurements alone cannot complete attribution. The chain artifact/process output and frozen original background body are retained and audited at publication.
+
+The original January 28 Select Sector SPDR Trust filing supplied all eleven exact sector risk disclosures in a deterministic preflight: eleven extracted, eleven verified, no collection or verification gaps. Complete opening statements survive page footer interruptions; source fund codes come from the original text. The raw HTML/hash is frozen once, reused for verification, and re-extracted during publication audit. An expired, undated, wrong-authority or unavailable filing produces gaps rather than a new daily event. These background disclosures do not count as current catalysts.
+
+Verification passed 340 Node tests, 12 Python tests, TypeScript, production build and repository safety. A stronger subsequent targeted run passed 71 tests, including persisted prior-batch evidence/access contexts and exact resume payloads. Regressions reject unrelated/generic events, future or unverified sources, unsupported date-only chronology, changed signs, incomplete basket exposure, high-confidence inference, missing language labels/chain citations, changed original bytes and altered publication artifacts.
+
+A fresh US September 29 comprehensive shadow completed 40 independent facts/causal processes and 80 successful-process searches. One facts process timed out; resuming reused the 31 completed processes and incurred two additional searches for that failed attempt (82 total). Final verification accepted 16 records: eleven background disclosures, one current first-party official fact and four publisher factual passages. Thirty-eight candidates were rejected; none supplied an accepted causal passage, so complete coverage remained 0/20. The run stopped before attribution/writing/publication and never marked a schedule complete. This is a failed real report acceptance. Artifacts are under work/complete-recap-2026-09-30-v4/US-2026-09-29-6444c858ee96-shadow-complete; background preflight/book are work/complete-recap-2026-09-30-sector-background-preflight.json and work/complete-recap-2026-09-30-sector-background-book.json.
+
+Rejection triage found faithful calendar/ordinal translations (September/August/April/third) that the current numeric gate does not understand, alongside genuinely uncited values and unit/direction problems. These cases require distinct regressions and corrected revalidation before another search run; they must not be collectively waived. Date-only official roots also still need a contemporary pre-close factual confirmation path when their actual market-reaction wrap is later. Empirical report and production-readback acceptance remain outstanding.
+
 ## Review and commit of the initial work
 
 Reviewed the pending workflow and UI changes, corrected the latest-run evidence checkpoint alias and its brittle regression assertion, and committed the result as 233c9bd. Validation at that point passed 275 Node tests, 6 Python tests, TypeScript/build, repository safety, shell syntax, and the required desktop/mobile screenshot reviews.

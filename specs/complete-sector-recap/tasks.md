@@ -11,5 +11,7 @@
 - [x] Preserve actual publication-date precision and first-party issuer identity.
 - [x] Admit typed signed path/range/offset measurements for magnitude, without supplying a cause.
 - [x] Verify separately dated first-party background transmission disclosures and their exact target/constituent scope.
-- [ ] Implement and independently review the qualified-inference evidence graph; background alone must never complete attribution.
+- [x] Implement the separate qualified-inference assessment, independent final-review requirements and immutable publication audit; reject missing/timing/scope/direction links in adversarial regressions.
+- [ ] Demonstrate independently accepted real qualified-inference chains; background alone must never complete attribution.
+- [ ] Correct verified calendar/ordinal/unit translations and date-only pre-close confirmation; revalidate frozen candidates before spending more research queries.
 - [ ] Demonstrate a real accepted all-sector report and exact production readback; implementation tests do not count as this outcome.

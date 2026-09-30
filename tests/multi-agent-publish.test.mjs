@@ -165,7 +165,7 @@ test("latest workflow alias retains evidence and can be checked independently", 
 async function completePublicationFixture() {
   const fixture = await publicationFixture();
   const f = recapFixture();
-  const recap = validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { requireComplete: true });
+  const recap = validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { requireComplete: true, attribution: f.attribution });
   const manifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
   const report = JSON.parse(await readFile(fixture.reportPath, "utf8"));
   const review = { market: "US", entries: recap.entries.map((entry) => ({ target: entry.target, verdict: "pass", scores: { factualAccuracy: 5, causality: 4, magnitude: 4, sourceIndependence: 5, readerUtility: 4 } })) };
@@ -177,16 +177,19 @@ async function completePublicationFixture() {
   manifest.tradingHash = stableHash(f.tradingData);
   manifest.macroHash = stableHash(f.macroData);
   manifest.socialHash = stableHash(f.social);
-  manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
+  manifest.recapAttributionHash = stableHash(f.attribution);
+  manifest.transmissionHash = stableHash(f.transmissionData);
+  manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), attributionStage: "recap-attributor-attempt-1", writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
   manifest.stages["recap-verification"] = { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(f.ledger) };
-  for (const [i, role, value] of [[0, "recap_writer", f.raw], [1, "recap_reviewer", review]]) {
-    const key = i === 0 ? manifest.recapApproval.writerStage : manifest.recapApproval.reviewerStage;
+  for (const [i, role, value, field] of [[0, "recap_writer", f.raw, "writerStage"], [1, "recap_reviewer", review, "reviewerStage"], [2, "recap_attributor", f.attribution, "attributionStage"]]) {
+    const key = manifest.recapApproval[field];
     const run = { ...manifest.agentRuns[0], key, role, agentRunId: `recap-agent-${i}`, outputHash: stableHash(JSON.stringify(value) + "\n") };
     manifest.agentRuns.push(run);
     manifest.stages[key] = run;
   }
   const root = resolve(fixture.manifestPath, "../artifacts");
-  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
+  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
+  await writeFile(resolve(root, `${manifest.recapApproval.attributionStage}.json`), JSON.stringify(f.attribution) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.writerStage}.json`), JSON.stringify(f.raw) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.reviewerStage}.json`), JSON.stringify(review) + "\n");
   await writeFile(fixture.reportPath, reportText);
@@ -220,11 +223,13 @@ test("the comprehensive latest alias retains exact independent writer and review
 });
 
 test("recap evidence, low review scores and rewritten reader claims stop before network writes", async () => {
-  for (const mutation of ["ledger", "review", "report", "trading", "macro"]) {
+  for (const mutation of ["ledger", "review", "report", "trading", "macro", "attribution", "transmission"]) {
     const f = await completePublicationFixture();
     if (mutation === "ledger") await writeFile(resolve(f.root, "recap-ledger.json"), '{"sources":[]}');
     if (mutation === "trading") await writeFile(resolve(f.root, "recap-trading-data.json"), '{"entries":[]}');
     if (mutation === "macro") await writeFile(resolve(f.root, "recap-macro-data.json"), '{"context":{"rates":{"tenYear":999}}}');
+    if (mutation === "attribution") await writeFile(resolve(f.root, "recap-attribution.json"), '{"entries":[]}');
+    if (mutation === "transmission") await writeFile(resolve(f.root, "recap-transmission-data.json"), '{"sources":[]}');
     if (mutation === "review") {
       f.review.entries[0].scores.magnitude = 3;
       f.manifest.recapApproval.reviewHash = stableHash(f.review);

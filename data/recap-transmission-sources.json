@@ -1,0 +1,10 @@
+{
+  "url": "https://www.sec.gov/Archives/edgar/data/1064641/000119312526027312/d15107d485bpos.htm",
+  "issuer": "Select Sector SPDR Trust",
+  "sectors": {
+    "XLC": "Communication Services", "XLY": "Consumer Discretionary",
+    "XLP": "Consumer Staples", "XLE": "Energy", "XLF": "Financial",
+    "XLV": "Healthcare", "XLI": "Industrial", "XLB": "Materials",
+    "XLRE": "Real Estate", "XLK": "Technology", "XLU": "Utilities"
+  }
+}

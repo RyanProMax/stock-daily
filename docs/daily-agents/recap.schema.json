@@ -94,7 +94,7 @@
               "minLength": 1,
               "maxLength": 80
             },
-            "maxItems": 10,
+            "maxItems": 24,
             "minItems": 0
           },
           "magnitudeEvidenceIds": {

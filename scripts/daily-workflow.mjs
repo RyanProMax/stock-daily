@@ -59,6 +59,8 @@ import {
 } from "./complete-recap.mjs";
 import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
+import { validateRecapAttribution } from "./recap-attribution.mjs";
+import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -86,6 +88,7 @@ async function cliFeatureArgs(binary) {
 }
 
 const STAGES = {
+  recap_attributor: { prompt: "recap-attributor.md", schema: "recap-attribution.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   recap_writer: { prompt: "recap-writer.md", schema: "recap.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   recap_reviewer: { prompt: "recap-reviewer.md", schema: "recap-review.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   planner: {
@@ -902,6 +905,7 @@ export class MarketWorkflow {
     ),
     sourceVerifier = verifyResearchSources,
     macroCollector = collectRecapMacroData,
+    transmissionCollector = collectRecapTransmissionData,
   }) {
     this.input = validateInput(input);
     this.market = market;
@@ -937,6 +941,7 @@ export class MarketWorkflow {
     this.saveQueue = Promise.resolve();
     this.sourceVerifier = sourceVerifier;
     this.macroCollector = macroCollector;
+    this.transmissionCollector = transmissionCollector;
     this.verifiedEvidenceCache = new Map();
     this.excludedSources = [];
     this.researchSourceDomains = publishableExternalSourceDomains();
@@ -1541,13 +1546,7 @@ export class MarketWorkflow {
     const exclusions = [...new Set([...this.excludedSources, ...excludedSources])];
     const reusable = {};
     await Promise.all(anomalies.flatMap((anomaly) => {
-      const payload = {
-        market: this.market, marketAsOf: this.envelope.marketAsOf,
-        session: this.envelope.session, sourceDomains: this.researchSourceDomains,
-        ...(exclusions.length ? { excludedSources: exclusions } : {}), anomaly,
-        ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
-        ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps } : {}),
-      };
+      const payload = this.researchPayload(anomaly, exclusions);
       return ["facts", "causal"].map(async (role, index) => {
         const key = anomalyResearchStageKeys(anomaly, suffix)[index];
         const fingerprint = await agentStageFingerprint(role, payload, this.researchPromptSuffix(anomaly, role, suffix));
@@ -1909,9 +1908,8 @@ export class MarketWorkflow {
     return outputs;
   }
 
-  async researchAnomaly(anomaly, suffix = "", excludedSources = []) {
-    const exclusions = [...new Set([...this.excludedSources, ...excludedSources])];
-    const payload = {
+  researchPayload(anomaly, exclusions = this.excludedSources) {
+    return {
       market: this.market,
       marketAsOf: this.envelope.marketAsOf,
       session: this.envelope.session,
@@ -1920,7 +1918,13 @@ export class MarketWorkflow {
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps } : {}),
+      ...(this.recapResearchEvidence ? { sharedEvidence: this.recapResearchEvidence } : {}),
     };
+  }
+
+  async researchAnomaly(anomaly, suffix = "", excludedSources = []) {
+    const exclusions = [...new Set([...this.excludedSources, ...excludedSources])];
+    const payload = this.researchPayload(anomaly, exclusions);
     const researchKeys = anomalyResearchStageKeys(anomaly, suffix);
     const previouslyConsumedQueries = this.consumedQueriesBefore(researchKeys);
     await this.assertResearchCapacity([anomaly], suffix, excludedSources);
@@ -1929,14 +1933,14 @@ export class MarketWorkflow {
         key: researchKeys[0],
         role: "facts",
         payload,
-        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json"] : ["market-envelope.json", "plan.json"],
+        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
         promptSuffix: this.researchPromptSuffix(anomaly, "facts", suffix),
       }),
       this.runAgent({
         key: researchKeys[1],
         role: "causal",
         payload,
-        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json"] : ["market-envelope.json", "plan.json"],
+        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
         promptSuffix: this.researchPromptSuffix(anomaly, "causal", suffix),
       }),
     ]);
@@ -2108,6 +2112,7 @@ export class MarketWorkflow {
         this.sourceVerifier(researchOutputs, this.envelope, {
           signal: controller.signal,
           verifiedCache: this.verifiedEvidenceCache,
+          ...(this.recapSourceReader ? { reader: this.recapSourceReader } : {}),
         }),
         hardStop,
       ]);
@@ -2570,7 +2575,7 @@ export class MarketWorkflow {
         const stage = this.manifest.stages[key];
         if (stage?.status !== "invalid" || !/queries.*(?:交易日|市场标记|市场或跨市场标记)/u.test(stage.error ?? "")) continue;
         try {
-          const payload = { market: this.market, marketAsOf: this.envelope.marketAsOf, session: this.envelope.session, sourceDomains: this.researchSourceDomains, ...(this.excludedSources.length ? { excludedSources: this.excludedSources } : {}), anomaly, ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}) };
+          const payload = this.researchPayload(anomaly);
           const fingerprint = await agentStageFingerprint(role, payload, this.researchPromptSuffix(anomaly, role));
           if (stage.promptHash !== fingerprint.promptHash || stage.schemaHash !== fingerprint.schemaHash) continue;
           const [outputText, eventsText] = await Promise.all([
@@ -2882,26 +2887,53 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-plan.json"), plan);
     const observations = recapObservations(this.envelope, tradingData);
     await atomicJson(resolve(this.runDir, "artifacts/recap-observations.json"), observations);
-    await this.revalidateResearchQueryCheckpoints(plan);
+    const transmissionPath = resolve(this.runDir, "artifacts/recap-transmission-data.json");
+    let transmission;
+    if (await exists(transmissionPath)) {
+      const stored = await readJson(transmissionPath);
+      if (this.manifest.transmissionHash === stableHash(stored)) transmission = validateRecapTransmissionData(stored, this.envelope, plan);
+    }
+    if (!transmission) {
+      transmission = validateRecapTransmissionData(await this.transmissionCollector(this.envelope, plan), this.envelope, plan);
+      await atomicJson(transmissionPath, transmission);
+      this.manifest.transmissionHash = stableHash(transmission);
+      await this.saveManifest();
+    }
+    this.recapSourceReader = transmissionSourceReader(transmission);
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
     let nextAccess = initialAccess;
+    let nextEvidence = [];
     let ledger;
+    if (transmission.sources.length) {
+      outputs.push({ sources: transmission.sources, rejectedSources: [], alternatives: [] });
+      ledger = await this.verifyEvidence(outputs);
+      nextEvidence = ledger.sources;
+    }
     // Four targets at a time: each has independent facts/causal processes.
     // A failed sibling must settle before this market can report failure.
     for (let i = 0; i < plan.anomalies.length; i += 4) {
       const batch = plan.anomalies.slice(i, i + 4);
       const batchKey = String(i / 4);
       this.manifest.recapBatchSourceAccess ??= {};
+      this.manifest.recapBatchEvidence ??= {};
+      this.recapResearchEvidence = this.manifest.recapBatchEvidence[batchKey] ?? nextEvidence;
+      this.manifest.recapBatchEvidence[batchKey] = this.recapResearchEvidence;
+      this.recapResearchEvidenceArtifact = `recap-batch-evidence-${batchKey}.json`;
+      await atomicJson(resolve(this.runDir, "artifacts", this.recapResearchEvidenceArtifact), this.recapResearchEvidence);
       const access = this.manifest.recapBatchSourceAccess[batchKey] ?? nextAccess;
       this.manifest.recapBatchSourceAccess[batchKey] = access;
       this.excludedSources = access.urls;
       this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !access.unavailableDomains.includes(domain));
       await this.saveManifest();
+      await this.revalidateResearchQueryCheckpoints({ anomalies: batch });
       await this.assertResearchCapacity(batch);
       outputs.push(...(await settleAgentResults(batch.map((anomaly) => this.researchAnomaly(anomaly)))).flat());
       ledger = await this.verifyEvidence(outputs);
       nextAccess = recapResearchSourceAccess(initialAccess, ledger);
+      // Keep original IDs/scopes. This is verified prior-batch context, not
+      // permission to retag a broad market quote as a direct sector cause.
+      nextEvidence = ledger.sources;
     }
     this.excludedSources = initialAccess.urls;
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
@@ -2911,18 +2943,26 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
-    if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
+    if (!coverage.eligibleCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
     const financialComparisons = ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length);
     const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps };
-    const recapOptions = { tradingData };
-    const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
+    const attributor = await this.runValidatedAgentStage({ baseKey: "recap-attributor", role: "recap_attributor", payload: { ...payload, coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, payload.targets, ledger) });
+    const attribution = attributor.output;
+    await atomicJson(resolve(this.runDir, "artifacts/recap-attribution.json"), attribution);
+    this.manifest.recapAttributionHash = stableHash(attribution);
+    payload.attribution = attribution;
+    await this.saveManifest();
+    if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
+    validateRecapAttribution(attribution, this.envelope, payload.targets, ledger, { requireComplete: true });
+    const recapOptions = { tradingData, attribution };
+    const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-attribution.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
     await atomicJson(resolve(this.runDir, "artifacts/recap-draft.json"), writer.output);
     const recap = validateCompleteRecap(writer.output, this.envelope, ledger, social, recapOptions);
     await atomicJson(resolve(this.runDir, "artifacts/recap-normalized.json"), recap);
-    const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "social-ledger.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
+    const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "recap-attribution.json", "social-ledger.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
     const review = reviewer.output;
     await atomicJson(resolve(this.runDir, "artifacts/recap-review.json"), review);
-    this.manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(writer.output), reviewHash: stableHash(review), writerStage: writer.key, reviewerStage: reviewer.key, status: recap.status };
+    this.manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(writer.output), reviewHash: stableHash(review), attributionStage: attributor.key, writerStage: writer.key, reviewerStage: reviewer.key, status: recap.status };
     await this.saveManifest();
     validateCompleteRecap(writer.output, this.envelope, ledger, social, { ...recapOptions, requireComplete: true });
     return recap;
@@ -3512,7 +3552,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
-  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-attribution.json", "recap-transmission-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }
   await writeFile(

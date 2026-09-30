@@ -6,6 +6,8 @@ Determine whether a reliable same-session source explicitly connects the candida
 
 # Success criteria
 
+- `sharedEvidence`, when supplied, contains verified prior-batch originals, never conclusions about your current target. Preserve their event IDs, scope, dates and contrary observations. Seek a direct target reaction or a specific counterevent. Do not relabel a broad-market quote as a sector quotation or return the same passage under a fabricated target association. Missing direct target reporting may support a later explicitly qualified inference only when a separate first-party exposure chain is verified; never substitute price coincidence or a generic risk assertion here.
+
 - When `macroContext` is supplied, use its independently measured rate changes to test a plausible discount-rate/financing channel and the strongest contrary observation. Treasury par yields and intraday benchmark-bond quotes have different instruments/times; a small difference is not automatically false reporting. The structured observation is not a causal passage or a timestamped news article, and a later feed revision cannot establish what was known during the session. Do not infer a sector cause from simultaneous moves.
 - Supplied `socialLeads` verify original attribution only. Test relevant KOL theses against same-session reporting and first-party facts; retain disagreement and never replace the required price connection with an author's popularity.
 

@@ -12,6 +12,7 @@ import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
+import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution } from "./recap-attribution.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
 const SIZE_EVIDENCE = /成交|量能|缩量|放量|振幅|波幅|盘中|涨跌家数|抵消|对冲|分化|权重|\b(?:volume|turnover|intraday|range|breadth|offset|counter|divergen|weight|narrow|restrain|limit)\w*/iu;
@@ -165,24 +166,30 @@ function ids(values, sources, label, min = 1) {
 
 export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = null } = {}) {
   const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
+  const inferenceCandidates = new Map(recapAttributionCandidates(envelope, recapTargets(envelope), ledger).map(item => [item.target, item]));
   const entries = completeRecapPlan(envelope).anomalies.map(anomaly => {
     const sources = ledger.sources.filter(source => source.anomalyId === anomaly.id && source.targets.includes(anomaly.target));
     const facts = sources.filter(source => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background");
     const causal = sources.filter(source => source.role === "causal" && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
     const magnitude = causal.filter(source => SIZE_EVIDENCE.test(source.supportingExcerpt));
     const measured = observations.get(anomaly.target).magnitudeEvidence;
+    const inference = inferenceCandidates.get(anomaly.target);
+    const direct = facts.length && causal.length && facts.some(fact => causal.some(cause => cause.url !== fact.url));
     const gaps = [];
-    if (!facts.length) gaps.push("official_facts");
-    if (!causal.length) gaps.push("target_causality");
+    if (!direct && !inference.inferredIngredientsPresent) {
+      if (!facts.length) gaps.push("official_facts");
+      if (!causal.length) gaps.push("target_causality");
+      if (!facts.some(fact => causal.some(cause => cause.url !== fact.url))) gaps.push("independent_origin");
+    }
     if (!magnitude.length && !hasMeasuredMagnitude(measured)) gaps.push("magnitude");
-    if (!facts.some(fact => causal.some(cause => cause.url !== fact.url))) gaps.push("independent_origin");
-    return { target: anomaly.target, status: gaps.length ? "incomplete" : "eligible_for_review", gaps, evidenceIds: sources.map(source => source.id), magnitudeSupport: magnitude.length ? "reported" : hasMeasuredMagnitude(measured) ? "measured" : "missing", magnitudeObservationIds: measured.records.map(item => item.id) };
+    return { target: anomaly.target, status: gaps.length ? "incomplete" : "eligible_for_review", gaps, attributionCandidates: inference, evidenceIds: sources.map(source => source.id), magnitudeSupport: magnitude.length ? "reported" : hasMeasuredMagnitude(measured) ? "measured" : "missing", magnitudeObservationIds: measured.records.map(item => item.id) };
   });
   return { market: envelope.market, marketAsOf: envelope.marketAsOf, eligibleCount: entries.filter(entry => !entry.gaps.length).length, requiredCount: entries.length, entries };
 }
 
-export function validateCompleteRecap(value, envelope, ledger, social, { requireComplete = false, tradingData = null } = {}) {
+export function validateCompleteRecap(value, envelope, ledger, social, { requireComplete = false, tradingData = null, attribution = null } = {}) {
   const targets = recapTargets(envelope);
+  const attributions = attribution ? new Map(validateRecapAttribution(attribution, envelope, targets, ledger, { requireComplete }).entries.map(item => [item.target, item])) : null;
   const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
   const sourceMap = new Map(ledger.sources.map((item) => [item.id, item]));
   if (value.contractVersion !== RECAP_VERSION || value.market !== envelope.market || value.marketAsOf !== envelope.marketAsOf || !Array.isArray(value.entries) || value.entries.length !== targets.length) throw new Error("复盘必须逐项覆盖完整的 20 个目标");
@@ -191,6 +198,8 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
   const socialMap = new Map((social.leads ?? []).map((item) => [item.id, item]));
   const entries = targets.map((target) => {
     const raw = byTarget.get(target.symbol);
+    const chain = attributions?.get(target.symbol);
+    const inferred = chain?.basis === "inferred";
     if (!["explained", "partial", "unresolved"].includes(raw.status) || !["high", "medium", "low"].includes(raw.confidence)) throw new Error(`${target.symbol} 复盘状态无效`);
     if (raw.status !== "explained" && raw.confidence === "high") throw new Error(`${target.symbol} 证据不足不能标为高置信`);
     const cause = ids(raw.evidenceIds, sourceMap, target.symbol, raw.status === "unresolved" ? 0 : 2);
@@ -199,11 +208,14 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const measurementIds = raw.magnitudeObservationIds ?? [];
     if (!Array.isArray(measurementIds)) throw new Error(`${target.symbol} 幅度观测引用无效`);
     const anomaly = completeRecapPlan(envelope).anomalies.find((item) => item.target === target.symbol);
-    if ([...cause, ...size].some((source) => source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) throw new Error(`${target.symbol} 引用了其他目标的证据`);
+    const linkedIds = inferred ? new Set([...attributionEvidenceIds(chain), ...chain.counterEvidenceIds]) : new Set();
+    if (cause.some(source => !linkedIds.has(source.id) && (source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) || size.some(source => source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) throw new Error(`${target.symbol} 引用了其他目标的证据`);
+    if (chain && raw.status !== "unresolved" && (chain.basis === "unresolved" || attributionEvidenceIds(chain).some(id => !raw.evidenceIds.includes(id)))) throw new Error(`${target.symbol} 成稿未保留完整的已审查传导证据`);
     const causal = cause.filter((source) => source.anomalyId === anomaly.id && source.role === "causal" && source.targets.includes(target.symbol) && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
-    if (raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
+    if (!inferred && raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
     if (raw.status === "explained") {
       if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
+      if (inferred && raw.confidence !== "medium") throw new Error(`${target.symbol} 经传导机制作出的推断只能标为中等置信`);
       if (!size.some((source) => source.anomalyId === anomaly.id && source.role === "causal" && SIZE_EVIDENCE.test(source.supportingExcerpt)) && !hasMeasuredMagnitude(measured, measurementIds)) throw new Error(`${target.symbol} 缺少成交、振幅、分化或相反力量的直接证据或完整幅度观测`);
       if (raw.confidence === "low") throw new Error(`${target.symbol} 低置信归因不能视为完成`);
       if (raw.confidence === "high") {
@@ -215,6 +227,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     let grounding = [JSON.stringify(target), JSON.stringify(marketObservation), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);
     const whyEn = readerText(raw.whyEn, `${target.symbol} whyEn`, 40, 1_800);
+    if (inferred && (!/推断|推论|推测/u.test(why) || !/\binfer(?:ence|red|ring)?\b/iu.test(whyEn))) throw new Error(`${target.symbol} 推断必须在两种语言中明确标注`);
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);
     const magnitudeEn = readerText(raw.magnitudeEn, `${target.symbol} magnitudeEn`, 40, 1_200);
     const selectedMeasurements = validateMagnitudeObservationIds(measurementIds, measured, { copy: magnitude, copyEn: magnitudeEn });

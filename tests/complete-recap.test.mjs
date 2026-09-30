@@ -213,7 +213,8 @@ test("comprehensive research freezes batch access hints and reproduces them on r
   try {
     const f = recapFixture();
     const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root,
-      sourceVerifier: async outputs => ({ sources: [], rejected: outputs.slice(0, 2).map((output, i) => ({ anomalyId: output.anomalyId, url: `https://apnews.com/article/refused-${i}`, reason: "HTTP 403" })) }),
+      transmissionCollector: async () => f.transmissionData,
+      sourceVerifier: async outputs => ({ sources: [f.ledger.sources[0]], rejected: outputs.slice(0, 2).map((output, i) => ({ anomalyId: output.anomalyId, url: `https://apnews.com/article/refused-${i}`, reason: "HTTP 403" })) }),
     });
     await workflow.initialize();
     workflow.manifest.socialHash = stableHash(f.social);
@@ -225,13 +226,16 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     workflow.assertResearchCapacity = async () => {};
     const contexts = [];
     workflow.researchAnomaly = async anomaly => {
-      contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains], macroData: structuredClone(workflow.macroData) });
+      contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains], macroData: structuredClone(workflow.macroData), sharedEvidence: structuredClone(workflow.recapResearchEvidence), payload: workflow.researchPayload(anomaly) });
       return [{ anomalyId: anomaly.id, role: "facts", sources: [] }];
     };
     await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
     assert.ok(contexts[0].domains.includes("apnews.com"));
     assert.ok(!contexts[4].domains.includes("apnews.com"));
     assert.equal(contexts[4].urls.length, 2);
+    assert.deepEqual(contexts[0].sharedEvidence, []);
+    assert.deepEqual(contexts[4].sharedEvidence, [f.ledger.sources[0]]);
+    assert.deepEqual(contexts[4].payload.sharedEvidence, contexts[4].sharedEvidence);
     const first = structuredClone(contexts);
     contexts.length = 0;
     await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
