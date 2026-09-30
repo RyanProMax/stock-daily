@@ -90,3 +90,13 @@ The screenshots use separated **layout fixtures** with controlled prose and sour
 - Production rollout and scheduled completion require a real approved report, exact production readback, and measurement of its storage/runtime cost.
 
 The goal is not marked complete by these implementation checks.
+
+## Date precision and first-party identity review
+
+Official issuer domains now derive from the existing reviewed identity registry. AMD, Micron, Dell, CoreWeave and Vertiv are accepted as issuer sources; specialist commentary sites remain expert sources. Conference Board is registered separately as an original statistical release authority.
+
+Date-only original publication metadata is retained as a calendar date, with intraday availability explicitly unknown. It is allowed only for factual official first-party releases, within the calendar-date evidence window; it cannot establish intraday causal ordering. Precise contemporary corroboration remains necessary for causal use. Generic modification metadata, future dates, invalid calendar dates, and date-only media/event passages remain inadmissible. The exact Conference Board consumer-confidence release block is a narrowly recognized date-only release record, not a general fallback from an Updated label.
+
+A separate real original-source preflight located the complete Conference Board sentence stating that consumers anticipating higher interest rates rose by 5.2 percentage points to 68.4%. Its release date was September 29; no clock time was invented. The corrected full-sentence passage, raw public HTML, hash and verification record reside in work/complete-recap-2026-09-30-primary-release-preflight.json. This corroborates one X lead's factual premise, not equity causality or the other four leads, and is not retroactively inserted into the earlier research runs.
+
+Verification passed 321 Node tests and 12 Python tests, TypeScript, production build and repository safety checks. The date precision UI fixtures passed eight configurations (CN/US × Chinese/English × 1440/390), all 160 individual expanded-state checks, full-page/collapsed/history checks, and visual review of every expanded disclosure via all 40 contact sheets. Dates retained the intended calendar day in both markets without fabricated hours; timestamped citations still showed localized times. No clipping, horizontal page/card overflow, off-canvas content, raw ISO dates, or browser errors were found. Screenshot fixtures under review/date-precision test presentation only, not real market attribution.

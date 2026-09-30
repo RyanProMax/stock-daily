@@ -8,6 +8,7 @@ Decide whether each reader-facing claim is factually supported, causally useful,
 
 # Success criteria
 
+- A date-only official release establishes a calendar date, not intraday availability. Require a separate precisely timed original passage corroborating the same event and values before accepting chronological causality; a rolling release may include later revisions. Never accept an invented publication hour.
 - Review every claim ID exactly once.
 - Require material facts to be supported by the supplied verified evidence. Its `supportingExcerpt` has been independently located in the full source page and may establish qualitative facts omitted by the shorter `facts` summary. Missing from that summary alone is not an unsupported-fact defect. Quantitative copy must still satisfy the stricter numeral rule below, and causal claims must match the approved card and causal passage.
 - Treat `deterministicNumberGrounding` as verified market-input support for prices, changes, and target moves when deciding whether a reader number is supported. It is review context only and must never be quoted as process language.

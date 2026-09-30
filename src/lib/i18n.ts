@@ -571,6 +571,17 @@ export function formatDate(date: string, language: Language) {
   }).format(new Date(`${date}T00:00:00+08:00`));
 }
 
+export function formatEvidenceTime(value: string, language: Language, market: MarketRegion) {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/u.test(value);
+  const date = new Date(dateOnly ? `${value}T00:00:00Z` : value);
+  if (!Number.isFinite(date.getTime())) return language === "zh" ? "日期待核实" : "Date unconfirmed";
+  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
+    month: language === "zh" ? "long" : "short", day: "numeric",
+    ...(dateOnly ? {} : { hour: "2-digit", minute: "2-digit", hour12: language === "en" }),
+    timeZone: dateOnly ? "UTC" : market === "CN" ? "Asia/Shanghai" : "America/New_York",
+  }).format(date);
+}
+
 export function formatMarketDate(date: string, language: Language) {
   return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
     month: language === "zh" ? "long" : "short",

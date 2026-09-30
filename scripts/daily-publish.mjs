@@ -26,6 +26,7 @@ import {
   topSectorHeat,
 } from "./sector-heat.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
+import { isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 
 export { verifiedExternalSourceType } from "./source-registry.mjs";
 
@@ -592,6 +593,7 @@ function validateEvidence(value, input, market, label) {
     10,
   );
   const publishedTime = Date.parse(publishedAt);
+  const dateOnly = isCalendarDate(publishedAt) && evidence.kind === "official" && evidence.platform === "web" && sourceType === "first_party";
   if (
     !source.startsWith("https://") ||
     SEARCH_RESULT_URL.test(source) ||
@@ -600,7 +602,7 @@ function validateEvidence(value, input, market, label) {
     !["web", "x"].includes(evidence.platform) ||
     typeof evidence.authorHandle !== "string" ||
     !Number.isFinite(publishedTime) ||
-    !ISO_TIMESTAMP.test(publishedAt)
+    (!ISO_TIMESTAMP.test(publishedAt) && !dateOnly)
   ) {
     throw new Error(`${label} 证据字段无效`);
   }
@@ -646,6 +648,8 @@ function validateEvidence(value, input, market, label) {
       `${title} ${facts}`,
       `${label}.facts`,
     );
+  } else if (dateOnly) {
+    if (!officialReleaseDateInWindow(publishedAt, { market, session }) || dataSources.has(source)) throw new Error(`${label} 正式发布日期不在本次市场窗口内`);
   } else {
     const start = Date.parse(session.windowStart);
     const close = Date.parse(session.windowEnd);
@@ -671,7 +675,7 @@ function validateEvidence(value, input, market, label) {
     facts,
     source,
     sourceLabel,
-    publishedAt: new Date(publishedTime).toISOString(),
+    publishedAt: dateOnly ? publishedAt : new Date(publishedTime).toISOString(),
     kind: evidence.kind,
     sourceType: verifiedSourceType,
     platform: evidence.platform,

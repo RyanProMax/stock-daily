@@ -1,8 +1,9 @@
 import type { Language, MarketRegion, RecapEntry } from "../types";
+import { formatEvidenceTime } from "../lib/i18n";
 
 export default function RecapDetails({ entry, language, market }: { entry?: RecapEntry; language: Language; market: MarketRegion }) {
   const en = language === "en";
-  const time = (value: string) => new Intl.DateTimeFormat(en ? "en-US" : "zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: market === "CN" ? "Asia/Shanghai" : "America/New_York" }).format(new Date(value));
+  const time = (value: string) => formatEvidenceTime(value, language, market);
   if (!entry) return <p className="recap-pending">{en ? "Attribution pending verification" : "本期归因待核实"}</p>;
   const status = entry.status === "explained" ? (en ? "Evidence and interpretation" : "证据与归因") : (en ? "Evidence incomplete" : "归因证据仍不完整");
   const confidence = entry.confidence === "high" ? (en ? "High confidence" : "把握较高") : entry.confidence === "medium" ? (en ? "Moderate confidence" : "中等把握") : (en ? "Low confidence" : "把握较低");

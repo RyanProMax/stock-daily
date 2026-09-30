@@ -2044,7 +2044,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v11",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v12",
       researchOutputs,
     });
     const key = `evidence-verification-${inputHash.slice(0, 8)}`;

@@ -27,6 +27,7 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 - Select complete sentences that fit the excerpt limit. Never rewrite a passage, cut a word, repair inaccessible text from memory, or invent an ellipsis as copied source text.
 - Every numeral placed in `facts` must also appear in the copied `supportingExcerpt`. Omit dates or figures that occur elsewhere on the page unless you also copy the exact passage containing them.
 - Record the page's displayed publication time, normalized to ISO 8601 with `Z` or an explicit numeric offset. Convert a displayed timezone abbreviation deterministically; never output the abbreviation itself.
+- If an official first-party release provides only a publication/release date, preserve exactly `YYYY-MM-DD` in `publishedAt` with `kind: official`. Do not invent midnight, the scheduled release hour, or another page's clock time. This can establish dated facts, while intraday availability remains unverified. Prefer a precise release timestamp when available. Generic modification dates, related articles and a dated observation in a rolling table are not release dates. The Conference Board's exact current consumer-confidence page labels its latest release date as Updated; this specifically identified release record can be used at date precision.
 - If the seed finds earnings, results, or guidance as the candidate catalyst, the adaptive query must explicitly seek the named company's reported revenue/EPS/guidance together with analyst consensus. Return at least two typed comparisons containing actual and consensus/baseline values before treating the financial event as usable evidence; an issuer release without consensus figures is not enough by itself. Do not calculate the delta. Every `actualDisplay` and `baselineDisplay` must appear verbatim inside `supportingExcerpt`; otherwise omit that comparison.
 - For EPS or profit comparisons, inspect the full article and issuer footnotes for investment gains, tax benefits and other non-recurring items. Include any material explanation in the exact excerpt, facts and comparison note. A reported non-GAAP figure can still include investment gains; never describe its entire difference from consensus as operating improvement. Prefer a revenue or forward-guidance comparison when the profit basis cannot be reconciled.
 - Preserve the source's financial scale in `unit`: use `hundred_million_cny` for 亿元, `million_cny` for 百万元 or million yuan, and `cny` for yuan/RMB amounts. Never put a renminbi amount in `other`.
@@ -41,7 +42,7 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.
 - Do not infer a price cause and set `causalConnection` to false.
-- Do not use social posts, mirrors, search pages, inaccessible pages, or pages without a precise timestamp.
+- Do not use social posts, mirrors, search pages, inaccessible pages, or undated pages. Date-only evidence is restricted to the official first-party release rule above.
 - If a required baseline cannot be verified, leave comparisons empty instead of calling the result a beat or miss.
 
 # Output

@@ -869,6 +869,31 @@ export function sourcePublishedAtCandidates(
   ];
 }
 
+export function sourcePublishedDateCandidates(body, contentType = "text/html", source = "") {
+  if (!/(?:html|xhtml)/iu.test(contentType)) return [];
+  const decoded = decodeSourceBody(body, contentType);
+  const values = jsonLdArticlePublishedValues(decoded, source);
+  for (const match of decoded.matchAll(/<meta[^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]*>/giu)) values.push(match[1]);
+  for (const match of decoded.matchAll(/<meta[^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]*>/giu)) values.push(match[1]);
+  for (const match of decoded.matchAll(/<time[^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]+datetime=["'](\d{4}-\d{2}-\d{2})["'][^>]*>/giu)) values.push(match[1]);
+  for (const match of decoded.matchAll(/<time[^>]+datetime=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]*>/giu)) values.push(match[1]);
+  // This exact first-party series labels the date of its current release as
+  // "Updated". It is a date-only release record, not generic modification
+  // metadata or an invented intraday publication time.
+  let url;
+  try { url = new URL(source); } catch { return []; }
+  if (url.hostname === "www.conference-board.org" && url.pathname === "/topics/tags.cfm" && url.searchParams.get("parent") === "consumer-confidence") {
+    const visible = sourceBodyText(body, contentType);
+    const match = /US Consumer Confidence[^\n]*\nLatest Press Release\nUpdated:\s*(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s*([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\n|$)/u.exec(visible);
+    if (match) {
+      const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const month = months.indexOf(match[1]);
+      if (month >= 0) values.push(`${match[3]}-${String(month + 1).padStart(2, "0")}-${match[2].padStart(2, "0")}`);
+    }
+  }
+  return [...new Set(values.filter(value => /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value))];
+}
+
 export function sourceBodyText(body, contentType = "text/html") {
   const decoded = decodeSourceBody(body, contentType);
   if (!/(?:html|xhtml)/iu.test(contentType)) {
@@ -922,6 +947,7 @@ export async function readExternalSource(
     maxBytes = MAX_SOURCE_BYTES,
     signal,
     structured = false,
+    includeRaw = false,
   } = {},
 ) {
   const resolveDestination =
@@ -1049,6 +1075,8 @@ export async function readExternalSource(
         contentType,
         text,
         publishedAtCandidates,
+        publishedDateCandidates: sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
+        ...(includeRaw ? { rawBody: response.body } : {}),
       };
     }
     if (response.status >= 300 && response.status < 400 && response.location) {

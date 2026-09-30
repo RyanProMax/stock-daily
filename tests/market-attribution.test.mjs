@@ -608,7 +608,7 @@ test("external evidence must fall inside the relevant market window", () => {
   );
 });
 
-test("event and official evidence cannot be published after the market close", () => {
+test("precise event and official times cannot follow close; date-only primary facts retain their uncertainty", () => {
   const input = validateInput(fixtureInput());
   const report = fixtureReport(input);
   report.drivers[0].evidence[1].publishedAt = "2026-08-21T07:00:01.000Z";
@@ -619,10 +619,8 @@ test("event and official evidence cannot be published after the market close", (
 
   const dateOnly = fixtureReport(input);
   dateOnly.drivers[0].evidence[1].publishedAt = "2026-08-21";
-  assert.throws(
-    () => validateReport(dateOnly, input),
-    /证据字段无效/,
-  );
+  const checked = validateReport(dateOnly, input);
+  assert.equal(checked.drivers[0].evidence[1].publishedAt, "2026-08-21");
 });
 
 test("market evidence must copy an input URL and exact session close", () => {

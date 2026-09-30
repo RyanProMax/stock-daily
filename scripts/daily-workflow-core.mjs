@@ -5,8 +5,9 @@ import {
   verifiedExternalSourceLabel,
   verifiedExternalSourceType,
 } from "./source-registry.mjs";
+import { isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v28";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v29";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -891,7 +892,8 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
         originalUrl: url,
         sourceLabel: text(source.sourceLabel, `${role}.sourceLabel`, 2, 80),
         title: text(source.title, `${role}.title`, 4, 220),
-        publishedAt: dateTime(source.publishedAt, `${role}.publishedAt`),
+        publishedAt: isCalendarDate(source.publishedAt) && role === "facts" && source.kind === "official" && verifiedExternalSourceType(url) === "first_party"
+          ? source.publishedAt : dateTime(source.publishedAt, `${role}.publishedAt`),
         kind: enumValue(
           source.kind,
           ["official", "event", "market_wrap"],
@@ -1045,7 +1047,12 @@ function sourceTimeInEvidenceWindow(source, envelope, value) {
   );
 }
 
-function verifiedSourceTime(source, envelope, candidates) {
+function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], sourceType) {
+  if (isCalendarDate(source.publishedAt)) {
+    if (source.role !== "facts" || source.kind !== "official" || sourceType !== "first_party" || !dateCandidates.includes(source.publishedAt)) throw new Error(`${source.originalUrl} 日期级正式发布与一手原文不一致`);
+    if (!officialReleaseDateInWindow(source.publishedAt, envelope)) throw new Error(`${source.originalUrl} 正式发布日期不在交易窗口内`);
+    return source.publishedAt;
+  }
   if (candidates.length === 0) {
     throw new Error(`${source.originalUrl} 未找到文章级发布时间`);
   }
@@ -1336,15 +1343,18 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.comparisonNotesChecked === true && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const opened = await reader(candidate.originalUrl, { signal });
+        const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         const publishedAt = verifiedSourceTime(
           candidate,
           envelope,
           opened.publishedAtCandidates ?? [],
+          opened.publishedDateCandidates ?? [],
+          sourceType,
         );
         let normalizedCandidate = {
           ...candidate,
@@ -1356,7 +1366,6 @@ export async function verifyResearchSources(
             envelope,
           ),
         };
-        const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         if (sourceType === "expert") {
           throw new Error("来源不在一手或专业媒体注册表中");
         }
@@ -1417,6 +1426,9 @@ export async function verifyResearchSources(
             ...normalizedCandidate,
             earningsContextChecked: true,
             comparisonNotesChecked: true,
+            timingChecked: true,
+            timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
+            ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,
             id,
             url: finalUrl,

@@ -1,9 +1,20 @@
+import xSources from "../data/ai-x-sources.json" with { type: "json" };
+
+// These issuer domains already have a first-party identity reference in the
+// reviewed original-source registry. Specialist/KOL websites are not issuers.
+const VERIFIED_ISSUERS = new Map();
+for (const source of xSources) if (source.authority === "first_party" && source.identityEvidence) {
+  for (const domain of source.canonicalDomains) if (!VERIFIED_ISSUERS.has(domain)) VERIFIED_ISSUERS.set(domain, source.label);
+}
+
 const FIRST_PARTY_SOURCE_DOMAINS = [
+  ...VERIFIED_ISSUERS.keys(),
   "bea.gov",
   "bls.gov",
   "cmegroup.com",
   "cninfo.com.cn",
   "commerce.gov",
+  "conference-board.org",
   "csrc.gov.cn",
   "csindex.com.cn",
   "customs.gov.cn",
@@ -67,6 +78,7 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
 ]);
 
 const SOURCE_LABELS = new Map([
+  ...VERIFIED_ISSUERS.entries(),
   ["21jingji.com", "21世纪经济报道"],
   ["apnews.com", "Associated Press"],
   ["barrons.com", "Barron's"],
@@ -76,6 +88,7 @@ const SOURCE_LABELS = new Map([
   ["chnfund.com", "中国基金报"],
   ["cnbc.com", "CNBC"],
   ["cnstock.com", "上海证券报"],
+  ["conference-board.org", "The Conference Board"],
   ["finance.eastmoney.com", "东方财富"],
   ["finance.sina.com.cn", "新浪财经"],
   ["finance.yahoo.com", "Yahoo Finance"],

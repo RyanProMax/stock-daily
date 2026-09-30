@@ -1,5 +1,5 @@
 import { ExternalLink } from "lucide-react";
-import { formatTemplate } from "../lib/i18n";
+import { formatTemplate, formatEvidenceTime } from "../lib/i18n";
 import RecapDetails from "./RecapDetails";
 import type {
   AiChainConstituent,
@@ -183,16 +183,7 @@ function evidenceTime(
   language: Language,
   market: MarketRegion,
 ) {
-  const date = new Date(publishedAt);
-  if (Number.isNaN(date.getTime())) return publishedAt;
-  return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
-    month: language === "zh" ? "long" : "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: language === "en",
-    timeZone: market === "CN" ? "Asia/Shanghai" : "America/New_York",
-  }).format(date);
+  return formatEvidenceTime(publishedAt, language, market);
 }
 
 function SnapshotEvidenceList({
