@@ -82,6 +82,33 @@ test("a bounded explanatory clause and climbed preserve the exact maturity and p
   for (const altered of [quote.replace("climbed", "fell"), quote.replace("30-year", "10-year"), quote.replace("Thursday", "Wednesday"), quote.replace("5.59%", "5.54%"), quote.replace("which takes", "after the 10-year yield, which takes"), quote.replace("many years down the line, climbed", "many years down the line. Separately, another yield climbed")]) assert.equal(reportedRateFactorMatch(factor, { ...f.report, supportingExcerpt: altered }, f.envelope), null);
 });
 
+test("a common rate reaction can support a qualified sector inference without becoming direct sector reporting", async () => {
+  const f = await fixture();
+  const sector = f.envelope.sectorPerformance.find(item => item.symbol === "XLU");
+  sector.change = "-0.68%";
+  const targets = recapTargets(f.envelope), target = targets.find(item => item.symbol === "XLU");
+  const background = { ...f.ledger.sources.find(source => source.id === "0-facts"), id: "utility-inverse-exposure", kind: "background", publishedAt: "2026-01-28", targets: ["XLU"], scope: "sector", causalConnection: false, backgroundSubjects: ["XLU"], supportingExcerpt: "Utilities Sector Risk: The value of regulated utility equity securities may tend to have an inverse relationship to the movement of interest rates." };
+  f.ledger.sources.push(background);
+  const entry = {
+    target: "XLU", basis: "inferred", observedReturn: target.change,
+    counterAssessment: "Company-specific effects remain unverified; this directionally consistent common factor does not identify the dominant cause or exact contribution.", counterEvidenceIds: [],
+    chains: [{ rootEvidenceId: f.factor.id, reactionEvidenceId: f.report.id, timingEvidenceId: null, mechanismEvidenceIds: [background.id], eventAnchors: ["10-year U.S. Treasury", "2026-08-21"], expectedDirection: "negative", transmission: "The observed long yield increased, and the independent broad-market passage links higher yields with valuation pressure. The utility fund's own disclosure states an inverse interest-rate relationship, supplying the separate target mechanism for a possible negative contribution.", limitations: "This is a par-yield observation, distinct from the benchmark quotation. Historical publication time is unknown, and neither dominance nor an exact contribution is established." }],
+  };
+  const assessment = { ...f.attribution, entries: targets.map(item => item.symbol === "XLU" ? entry : { target: item.symbol, basis: "unresolved", observedReturn: item.change, counterAssessment: "No complete independently supported transmission chain was selected for this separate target.", counterEvidenceIds: [], chains: [] }) };
+  const validate = () => validateRecapAttribution(assessment, f.envelope, targets, f.ledger, { macroData: f.macroData });
+  const originalTargets = [...f.report.targets];
+  assert.ok(!originalTargets.includes("XLU"));
+  assert.doesNotThrow(validate);
+  assert.deepEqual(f.report.targets, originalTargets);
+  entry.basis = "reported";
+  assert.throws(validate, /观测不能伪装/);
+  entry.basis = "inferred"; entry.chains[0].mechanismEvidenceIds = [];
+  assert.throws(validate, /背景传导/);
+  entry.chains[0].mechanismEvidenceIds = [background.id];
+  target.change = "+0.68%"; entry.observedReturn = target.change;
+  assert.throws(validate, /实际涨跌/);
+});
+
 test("observed factors cannot be promoted to a reported event or omit anchors and unknown publication limitations", async () => {
   const f = await fixture();
   f.envelope.markets.find(item => item.symbol === "SPX").change = "-0.17%";
