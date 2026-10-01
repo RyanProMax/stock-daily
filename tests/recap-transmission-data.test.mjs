@@ -121,3 +121,54 @@ test("ambiguous repeated fund risk headings cannot establish an exposure, and ol
   assert.ok(!ambiguous.sources.some(item => item.targets[0] === 'XLF'));
   assert.ok(ambiguous.gaps.some(item => item.target === 'XLF'));
 });
+
+test("later financing, valuation and household-demand contexts are preserved without becoming current catalysts", async () => {
+  const f = recapFixture();
+  const financing = 'Profitability is largely dependent on the availability and cost of capital funds and can fluctuate significantly when interest rates change or due to increased competition.';
+  const valuation = 'Securities of financial services companies may experience a dramatic decline in value when such companies experience substantial declines in the valuations of their assets.';
+  const credit = 'Credit losses resulting from financial difficulties of borrowers and financial losses associated with investment activities can negatively impact the sector.';
+  const spending = 'Success depends heavily on disposable household income and consumer spending.';
+  const rawHtml = original()
+    .replace('Companies in the financial sector are affected by supply and demand, operating costs and government regulation.', `Companies in the financial sector are affected by supply and demand, operating costs and government regulation. ${financing} ${valuation} ${credit}`)
+    .replace('Companies in the consumer discretionary sector are affected by supply and demand, operating costs and government regulation.', `Companies in the consumer discretionary sector are affected by supply and demand, operating costs and government regulation. ${spending}`);
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(rawHtml) });
+  assert.deepEqual(book.gaps, []);
+  for (const sentence of [financing, valuation, credit]) assert.ok(book.sources.some(source => source.targets[0] === 'XLF' && source.supportingExcerpt.includes(sentence)));
+  assert.ok(book.sources.some(source => source.targets[0] === 'XLY' && source.supportingExcerpt.includes(spending)));
+  assert.ok(book.sources.every(source => source.kind === 'background' && source.causalConnection === false && source.supportingExcerpt.length <= 700));
+  const ledger = await verifyResearchSources([{ sources: book.sources, alternatives: [] }], f.envelope, { reader: transmissionSourceReader(book) });
+  assert.equal(ledger.sources.length, book.sources.length, JSON.stringify(ledger.rejected));
+  assert.equal(validateRecapTransmissionData(book, f.envelope, f.plan), book);
+});
+
+test("a following contrary financing qualification is retained, and an overlong qualification is rejected with a gap", async () => {
+  const f = recapFixture();
+  const mechanism = 'Higher interest rates may increase borrowing costs for financial services companies.';
+  const contrary = 'However, fixed-rate contracts may prevent an immediate increase in those financing costs.';
+  const base = 'Companies in the financial sector are affected by supply and demand, operating costs and government regulation.';
+  const rawHtml = original().replace(base, `${base} ${mechanism} ${contrary}`);
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(rawHtml) });
+  const relevant = book.sources.filter(source => source.supportingExcerpt.includes(mechanism));
+  assert.ok(relevant.length > 0);
+  assert.ok(relevant.every(source => source.supportingExcerpt.includes(contrary)));
+  const longer = rawHtml.replace(contrary, 'However, ' + 'existing fixed-rate financing contracts with additional conditions '.repeat(13) + 'may prevent an immediate increase in those financing costs.');
+  const longBook = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(longer) });
+  assert.ok(!longBook.sources.some(source => source.supportingExcerpt.includes(mechanism)));
+  assert.ok(longBook.gaps.some(gap => gap.target === 'XLF' && gap.reason.includes('未截断')));
+  const ledger = await verifyResearchSources([{ sources: longBook.sources, alternatives: [] }], f.envelope, { reader: transmissionSourceReader(longBook) });
+  assert.equal(ledger.sources.length, longBook.sources.length, JSON.stringify(ledger.rejected));
+});
+
+test("consecutive references retain the actual company subgroup rather than broadening a benefit to the whole fund", async () => {
+  const f = recapFixture();
+  const subgroup = 'Certain utility companies have experienced full or partial deregulation in recent years.';
+  const detail = 'These utility companies operate outside their original geographic regions and offer new services.';
+  const benefit = 'These opportunities may permit certain utility companies to earn more than their traditional regulated rates of return.';
+  const rawHtml = original().replace('Companies in the utilities sector are affected by supply and demand, operating costs and government regulation.', `Companies in the utilities sector are affected by supply and demand, operating costs and government regulation. ${subgroup} ${detail} ${benefit}`);
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(rawHtml) });
+  const relevant = book.sources.filter(source => source.supportingExcerpt.includes(benefit));
+  assert.ok(relevant.length > 0);
+  assert.ok(relevant.every(source => source.supportingExcerpt.includes(subgroup) && source.supportingExcerpt.includes(detail)));
+  const ledger = await verifyResearchSources([{ sources: book.sources, alternatives: [] }], f.envelope, { reader: transmissionSourceReader(book) });
+  assert.equal(ledger.sources.length, book.sources.length, JSON.stringify(ledger.rejected));
+});

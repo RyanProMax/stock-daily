@@ -14,7 +14,7 @@ import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identi
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v43";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v44";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];

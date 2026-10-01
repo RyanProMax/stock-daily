@@ -6,6 +6,10 @@ import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
 const CONFIG = new URL("../data/recap-transmission-sources.json", import.meta.url);
 const FACTOR = /demand|supply|costs?|rates?|financing|regulat/iu;
+const ECONOMIC_CONTEXT = /\b(?:demand|supply|costs?|rates?|financing|regulat\w*|spending|income|prices?|valuations?|credit|capital|profitability|competition|patents?|expenses?|fuel|economic|investment|reimbursement|debt|losses|earnings|dividends|returns?)\b/iu;
+const ANTECEDENT = /^(?:This|These|Such|They|Their|Its|Success|Profitability|For instance)\b/iu;
+const QUALIFICATION = /^(?:However|Nevertheless|Nonetheless|Although|While|But|Yet|Despite|In contrast|Conversely|This factor|These opportunities|Some companies,? however)\b/iu;
+const MAX_CONTEXTS = 16;
 
 function completeRiskSentences(section) {
   const offsets = [], footers = [...section.matchAll(/\n\d{1,3}\nFund Summaries\nX(?:[A-Z]{2}|LRE)\n/gu)];
@@ -20,6 +24,32 @@ function completeRiskSentences(section) {
     const end = item.index + item.segment.trimEnd().length;
     return section.slice(offsets[start], offsets[end - 1] + 1).trim();
   }).filter(Boolean);
+}
+
+function completeFactorContext(sentences, index, heading) {
+  let start = index;
+  while (ANTECEDENT.test(sentences[start])) {
+    if (start < 2) return null;
+    start--;
+  }
+  let quote = sentences.slice(start, index + 1).join('\n');
+  for (let next = index + 1; next < sentences.length && QUALIFICATION.test(sentences[next]); next++) quote += `\n${sentences[next]}`;
+  // Reject the whole candidate rather than truncating a necessary limitation.
+  return heading.length + quote.length + 1 <= 700 ? quote : null;
+}
+
+function excerptForContext(context, first, heading, section, envelope, anomaly) {
+  const prefix = first.length + context.length + 1 <= 700 ? first : heading;
+  let excerpt = `${prefix}\n${context}`;
+  if (!bodySupportsDeterministicTarget(excerpt, envelope, anomaly.target)) {
+    const firstContext = context.split('\n')[0];
+    const between = section.slice(heading.length, section.indexOf(firstContext) + context.length);
+    const marker = /\nFund Summaries\n(X(?:[A-Z]{2}|LRE))\n/u.exec(between);
+    if (marker?.[1] !== anomaly.target) throw new Error("风险正文未确认对应基金代码");
+    excerpt = `${prefix}\n${marker[1]}\n${context}`;
+  }
+  if (excerpt.length > 700) throw new Error("完整原始段落超过可核验长度");
+  return excerpt;
 }
 
 function derive(snapshot, envelope, plan) {
@@ -42,18 +72,19 @@ function derive(snapshot, envelope, plan) {
       const sentences = completeRiskSentences(section), first = sentences[0];
       // Segment an unpaged view, then recover the full original sentence.
       // A footer cannot orphan a subject or remove an economic qualification.
-      const factor = (name === "Utilities" ? sentences.slice(1).find(item => /inverse relationship.*interest rates/iu.test(item)) : null) ?? sentences.slice(1).find(item => FACTOR.test(item) && heading.length + item.length + 1 <= 700);
-      if (!first || !factor || heading.length + factor.length + 1 > 700) throw new Error("未找到完整且有传导因素的原始句子");
-      const prefix = first.length + factor.length + 1 <= 700 ? first : heading;
-      let excerpt = `${prefix}\n${factor}`;
-      if (!bodySupportsDeterministicTarget(excerpt, envelope, anomaly.target)) {
-        const between = section.slice(heading.length, section.indexOf(factor) + factor.length);
-        const marker = /\nFund Summaries\n(X(?:[A-Z]{2}|LRE))\n/u.exec(between);
-        if (marker?.[1] !== anomaly.target) throw new Error("风险正文未确认对应基金代码");
-        excerpt = `${prefix}\n${marker[1]}\n${factor}`;
+      const candidates = sentences.flatMap((sentence, index) => index > 0 && ECONOMIC_CONTEXT.test(sentence) ? [{ index, sentence, context: completeFactorContext(sentences, index, heading) }] : []);
+      const primary = (name === "Utilities" ? candidates.find(item => item.context && /inverse relationship.*interest rates/iu.test(item.sentence)) : null) ?? candidates.find(item => item.context && FACTOR.test(item.sentence)) ?? candidates.find(item => item.context);
+      if (!first || !primary) throw new Error("未找到完整且有传导因素的原始句子");
+      const selected = [], excerpts = new Set();
+      for (const item of [primary, ...candidates.filter(item => item !== primary)]) {
+        if (!item.context) { gaps.push({ target: anomaly.target, reason: "经济风险原句无法在引文上限内保留必要的完整上下文，未截断采纳" }); continue; }
+        if (selected.some(context => normalizedEvidenceText(context).includes(normalizedEvidenceText(item.context)))) continue;
+        if (selected.length >= MAX_CONTEXTS) { gaps.push({ target: anomaly.target, reason: "经济风险上下文超过单行业容量，未将未选句子视为完整覆盖" }); break; }
+        const excerpt = excerptForContext(item.context, first, heading, section, envelope, anomaly);
+        if (excerpts.has(excerpt)) continue;
+        selected.push(item.context); excerpts.add(excerpt);
+        sources.push({ originalUrl: config.url, sourceLabel: "SEC", title: `${config.issuer}: ${heading.slice(0, -1)}`, publishedAt: dates[0], kind: "background", supportingExcerpt: excerpt, facts: `${anomaly.observation.name}基金的一手风险披露说明，该行业的结构性暴露可能影响经营表现；这是此前披露的风险机制，不能单独证明本次交易日的价格原因。`, scope: "sector", targets: [anomaly.target], hypothesisIds: [anomaly.hypotheses[1].id], causalConnection: false, comparisons: [], role: "facts", anomalyId: anomaly.id });
       }
-      if (excerpt.length > 700) throw new Error("完整原始段落超过可核验长度");
-      sources.push({ originalUrl: config.url, sourceLabel: "SEC", title: `${config.issuer}: ${heading.slice(0, -1)}`, publishedAt: dates[0], kind: "background", supportingExcerpt: excerpt, facts: `${anomaly.observation.name}基金的一手风险披露说明，该行业的结构性暴露可能影响经营表现；这是此前披露的风险机制，不能单独证明本次交易日的价格原因。`, scope: "sector", targets: [anomaly.target], hypothesisIds: [anomaly.hypotheses[1].id], causalConnection: false, comparisons: [], role: "facts", anomalyId: anomaly.id });
     } catch (error) { gaps.push({ target: anomaly.target, reason: error.message }); }
   }
   return { sources, gaps };
