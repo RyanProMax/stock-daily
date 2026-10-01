@@ -24,6 +24,65 @@ function original(body = html()) {
   return { finalUrl: url, status: 200, contentType: "text/html", text: sourceBodyText(rawBody), rawBody, publishedAtCandidates: sourcePublishedAtCandidates(rawBody, "text/html", url), publishedDateCandidates: sourcePublishedDateCandidates(rawBody, "text/html", url), articleProvenance: sourceArticleProvenance(body, url), metadataReceipts: [] };
 }
 
+const micronUrl = "https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Fiscal-Fourth-Quarter-and-Full-Year-2026-Results/default.aspx";
+const micronTitle = "Micron Technology, Inc. Reports Record Fiscal Fourth-Quarter and Full-Year 2026 Results";
+const micronArticle = { "@type": "NewsArticle", mainEntityOfPage: { "@id": micronUrl }, headline: micronTitle, datePublished: "2026-09-30T15:01:00Z", dateModified: "2026-09-30T15:01:00Z", publisher: { "@type": "Corporation", name: "Micron", legalName: "Micron Technology, Inc.", url: "https://investors.micron.com" } };
+function micronHtml(data = micronArticle) {
+  return `<html><head><meta property="og:url" content="${micronUrl}"><script type="application/ld+json">${JSON.stringify(data)}</script></head><body><h1>Press release</h1><main><div class="evergreen-news-details"><div class="evergreen-news-details-item"><h3 class="evergreen-news-title">${micronTitle}</h3><span class="evergreen-news-date-text">September 30, 2026</span><p>Micron Technology, Inc. (Nasdaq: MU) announced its results.</p></div></div></main></body></html>`;
+}
+
+test("the reviewed Micron release binds its owned H3, calendar and corporate legal identity", () => {
+  const result = sourceArticleProvenance(micronHtml(), micronUrl);
+  assert.equal(result.origin.key, "issuer:micron.com");
+  assert.equal(result.origin.identified, true);
+  assert.deepEqual(result.publication, { status: "verified", initialPublishedAt: "2026-09-30T15:01:00.000Z", currentVersionAt: "2026-09-30T15:01:00.000Z", timeBasis: "first_publication", boundReleaseDate: "2026-09-30" });
+});
+
+test("an unrelated heading, calendar, issuer, link or duplicate module cannot lend the Micron release a clock", () => {
+  const base = micronHtml();
+  const mutations = [
+    base.replace(`<h3 class="evergreen-news-title">${micronTitle}`, '<h3 class="evergreen-news-title">Another release'),
+    base.replace("September 30, 2026", "October 1, 2026"),
+    base.replace('"legalName":"Micron Technology, Inc."', '"legalName":"Nvidia Corporation"'),
+    base.replace('"name":"Micron"', '"name":"Q4 Inc"'),
+    base.replace('"url":"https://investors.micron.com"', '"url":"https://another.example"'),
+    base.replace(`content="${micronUrl}"`, 'content="https://investors.micron.com/other"'),
+    base.replace('<div class="evergreen-news-details">', '<div class="other-news-details">'),
+    base.replace("</main>", '<div class="evergreen-news-details"></div></main>'),
+    base.replace('"dateModified":"2026-09-30T15:01:00Z"', '"dateModified":"2026-09-30T15:01:00"'),
+  ];
+  for (const body of mutations) assert.equal(sourceArticleProvenance(body, micronUrl).publication.status, "unverified_update");
+  const elsewhere = micronUrl.replace("investors.micron.com", "www.hpe.com");
+  assert.notEqual(sourceArticleProvenance(base.replaceAll(micronUrl, elsewhere), elsewhere)?.publication?.status, "verified");
+});
+
+test("a matching Micron calendar claim upgrades only to its rederived native clock and remains auditable", async () => {
+  const envelope = structuredClone(recapFixture().envelope);
+  envelope.marketAsOf = "2026-10-01";
+  Object.assign(envelope.session, { asOf: "2026-10-01", windowStart: "2026-09-30T20:00:00.000Z", windowEnd: "2026-10-01T20:00:00.000Z", wrapDeadline: "2026-10-01T22:00:00.000Z" });
+  const rawBody = Buffer.from(micronHtml());
+  const opened = { finalUrl: micronUrl, status: 200, contentType: "text/html", rawBody, text: sourceBodyText(rawBody), publishedAtCandidates: sourcePublishedAtCandidates(rawBody, "text/html", micronUrl), publishedDateCandidates: [], articleProvenance: sourceArticleProvenance(rawBody.toString(), micronUrl) };
+  const source = { originalUrl: micronUrl, title: micronTitle, publishedAt: "2026-09-30", kind: "official", scope: "event_only", targets: [], role: "facts", anomalyId: "micron-calendar", hypothesisIds: ["micron-calendar-event"], causalConnection: false, facts: "Micron Technology, Inc. announced its results.", supportingExcerpt: "Micron Technology, Inc. (Nasdaq: MU) announced its results.", comparisons: [] };
+  const research = value => ({ sources: [value], rejectedSources: [], alternatives: [] });
+  const ledger = await verifyResearchSources([research(source)], envelope, { reader: async () => opened });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
+  assert.equal(ledger.sources[0].publishedAt, "2026-09-30T15:01:00.000Z");
+  assert.equal(ledger.sources[0].timePrecision, "instant");
+  const book = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [snapshotFromOpenedSource(micronUrl, opened)] };
+  assert.doesNotThrow(() => auditLedgerSourceSnapshots(ledger, book, { envelope }));
+  const wrongDate = await verifyResearchSources([research({ ...source, publishedAt: "2026-10-01" })], envelope, { reader: async () => opened });
+  assert.equal(wrongDate.sources.length, 0);
+  assert.match(wrongDate.rejected[0].reason, /可见发布日期/);
+  for (const changed of [
+    { ...opened, rawBody: undefined },
+    { ...opened, articleProvenance: { ...opened.articleProvenance, publication: { ...opened.articleProvenance.publication, boundReleaseDate: "2026-10-01" } } },
+  ]) {
+    const rejected = await verifyResearchSources([research(source)], envelope, { reader: async () => changed });
+    assert.equal(rejected.sources.length, 0);
+    assert.match(rejected.rejected[0].reason, /原始正文重建/);
+  }
+});
+
 test("the bound news version retains both the original creation clock and the current availability clock", () => {
   const opened = original();
   assert.deepEqual(opened.publishedAtCandidates, [initial]);

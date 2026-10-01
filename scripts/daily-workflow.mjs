@@ -5,6 +5,7 @@ import {
   access,
   chmod,
   copyFile,
+  cp,
   mkdir,
   mkdtemp,
   readdir,
@@ -68,6 +69,7 @@ import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "./recap-company-background-data.mjs";
 import { planRecapResearchRepair } from "./recap-research-repair.mjs";
 import { recapEvidenceTiming } from "./evidence-timing.mjs";
+import { beginNativeAgentAttempt, finishNativeAgentAttempt, auditNativeAgentAttempt, nativeSearchQueries as looseSearchQueries } from "./native-agent-receipts.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -160,6 +162,7 @@ async function agentStageInvocation(role, payload, promptSuffix = "") {
   return {
     definition,
     prompt,
+    schemaText,
     schemaHash,
     promptHash: stableHash({
       prompt,
@@ -182,6 +185,15 @@ export async function agentStageFingerprint(role, payload, promptSuffix = "") {
     promptSuffix,
   );
   return { promptHash, schemaHash };
+}
+
+export function targetResearchEvidence(sources, anomaly) {
+  const subjects = new Set([anomaly.target, ...(anomaly.observation?.constituents ?? []).map(item => item.symbol)].filter(Boolean));
+  // Public events and common-factor observations remain competing leads. Only
+  // unrelated historical exposure is removed; no source is retagged or abridged.
+  return sources.filter(source => source.kind !== "background" ||
+    [...(source.targets ?? []), ...(source.backgroundSubjects ?? []), ...(source.companySubjects ?? [])].some(subject => subjects.has(subject)))
+    .map(source => structuredClone(source));
 }
 
 export function assertResearchQueryCount(events, role) {
@@ -299,32 +311,6 @@ export async function settleAgentResults(promises) {
 export function researchRepairFitsBudget(repairRole, searchQueryCount, limit = 12) {
   const required = repairRole === "both" ? 4 : 2;
   return searchQueryCount + required <= limit;
-}
-
-function looseSearchQueries(eventsText) {
-  const queries = [];
-  for (const line of String(eventsText).split(/\r?\n/u)) {
-    try {
-      const event = JSON.parse(line);
-      if (
-        event.type !== "item.completed" ||
-        event.item?.type !== "web_search" ||
-        event.item?.action?.type !== "search"
-      ) {
-        continue;
-      }
-      const action = event.item?.action;
-      const values = Array.isArray(action?.queries)
-        ? action.queries
-        : [action?.query];
-      for (const value of values) {
-        if (typeof value === "string" && value.trim()) queries.push(value.trim());
-      }
-    } catch {
-      // Failed event streams may end with one partial JSON line.
-    }
-  }
-  return queries;
 }
 
 function stagePayload(value) {
@@ -1080,6 +1066,9 @@ export class MarketWorkflow {
         }
         this.recoverInterruptedBudgetSessions();
         await this.reconcileInterruptedAgentRuns();
+        for (const run of [...(previous.agentRuns ?? []), ...(previous.failedAgentRuns ?? [])]) {
+          if (run.receiptArtifact) await auditNativeAgentAttempt(this.runDir, run);
+        }
         for (const run of previous.agentRuns ?? []) {
           for (const query of run.queries ?? []) {
             this.searchQueries.add(query);
@@ -1213,16 +1202,18 @@ export class MarketWorkflow {
       ) {
         continue;
       }
-      const eventsPath = resolve(this.runDir, "events", `${key}.jsonl`);
+      const eventsPath = resolve(this.runDir, stage.eventStreamArtifact ?? `events/${key}.jsonl`);
       const eventText = (await exists(eventsPath))
         ? await readFile(eventsPath, "utf8")
         : "";
       const queries = looseSearchQueries(eventText);
       const completedAt = this.now().toISOString();
+      const receipt = stage.invocationArtifact ? await finishNativeAgentAttempt(this.runDir, stage, { events: eventText, completedAt, capture: "interrupted" }) : {};
       this.manifest.failedAgentRuns = [
         ...(this.manifest.failedAgentRuns ?? []),
         {
           agentRunId: stage.agentRunId,
+          ...receipt,
           key,
           role: stage.role,
           status: "interrupted",
@@ -1233,13 +1224,14 @@ export class MarketWorkflow {
           promptHash: stage.promptHash,
           schemaHash: stage.schemaHash,
           eventHash: stableHash(eventText),
-          queries: [...new Set(queries)],
+          queries,
           searchCount: queries.length,
           exitCode: 128,
         },
       ];
       this.manifest.stages[key] = {
         ...stage,
+        ...receipt,
         status: "interrupted",
         completedAt,
         eventHash: stableHash(eventText),
@@ -1554,6 +1546,7 @@ export class MarketWorkflow {
         readFile(resolve(this.runDir, "events", `${key}.jsonl`), "utf8"),
       ]);
       if (existing.outputHash !== stableHash(outputText) || existing.eventHash !== stableHash(eventText)) return null;
+      if (existing.receiptArtifact) await auditNativeAgentAttempt(this.runDir, existing);
       return { output: JSON.parse(outputText), events: eventText, resumed: true };
     } catch {
       return null;
@@ -1581,14 +1574,14 @@ export class MarketWorkflow {
     inputArtifacts,
     promptSuffix = "",
   }) {
-    const { definition, prompt, promptHash, schemaHash } =
+    const { definition, prompt, schemaText, promptHash, schemaHash } =
       await agentStageInvocation(
         role,
         payload,
         promptSuffix,
       );
     const outputPath = resolve(this.runDir, "artifacts", `${key}.json`);
-    const eventsPath = resolve(this.runDir, "events", `${key}.jsonl`);
+    const eventsAliasPath = resolve(this.runDir, "events", `${key}.jsonl`);
     const checkpoint = await this.readAgentCheckpoint({ key, promptHash, schemaHash });
     if (checkpoint) return checkpoint;
     if (definition.search && this.searchQueryCount + this.reservedSearchQueryCount + 2 > this.searchQueryLimit) {
@@ -1611,17 +1604,21 @@ export class MarketWorkflow {
       const idleTimeoutMs = Math.min(definition.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS, timeoutMs);
       const agentRunId = randomUUID();
       const startedAt = this.now().toISOString();
+      const invocation = { agentRunId, key, role, startedAt, promptHash, schemaHash };
+      const attempt = await beginNativeAgentAttempt(this.runDir, invocation, { prompt, schemaText });
+      const eventsPath = resolve(this.runDir, attempt.eventStreamArtifact);
       const sandboxDir = await mkdtemp(
         resolve(AGENT_SANDBOX_ROOT, `${key.replace(/[^a-z0-9_-]+/giu, "-")}-`),
       );
       const sandboxSchemaPath = resolve(sandboxDir, "output.schema.json");
       const sandboxOutputPath = resolve(sandboxDir, "result.json");
       const isolatedCodexHome = await prepareIsolatedCodexHome({ sandboxDir });
-      await copyFile(resolve(AGENT_DIR, definition.schema), sandboxSchemaPath);
+      await writeFile(sandboxSchemaPath, schemaText, "utf8");
       this.manifest.stages[key] = {
         status: "running",
         role,
         agentRunId,
+        ...attempt,
         promptHash,
         schemaHash,
         filesystemIsolation: AGENT_FILESYSTEM_ISOLATION,
@@ -1685,6 +1682,10 @@ export class MarketWorkflow {
         await rm(sandboxDir, { recursive: true, force: true });
         throw error;
       }
+      const archivedOutput = await exists(sandboxOutputPath) ? await readFile(sandboxOutputPath, "utf8") : null;
+      const receipt = await finishNativeAgentAttempt(this.runDir, invocation, { events: result.stdout, stderr: result.stderr, outputText: archivedOutput, exitCode: result.code, completedAt: this.now().toISOString() });
+      this.manifest.stages[key] = { ...this.manifest.stages[key], ...receipt };
+      await writeFile(eventsAliasPath, result.stdout, "utf8");
       if (result.code !== 0) {
         const errorPath = resolve(this.runDir, "events", `${key}.stderr.txt`);
         await writeFile(errorPath, result.stderr, "utf8");
@@ -1695,6 +1696,7 @@ export class MarketWorkflow {
           ...(this.manifest.failedAgentRuns ?? []),
           {
             agentRunId,
+            ...receipt,
             key,
             role,
             status: "failed",
@@ -1705,7 +1707,7 @@ export class MarketWorkflow {
             promptHash,
             schemaHash,
             eventHash: stableHash(result.stdout),
-            queries: [...new Set(failedQueries)],
+            queries: failedQueries,
             searchCount: failedQueries.length,
             exitCode: result.code,
           },
@@ -1742,6 +1744,7 @@ export class MarketWorkflow {
           ...(this.manifest.failedAgentRuns ?? []),
           {
             agentRunId,
+            ...receipt,
             key,
             role,
             status: "invalid",
@@ -1752,7 +1755,7 @@ export class MarketWorkflow {
             promptHash,
             schemaHash,
             eventHash: stableHash(result.stdout),
-            queries: [...new Set(failedQueries)],
+            queries: failedQueries,
             searchCount: failedQueries.length,
             exitCode: result.code,
           },
@@ -1763,6 +1766,7 @@ export class MarketWorkflow {
       }
       const agentRun = {
         agentRunId,
+        ...receipt,
         key,
         role: role === "repair" ? "writer" : role,
         status: "completed",
@@ -1778,9 +1782,7 @@ export class MarketWorkflow {
         outputHash: stableHash(outputText),
         eventHash: stableHash(result.stdout),
         inputArtifacts,
-        outputArtifact: `artifacts/${key}.json`,
-        eventArtifact: `events/${key}.jsonl`,
-        queries: events.queries,
+        queries: looseSearchQueries(result.stdout),
         searchCount: events.searchCount,
       };
       this.manifest.agentRuns = [...this.manifest.agentRuns, agentRun];
@@ -1937,7 +1939,7 @@ export class MarketWorkflow {
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps, ...(this.macroData.chinaPmi ? { chinaPmiContext: this.macroData.chinaPmi.context, chinaPmiGaps: this.macroData.chinaPmi.gaps } : {}) } : {}),
-      ...(this.recapResearchEvidence ? { sharedEvidence: this.recapResearchEvidence } : {}),
+      ...(this.recapResearchEvidence ? { sharedEvidence: targetResearchEvidence(this.recapResearchEvidence, anomaly) } : {}),
       ...(this.pbocNewsContext?.articles.length || this.pbocNewsContext?.gaps.length ? { primaryPolicyContext: this.pbocNewsContext } : {}),
     };
   }
@@ -2068,7 +2070,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v40",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v41",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -3685,6 +3687,13 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
+  for (const run of [...(manifest.agentRuns ?? []), ...(manifest.failedAgentRuns ?? [])]) {
+    if (!run.receiptArtifact) continue;
+    const sourceRoot = dirname(result.manifestPath), aliasRoot = resolve(projectDir, "work");
+    await auditNativeAgentAttempt(sourceRoot, run);
+    await cp(resolve(sourceRoot, `native-attempts/${run.agentRunId}`), resolve(aliasRoot, `native-attempts/${run.agentRunId}`), { recursive: true, force: false });
+    await auditNativeAgentAttempt(aliasRoot, run);
+  }
   if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json", "recap-pboc-news-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }

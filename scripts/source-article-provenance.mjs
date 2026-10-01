@@ -5,7 +5,7 @@ import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v3";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v4";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -61,6 +61,30 @@ function names(value) {
   return value && typeof value.name === "string" ? [normalized(value.name)] : [];
 }
 
+function issuerPublisherMatches(value, issuer, source) {
+  if (names(value).some(name => corporateNameKey(name) === corporateNameKey(issuer.label))) return true;
+  // This reviewed Q4 release uses the Micron brand alongside its legal name.
+  // Neither an unrelated organization nor Q4's separate software credit owns it.
+  return issuer.domain === "micron.com" && value?.["@type"] === "Corporation" && value.name === "Micron" &&
+    corporateNameKey(value.legalName) === corporateNameKey(issuer.label) &&
+    exactUrl(value.url, source) === "https://investors.micron.com/";
+}
+
+function micronReleaseHeading(document, source, article) {
+  const url = new URL(source);
+  if (url.hostname !== "investors.micron.com" || !/^\/news\/press-release\/20\d{2}\/[^/]+\/default\.aspx$/u.test(url.pathname) || url.search) return false;
+  const modules = [...document.querySelectorAll("main .evergreen-news-details")];
+  const urls = [...document.querySelectorAll('meta[property="og:url"]')];
+  if (modules.length !== 1 || urls.length !== 1 || exactUrl(urls[0].content, source) !== exactUrl(source, source)) return false;
+  const items = [...modules[0].querySelectorAll(".evergreen-news-details-item")];
+  if (items.length !== 1) return false;
+  const headings = [...items[0].querySelectorAll("h3.evergreen-news-title")], dates = [...items[0].querySelectorAll(".evergreen-news-date-text")];
+  const published = instant(article.datePublished);
+  if (headings.length !== 1 || dates.length !== 1 || !published || titleKey(headings[0].textContent) !== titleKey(article.headline)) return false;
+  const visibleDate = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(new Date(published));
+  return normalized(dates[0].textContent) === visibleDate;
+}
+
 function agency(value) {
   if (/\bAssociated Press\b|\bAP (?:Business|Technology|Economics|Financial|News|Staff)?\s*(?:Writer|Writers|Correspondent|Reporter)\b/iu.test(value)) return "agency:associated_press";
   if (/^(?:Reuters|Thomson Reuters)$/iu.test(value) || /\b(?:Reuters (?:Writer|Reporter|Correspondent)|(?:for|at) Reuters)\b/iu.test(value)) return "agency:reuters";
@@ -90,7 +114,7 @@ export function sourceArticleProvenance(decodedHtml, source) {
   const document = new JSDOM(decodedHtml).window.document;
   const headlines = [...document.querySelectorAll("h1")].map(item => normalized(item.textContent)).filter(Boolean);
   const allArticles = matchingArticles(document, source);
-  const articles = allArticles.filter(item => headlines.length === 1 && titleKey(item.headline) === titleKey(headlines[0]) && titleKey(item.headline).length >= 8 && (!issuer || names(item.publisher).some(name => corporateNameKey(name) === corporateNameKey(issuer.label))));
+  const articles = allArticles.filter(item => ((headlines.length === 1 && titleKey(item.headline) === titleKey(headlines[0])) || (issuer?.domain === "micron.com" && micronReleaseHeading(document, source, item))) && titleKey(item.headline).length >= 8 && (!issuer || issuerPublisherMatches(item.publisher, issuer, source)));
   const host = new URL(source).hostname.replace(/^www\./u, "");
   const nativeAgency = /(?:^|\.)apnews\.com$/u.test(host) ? "agency:associated_press" : /(?:^|\.)reuters\.com$/u.test(host) ? "agency:reuters" : null;
   let origin = issuer ? { key: `issuer:${issuer.domain}`, identified: false, basis: "origin_unresolved" } : nativeAgency ? { key: nativeAgency, identified: true, basis: "original_agency_domain" } : { key: `publisher:${host.replace(/^(?:[a-z]{2})\.finance\.yahoo\.com$/u, "finance.yahoo.com")}`, identified: false, basis: "origin_unresolved" };
@@ -136,6 +160,7 @@ export function sourceArticleProvenance(decodedHtml, source) {
       publication = initialPublishedAt && currentVersionAt && Date.parse(currentVersionAt) >= Date.parse(initialPublishedAt) && clocksAgree("article:published_time", initialPublishedAt) && clocksAgree("article:modified_time", currentVersionAt)
         ? { status: "verified", initialPublishedAt, currentVersionAt, timeBasis: currentVersionAt === initialPublishedAt ? "first_publication" : "article_update" }
         : { status: "unverified_update" };
+      if (publication.status === "verified" && issuer?.domain === "micron.com" && micronReleaseHeading(document, source, article)) publication.boundReleaseDate = initialPublishedAt.slice(0, 10);
     }
   }
   return { version: ARTICLE_PROVENANCE_VERSION, publication, origin };

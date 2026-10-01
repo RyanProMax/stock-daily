@@ -25,6 +25,7 @@ import { validateRecapTransmissionData } from "./recap-transmission-data.mjs";
 import { validateRecapCompanyBackgroundData } from "./recap-company-background-data.mjs";
 import { validateRecapPbocNewsData, auditRecapPbocNewsSources } from "./recap-pboc-news-data.mjs";
 import { auditLedgerSourceSnapshots } from "./evidence-source-snapshots.mjs";
+import { auditNativeAgentAttempt } from "./native-agent-receipts.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -522,6 +523,9 @@ export function preserveInactiveStoredSlice(
 }
 
 export async function auditWorkflowCausalEvidence({ manifest, report, manifestPath, input }) {
+  for (const run of [...(manifest.agentRuns ?? []), ...(manifest.failedAgentRuns ?? [])]) {
+    if (run.receiptArtifact) await auditNativeAgentAttempt(dirname(resolve(manifestPath)), run);
+  }
   if (manifest.coverageRequired) {
     if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
     const root = resolve(dirname(resolve(manifestPath)), "artifacts");

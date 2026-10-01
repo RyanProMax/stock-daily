@@ -19,11 +19,12 @@ import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition,
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { SNOWFLAKE_PRESS_RELEASE_VERSION, snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
+import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v65";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v66";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v4";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
@@ -1529,7 +1530,7 @@ export async function verifyResearchSources(
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || snowflakePressReleaseIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || snowflakePressReleaseIdentity(candidate.originalUrl) || verifiedFirstPartyIssuerIdentity(candidate.originalUrl)?.domain === "micron.com" ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const boundAuthority = mofDocumentIdentity(opened.finalUrl) || pbocDocumentIdentity(opened.finalUrl);
         const boundRecord = boundAuthority && Buffer.isBuffer(opened.rawBody) ? (mofDocumentIdentity(opened.finalUrl) ? mofDocumentRecord : pbocDocumentRecord)(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
@@ -1548,7 +1549,10 @@ export async function verifyResearchSources(
         // A fully bound native authority record supplies a publication clock.
         // Verify a supplied calendar claim before replacing its lower precision.
         if (boundRecord && isCalendarDate(candidate.publishedAt)) verifiedSourceTime(candidate, envelope, boundRecord.publishedAtCandidates, boundRecord.publishedDateCandidates, sourceType, corporateAction);
-        const timedCandidate = boundRecord ? { ...candidate, publishedAt: boundRecord.publishedAtCandidates[0] } : candidate;
+        const boundIssuerCalendar = sourceType === "first_party" && publication?.status === "verified" && publication.boundReleaseDate;
+        if (publication?.boundReleaseDate && (!boundIssuerCalendar || verifiedFirstPartyIssuerIdentity(opened.finalUrl)?.domain !== "micron.com" || !Buffer.isBuffer(opened.rawBody) || stableHash(publication) !== stableHash(sourceArticleProvenance(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl)?.publication))) throw new Error("公司公告可见日期和精确时点未由原始正文重建");
+        if (boundIssuerCalendar && isCalendarDate(candidate.publishedAt) && candidate.publishedAt !== boundIssuerCalendar) throw new Error("公司公告所报日期与原文可见发布日期不一致");
+        const timedCandidate = boundRecord ? { ...candidate, publishedAt: boundRecord.publishedAtCandidates[0] } : boundIssuerCalendar && isCalendarDate(candidate.publishedAt) ? { ...candidate, publishedAt: publication.currentVersionAt } : candidate;
         const publishedAt = verifiedSourceTime(
           timedCandidate,
           envelope,
