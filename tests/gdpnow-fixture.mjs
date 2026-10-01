@@ -1,0 +1,6 @@
+import { GDP_NOW_COMMENTARIES, GDP_NOW_URL } from "../scripts/gdpnow-publication.mjs";
+export const current = "The GDPNow model estimate for real GDP growth (seasonally adjusted annual rate) in the third quarter of 2026 is 3.7 percent on August 21, down from 5.0 percent on August 17.";
+export const old = "The GDPNow model estimate for real GDP growth (seasonally adjusted annual rate) in the third quarter of 2026 is 5.0 percent on August 17, down from 5.1 percent on August 14.";
+export const html = `<html><head><meta property="og:url" content="${GDP_NOW_COMMENTARIES}"><meta property="og:title" content="Current and Past GDPNow Commentaries"></head><body><h1>Current and Past GDPNow Commentaries</h1><div><h2>August 21, 2026</h2><p>${current}</p><h2>August 17, 2026</h2><p>${old}</p></div></body></html>`;
+export const item = `<item><title>Latest Third-Quarter GDP Growth Estimate 3.7 Percent</title><link>${GDP_NOW_URL}</link><guid>${GDP_NOW_URL}?item=bbc33028f37e433ba5439155f195385a</guid><description>${current}\n\nThe next GDPNow update is Monday, August 24.</description><pubDate>Fri, 21 Aug 2026 10:14:00 EST</pubDate></item>`;
+export const feed = `<rss><channel><title>subscribeGDPNow</title><link>https://www.atlantafed.org</link>${item}</channel></rss>`;

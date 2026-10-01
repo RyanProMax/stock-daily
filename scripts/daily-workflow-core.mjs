@@ -12,9 +12,10 @@ import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
+import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v44";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v45";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
@@ -1465,12 +1466,12 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
@@ -1510,6 +1511,13 @@ export async function verifyResearchSources(
           )
         ) {
           throw new Error("支持段落无法在来源正文中定位");
+        }
+        let forecastDefinition;
+        if (isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(opened.finalUrl)) {
+          const record = gdpNowCommentaryRecord(opened.rawBody ?? Buffer.alloc(0), opened.finalUrl);
+          if (!record || candidate.role !== "facts" || !["official", "event"].includes(candidate.kind) || candidate.causalConnection || !supportingExcerptMatches(normalizedEvidenceText(record.paragraph), normalizedExcerpt, candidate.supportingExcerpt)) throw new Error("GDPNow 引文须属于唯一的最新模型更新，不能借用历史条目或充当行情因果报道");
+          forecastDefinition = gdpNowForecastDefinition(record);
+          assertGdpNowCopy(candidate.facts, [{ forecastDefinition }]);
         }
         assertFactsNumbersInExcerpt(candidate);
         assertMaterialEarningsContext(candidate, opened.text);
@@ -1566,6 +1574,7 @@ export async function verifyResearchSources(
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
+            ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,

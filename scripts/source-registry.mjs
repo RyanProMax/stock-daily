@@ -13,6 +13,8 @@ for (const source of FILING_ISSUERS) if (!VERIFIED_ISSUERS.has(source.domain)) V
 
 const FIRST_PARTY_SOURCE_DOMAINS = [
   ...VERIFIED_ISSUERS.keys(),
+  // Official Board identity: federalreserve.gov/aboutthefed/federal-reserve-system-atlanta.htm
+  "atlantafed.org",
   "bea.gov",
   "bls.gov",
   "cmegroup.com",
@@ -83,6 +85,7 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
 ]);
 
 const SOURCE_LABELS = new Map([
+  ["atlantafed.org", "Federal Reserve Bank of Atlanta"],
   ...VERIFIED_ISSUERS.entries(),
   ["21jingji.com", "21世纪经济报道"],
   ["apnews.com", "Associated Press"],

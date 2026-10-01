@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { JSDOM } from "jsdom";
+import { GDP_NOW_FEED, gdpNowCommentaryRecord, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -695,6 +696,7 @@ export function sourcePublishedAtCandidates(
   contentType = "text/html",
   source = "",
 ) {
+  if (isGdpNowCommentary(source)) return [];
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
@@ -928,6 +930,10 @@ export function sourcePublishedAtCandidates(
 
 export function sourcePublishedDateCandidates(body, contentType = "text/html", source = "") {
   if (!/(?:html|xhtml)/iu.test(contentType)) return [];
+  if (isGdpNowCommentary(source)) {
+    const record = gdpNowCommentaryRecord(body, source);
+    return record ? [record.updateDate] : [];
+  }
   const decoded = decodeSourceBody(body, contentType);
   const values = jsonLdArticlePublishedValues(decoded, source);
   for (const match of decoded.matchAll(/<meta[^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]*>/giu)) values.push(match[1]);
@@ -1108,6 +1114,19 @@ export async function readExternalSource(
         } catch (error) {
           if (signal?.aborted) throw signal.reason ?? error;
           // Missing or inconsistent official records leave the hour unknown.
+        }
+      }
+      if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && gdpNowCommentaryRecord(response.body, resolved.url.toString())) {
+        try {
+          const feed = await publicDestination(GDP_NOW_FEED, resolveDestination);
+          const metadata = await requestContent(feed.url.toString(), feed.destination, { maxBytes, signal });
+          if (metadata.status >= 200 && metadata.status < 300 && /^(?:application|text)\/xml(?:;|$)/iu.test(metadata.contentType ?? "")) {
+            publishedAtCandidates = gdpNowPublishedAtCandidates(response.body, metadata.body, resolved.url.toString());
+            if (includeRaw && publishedAtCandidates.length) metadataReceipts.push({ finalUrl: feed.url.toString(), status: metadata.status, contentType: metadata.contentType, rawBody: metadata.body });
+          }
+        } catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error;
+          // A missing or mismatched feed leaves this update's hour unknown.
         }
       }
       if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {

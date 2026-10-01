@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isIP } from "node:net";
 import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, decodeSourceBody, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
+import { GDP_NOW_FEED, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects, verifiedCurrentCompanySubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
@@ -49,6 +50,7 @@ export function openedSourceFromSnapshot(snapshot) {
     const metadata = bytes(receipt);
     if (publishedAtCandidates.length) throw new Error("已有原始发布时间时不得覆盖为附加时间");
     if (receipt.finalUrl === "https://www.federalreserve.gov/feeds/speeches.xml" && new URL(snapshot.finalUrl).hostname === "www.federalreserve.gov") publishedAtCandidates = fedSpeechPublishedAtCandidates(body, metadata, snapshot.finalUrl);
+    else if (receipt.finalUrl === GDP_NOW_FEED && isGdpNowCommentary(snapshot.finalUrl) && /^(?:application|text)\/xml(?:;|$)/iu.test(receipt.contentType)) publishedAtCandidates = gdpNowPublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === BEA_RELEASE_FEED) publishedAtCandidates = beaReleasePublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secCompanySubmissionsUrl(snapshot.finalUrl)) publishedAtCandidates = secCompanySubmissionTime(metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secSubmissionMetadataUrl(snapshot.finalUrl)) publishedAtCandidates = sourcePublishedAtCandidates(metadata, receipt.contentType, receipt.finalUrl);
@@ -142,6 +144,11 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     if (publication?.status === "verified" && (source.initialPublishedAt !== publication.initialPublishedAt || source.timeBasis !== publication.timeBasis)) throw new Error("首次发布与当前版本时间必须分别保留");
     const clock = isCalendarDate(source.publishedAt) ? source.sourceType === "first_party" && original.publishedDateCandidates.includes(source.publishedAt) : Number.isFinite(Date.parse(source.publishedAt)) && /(?:Z|[+-]\d{2}:\d{2})$/u.test(source.publishedAt ?? "") && clocks.some(value => !isCalendarDate(value) && Date.parse(value) === Date.parse(source.publishedAt));
     if (!clock) throw new Error("证据发布时间未由冻结原文或对应时间元数据证明");
+    if (isGdpNowCommentary(source.originalUrl ?? source.url) || isGdpNowCommentary(source.url)) {
+      const record = gdpNowCommentaryRecord(original.rawBody, source.url);
+      if (!record || source.forecastChecked !== true || stableHash(source.forecastDefinition) !== stableHash(gdpNowForecastDefinition(record)) || source.role !== "facts" || !["official", "event"].includes(source.kind) || source.causalConnection || !supportingExcerptMatches(normalizedEvidenceText(record.paragraph), quote, source.supportingExcerpt)) throw new Error("GDPNow 模型定义、最新条目和引文未由冻结原文重建");
+      assertGdpNowCopy(source.facts, [source]);
+    } else if (source.forecastDefinition || source.forecastChecked) throw new Error("非 GDPNow 原文不得伪造模型核验记录");
     assertFactsNumbersInExcerpt({ ...source, facts: source.facts ?? "" });
     assertComparisonNotesInExcerpt(source);
     assertMaterialEarningsContext(source, original.text);

@@ -9,6 +9,7 @@ import {
   stableHash,
   bodySupportsDeterministicTarget,
 } from "./daily-workflow-core.mjs";
+import { assertGdpNowCopy } from "./gdpnow-publication.mjs";
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
@@ -240,11 +241,13 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     let grounding = [JSON.stringify(target), JSON.stringify(marketObservation), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);
     const whyEn = readerText(raw.whyEn, `${target.symbol} whyEn`, 40, 1_800);
+    for (const copy of [why, whyEn]) assertGdpNowCopy(copy, cause);
     if (decomposed && raw.status !== "unresolved" && target.constituents.some(company => !bodySupportsDeterministicTarget(why, envelope, company.symbol) || !bodySupportsDeterministicTarget(whyEn, envelope, company.symbol))) throw new Error(`${target.symbol} 两种语言必须分别保留所有成分股的解释，不能只写净额或一家公司`);
     if (inferred && (!/推断|推论|推测/u.test(why) || !/\binfer(?:ence|red|ring)?\b/iu.test(whyEn))) throw new Error(`${target.symbol} 推断必须在两种语言中明确标注`);
     if (cause.some(source => source.kind === "macro_observation") && (!/观测|观察/u.test(why) || !/平价/u.test(why) || !hasUnknownRatePublication(why) || !/\bobserv(?:ation|ed)\b/iu.test(whyEn) || !/\bpar\b/iu.test(whyEn) || !hasUnknownRatePublication(whyEn))) throw new Error(`${target.symbol} 两种语言须保留观测口径与未知公布时刻，不得把它写成新闻催化`);
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);
     const magnitudeEn = readerText(raw.magnitudeEn, `${target.symbol} magnitudeEn`, 40, 1_200);
+    for (const copy of [magnitude, magnitudeEn]) assertGdpNowCopy(copy, size);
     const selectedMeasurements = validateMagnitudeObservationIds(measurementIds, measured, { copy: magnitude, copyEn: magnitudeEn });
     grounding += " " + JSON.stringify(selectedMeasurements.map(item => item.values));
     const financialCopy = `${why} ${whyEn} ${magnitude} ${magnitudeEn}`;
@@ -267,7 +270,10 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       if (!["supported", "contradicted", "unresolved"].includes(item.status)) throw new Error("竞争解释状态无效");
       const sources = ids(item.evidenceIds, sourceMap, "竞争解释", item.status === "unresolved" ? 0 : 1);
       const text = readerText(item.text, "竞争解释", 12, 500), textEn = readerText(item.textEn, "alternative", 20, 900);
-      for (const copy of [text, textEn]) assertNumbersGrounded(copy, [JSON.stringify(target), ...sources.map((s) => s.supportingExcerpt)].join(" "), "竞争解释数字");
+      for (const copy of [text, textEn]) {
+        assertGdpNowCopy(copy, sources);
+        assertNumbersGrounded(copy, [JSON.stringify(target), ...sources.map((s) => s.supportingExcerpt)].join(" "), "竞争解释数字");
+      }
       return { text, textEn, status: item.status, sources: sources.map(publicRecapSource) };
     });
     if (!alternatives.length) throw new Error(`${target.symbol} 未检验竞争解释`);
@@ -280,6 +286,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       const text = readerText(item.text, "KOL 观点", 20, 500), textEn = readerText(item.textEn, "KOL perspective", 30, 900);
       const primaryText = primary.map(source => source.supportingExcerpt).join(" ");
       for (const copy of [text, textEn]) {
+        assertGdpNowCopy(copy, primary);
         assertNumbersGrounded(copy, primaryText, "KOL 事实数字的官方佐证");
         assertFactsNumbersInExcerpt({ facts: copy, supportingExcerpt: primaryText });
       }
