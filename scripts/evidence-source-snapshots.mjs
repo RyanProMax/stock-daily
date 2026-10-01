@@ -6,6 +6,8 @@ import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, decodeSourceBody, fe
 import { GDP_NOW_FEED, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
+import { pdfSourceRecord } from "./pdf-source.mjs";
+import { cninfoPdfPublication } from "./cninfo-pdf-publication.mjs";
 import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects, verifiedCurrentCompanySubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
@@ -27,7 +29,7 @@ function httpsUrl(value) {
 
 function rawReceipt(opened) {
   if (!Buffer.isBuffer(opened.rawBody) || !opened.rawBody.length || opened.rawBody.length > MAX_BYTES || !Number.isInteger(opened.status) || opened.status < 200 || opened.status >= 300 || typeof opened.contentType !== "string") throw new Error("原文快照缺少有效原始字节、状态或正文类型");
-  return { finalUrl: httpsUrl(opened.finalUrl), status: opened.status, contentType: opened.contentType, bodyBase64: opened.rawBody.toString("base64"), bodyHash: digest(opened.rawBody) };
+  return { finalUrl: httpsUrl(opened.finalUrl), status: opened.status, contentType: opened.contentType, bodyBase64: opened.rawBody.toString("base64"), bodyHash: digest(opened.rawBody), ...(opened.requestMethod ? { requestMethod: opened.requestMethod } : {}) };
 }
 
 function bytes(receipt) {
@@ -41,8 +43,9 @@ function bytes(receipt) {
 export function openedSourceFromSnapshot(snapshot) {
   httpsUrl(snapshot.source);
   const body = bytes(snapshot);
-  if (!/(?:html|xhtml|plain|json)/iu.test(snapshot.contentType)) throw new Error("原文快照正文类型不受支持");
+  if (!/(?:html|xhtml|plain|json)/iu.test(snapshot.contentType) && !/^application\/pdf(?:;|$)/iu.test(snapshot.contentType)) throw new Error("原文快照正文类型不受支持");
   let text = sourceBodyText(body, snapshot.contentType);
+  let pdfDocument = /^application\/pdf(?:;|$)/iu.test(snapshot.contentType) ? pdfSourceRecord(body) : undefined;
   let publishedAtCandidates = sourcePublishedAtCandidates(body, snapshot.contentType, snapshot.finalUrl);
   const receipts = snapshot.metadataReceipts;
   if (!Array.isArray(receipts) || receipts.length > 1) throw new Error("原文快照的时间元数据记录无效");
@@ -52,7 +55,12 @@ export function openedSourceFromSnapshot(snapshot) {
   for (const receipt of receipts) {
     const metadata = bytes(receipt);
     if (publishedAtCandidates.length) throw new Error("已有原始发布时间时不得覆盖为附加时间");
-    if (nfraIdentity) {
+    if (pdfDocument) {
+      const publication = cninfoPdfPublication(body, { ...receipt, rawBody: metadata }, snapshot.finalUrl);
+      if (!publication) throw new Error("PDF 公告身份或发布日期未由对应原始记录证明");
+      pdfDocument = { ...pdfDocument, ...publication };
+    }
+    else if (nfraIdentity) {
       authorityDocument = nfraDocumentRecord(decodeSourceBody(body, snapshot.contentType), { ...receipt, rawBody: metadata }, snapshot.finalUrl);
       if (!authorityDocument) throw new Error("金融监管总局公告未由冻结页面和对应原始记录绑定");
       text = authorityDocument.text;
@@ -67,11 +75,11 @@ export function openedSourceFromSnapshot(snapshot) {
   }
   if (nfraIdentity && !authorityDocument) throw new Error("金融监管总局公告缺少冻结原始正文记录");
   if ([...text].length < 80 || stableHash(text) !== snapshot.textHash || !/Z$/u.test(snapshot.fetchedAt ?? "") || !Number.isFinite(Date.parse(snapshot.fetchedAt))) throw new Error("原文快照正文或采集时间无效");
-  const publishedDateCandidates = authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl);
+  const publishedDateCandidates = pdfDocument?.publishedDateCandidates ?? authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl);
   if (stableHash(publishedAtCandidates) !== stableHash(snapshot.publishedAtCandidates) || stableHash(publishedDateCandidates) !== stableHash(snapshot.publishedDateCandidates)) throw new Error("原文快照的发布时间未由冻结原文证明");
   const articleProvenance = authorityDocument?.articleProvenance ?? (/(?:html|xhtml)/iu.test(snapshot.contentType) ? sourceArticleProvenance(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null);
-  const metadataReceipts = receipts.map(receipt => ({ finalUrl: receipt.finalUrl, status: receipt.status, contentType: receipt.contentType, rawBody: bytes(receipt) }));
-  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, articleProvenance, rawBody: body, metadataReceipts, fetchedAt: snapshot.fetchedAt };
+  const metadataReceipts = receipts.map(receipt => ({ finalUrl: receipt.finalUrl, status: receipt.status, contentType: receipt.contentType, rawBody: bytes(receipt), ...(receipt.requestMethod ? { requestMethod: receipt.requestMethod } : {}) }));
+  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, articleProvenance, rawBody: body, metadataReceipts, fetchedAt: snapshot.fetchedAt, ...(pdfDocument ? { pdfDocument } : {}) };
 }
 
 export function snapshotFromOpenedSource(source, opened, fetchedAt = new Date().toISOString()) {

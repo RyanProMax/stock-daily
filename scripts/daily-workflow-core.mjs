@@ -15,8 +15,9 @@ import transmissionConfig from "../data/recap-transmission-sources.json" with { 
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v47";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v48";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v1";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v1";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
@@ -1398,12 +1399,18 @@ export function bodySupportsDeterministicTarget(body, envelope, target) {
   });
 }
 
+function assertCurrentPdfIssuer(source, opened) {
+  if (source.role === "facts" && /^application\/pdf(?:;|$)/iu.test(opened.contentType ?? "") && new URL(opened.finalUrl).hostname === "static.cninfo.com.cn" && (source.scope !== "company" || source.targets?.length !== 1 || opened.pdfDocument?.issuer?.symbol !== source.targets[0])) throw new Error("公司 PDF 事实必须绑定官方记录确认的发行人代码，不能改写为整个板块或其他公司");
+}
+
 export function verifiedCurrentCompanySubjects(source, opened, envelope) {
+  assertCurrentPdfIssuer(source, opened);
   if (source.kind === "background" || source.scope !== "company") return [];
   const companies = [...envelope.sectorPerformance, ...envelope.aiChainPerformance].flatMap(item => item.constituents ?? []);
   const company = source.targets?.length === 1 ? companies.find(item => item.symbol === source.targets[0]) : null;
   if (!company) return [];
   if (!bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, company.symbol)) throw new Error("公司级证据未在原始引文中确认该公司身份");
+  if (source.role === "facts" && /^application\/pdf(?:;|$)/iu.test(opened.contentType ?? "") && opened.pdfDocument?.issuer?.symbol !== company.symbol) throw new Error("公司级 PDF 的发行主体未由对应官方记录确认，或并非所引用公司");
   const issuer = secFilingIssuerIdentity(opened), registeredIssuer = verifiedFirstPartyIssuerIdentity(opened.finalUrl);
   const archive = secArchiveIdentity(opened.finalUrl), registeredSecIssuer = archive ? verifiedSecIssuerIdentity(archive.cik) : null;
   const identityKey = value => normalizedEvidenceText(String(value ?? "").replace(/(?:[\s,.]+(?:co|corp|corporation|company|inc|incorporated|ltd|limited|plc)\.?)+$/iu, ""));
@@ -1427,11 +1434,12 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
   if (source.scope === "company") {
     const constituents = (metric.constituents ?? []).filter(item => metric.symbol === target || item.symbol === target);
     const issuer = secFilingIssuerIdentity(opened);
+    const pdfIssuer = /^application\/pdf(?:;|$)/iu.test(opened.contentType ?? "") ? opened.pdfDocument?.issuer : null;
     const label = verifiedFirstPartyIssuerLabel(opened.finalUrl);
     const own = label && normalizedEvidenceText(label);
-    subjects = constituents.filter(item => issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
-    if (!issuer && !label && !authority) throw new Error("公司背景原文未证明发行主体，不能将被提及的客户或竞争对手当作披露主体");
-    if ((issuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
+    subjects = constituents.filter(item => pdfIssuer ? pdfIssuer.symbol === item.symbol : issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
+    if (!issuer && !pdfIssuer && !label && !authority) throw new Error("公司背景原文未证明发行主体，不能将被提及的客户或竞争对手当作披露主体");
+    if ((issuer || pdfIssuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
   } else {
     const fund = expectedScope === "sector" && secArchiveIdentity(opened.finalUrl)?.cik === "1064641" && normalizedEvidenceText(opened.text).includes(normalizedEvidenceText(transmissionConfig.issuer)) && source.supportingExcerpt.includes(`${transmissionConfig.sectors[metric.symbol]} Sector Risk:`);
     if (!authority && !fund) throw new Error("发行人或单家公司披露不能自动扩大为整个行业或 AI 环节的背景机制");
@@ -1473,7 +1481,10 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const candidateUrl = new URL(candidate.originalUrl);
+        const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
+        const cachedPdfIssuerValid = (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
+        if (cachedPdfIssuerValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1481,6 +1492,7 @@ export async function verifyResearchSources(
         const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
+        assertCurrentPdfIssuer(candidate, opened);
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publication = opened.articleProvenance?.publication;
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
@@ -1582,6 +1594,7 @@ export async function verifyResearchSources(
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
+            ...((companySubjects.length || backgroundSubjects?.length) && opened.pdfDocument?.issuer ? { pdfIssuerEvidenceVersion: PDF_ISSUER_EVIDENCE_VERSION } : {}),
             ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),

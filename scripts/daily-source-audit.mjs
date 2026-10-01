@@ -10,6 +10,8 @@ import { JSDOM } from "jsdom";
 import { GDP_NOW_FEED, gdpNowCommentaryRecord, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
+import { pdfSourceRecord } from "./pdf-source.mjs";
+import { cninfoPdfIdentity, cninfoPdfPublication } from "./cninfo-pdf-publication.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -343,7 +345,7 @@ async function requestHeadersWithNode(value, destination) {
 async function requestContentWithNode(
   value,
   destination,
-  { maxBytes = MAX_SOURCE_BYTES, signal } = {},
+  { maxBytes = MAX_SOURCE_BYTES, signal, method = "GET" } = {},
 ) {
   const url = new URL(value);
   const hostname = normalizeHostname(url.hostname);
@@ -351,7 +353,7 @@ async function requestContentWithNode(
     const request = httpsRequest(
       url,
       {
-        method: "GET",
+        method,
         family: destination.family,
         servername: hostname,
         signal,
@@ -409,6 +411,7 @@ async function requestContentWithCurl(
     curlPath = DEFAULT_CURL_PATH,
     maxBytes = MAX_SOURCE_BYTES,
     signal,
+    method = "GET",
   } = {},
 ) {
   const url = new URL(value);
@@ -434,6 +437,7 @@ async function requestContentWithCurl(
       "=https",
       "--proto-redir",
       "=https",
+      ...(method === "POST" ? ["--request", "POST"] : []),
       "--connect-to",
       `${hostname}:443:${connectAddress}:443`,
       "--proxy-header",
@@ -697,6 +701,7 @@ export function sourcePublishedAtCandidates(
   contentType = "text/html",
   source = "",
 ) {
+  if (/^application\/pdf(?:;|$)/iu.test(contentType)) return [];
   if (isGdpNowCommentary(source)) return [];
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
@@ -970,6 +975,7 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
 }
 
 export function sourceBodyText(body, contentType = "text/html") {
+  if (/^application\/pdf(?:;|$)/iu.test(contentType)) return pdfSourceRecord(body).text;
   const decoded = decodeSourceBody(body, contentType);
   if (!/(?:html|xhtml)/iu.test(contentType)) {
     return decoded.replace(/\s+/gu, " ").trim();
@@ -1091,7 +1097,7 @@ export async function readExternalSource(
         }
         return { source, status: response.status, finalUrl: resolved.url.toString(), contentType, rawBody: response.body };
       }
-      if (!/(?:html|xhtml|plain|json)/iu.test(contentType)) {
+      if (!/(?:html|xhtml|plain|json)/iu.test(contentType) && !/^application\/pdf(?:;|$)/iu.test(contentType)) {
         throw new Error(`外部证据正文类型不受支持：${contentType}`);
       }
       let text = sourceBodyText(response.body, contentType);
@@ -1101,6 +1107,22 @@ export async function readExternalSource(
         resolved.url.toString(),
       );
       const metadataReceipts = [];
+      let pdfDocument = /^application\/pdf(?:;|$)/iu.test(contentType) ? pdfSourceRecord(response.body) : undefined;
+      if (pdfDocument) {
+        const identity = cninfoPdfIdentity(response.body, resolved.url.toString());
+        if (identity && lookupPublicationMetadata) {
+          try {
+            const destination = await publicDestination(identity.recordUrl, resolveDestination);
+            const metadata = await requestContent(destination.url.toString(), destination.destination, { maxBytes: Math.min(maxBytes, 1024 * 1024), signal, method: "POST" });
+            const receipt = { finalUrl: destination.url.toString(), status: metadata.status, contentType: metadata.contentType, rawBody: metadata.body, requestMethod: "POST" };
+            const publication = cninfoPdfPublication(response.body, receipt, resolved.url.toString());
+            if (publication) {
+              pdfDocument = { ...pdfDocument, ...publication };
+              if (includeRaw) metadataReceipts.push(receipt);
+            }
+          } catch (error) { if (signal?.aborted) throw signal.reason ?? error; }
+        }
+      }
       let authorityDocument;
       const nfraIdentity = nfraDocumentIdentity(resolved.url.toString());
       if (nfraIdentity) {
@@ -1192,9 +1214,10 @@ export async function readExternalSource(
         contentType,
         text,
         publishedAtCandidates,
-        publishedDateCandidates: authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
+        publishedDateCandidates: pdfDocument?.publishedDateCandidates ?? authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
         articleProvenance: authorityDocument?.articleProvenance ?? (/(?:html|xhtml)/iu.test(contentType) ? sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null),
         ...(includeRaw ? { rawBody: response.body, metadataReceipts } : {}),
+        ...(pdfDocument ? { pdfDocument } : {}),
       };
     }
     if (response.status >= 300 && response.status < 400 && response.location) {

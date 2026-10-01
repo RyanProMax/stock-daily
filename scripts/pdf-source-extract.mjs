@@ -1,0 +1,46 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { getDocument, OPS, version } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_TEXT = 1_000_000;
+const imageOperators = new Set([OPS.paintImageMaskXObject, OPS.paintImageMaskXObjectGroup, OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintInlineImageXObjectGroup, OPS.paintImageXObjectRepeat, OPS.paintImageMaskXObjectRepeat, OPS.paintSolidColorImageMask]);
+const chunks = [];
+let bytes = 0;
+for await (const chunk of process.stdin) {
+  bytes += chunk.length;
+  if (bytes > MAX_BYTES) throw new Error("PDF byte limit exceeded");
+  chunks.push(chunk);
+}
+const data = Buffer.concat(chunks);
+if (!data.subarray(0, 5).equals(Buffer.from("%PDF-")) || !/%%EOF\s*$/u.test(data.subarray(-1024).toString("latin1"))) throw new Error("Incomplete PDF signature or end marker");
+const tail = /startxref\s+(\d+)\s+%%EOF\s*$/u.exec(data.subarray(-1024).toString("latin1"));
+const offset = tail ? Number(tail[1]) : -1;
+const xref = Number.isSafeInteger(offset) && offset >= 5 && offset < data.length ? data.subarray(offset, offset + 512).toString("latin1") : "";
+if (!/^(?:xref\s|\d+\s+\d+\s+obj\b[\s\S]*\/Type\s*\/XRef\b)/u.test(xref)) throw new Error("Invalid PDF cross-reference offset");
+const warnings = [];
+console.log = (...values) => { if (values.some(value => /^(?:Warning|Error):/u.test(String(value)))) warnings.push(values.join(" ")); };
+console.warn = console.error = (...values) => { warnings.push(values.join(" ")); };
+const root = dirname(fileURLToPath(import.meta.resolve("pdfjs-dist/package.json")));
+const task = getDocument({ data: new Uint8Array(data), stopAtErrors: true, isEvalSupported: false, enableXfa: false, useWorkerFetch: false, useWasm: false, disableFontFace: true, cMapUrl: resolve(root, "cmaps") + "/", cMapPacked: true, standardFontDataUrl: resolve(root, "standard_fonts") + "/" });
+try {
+  const document = await task.promise;
+  if (document.numPages < 1 || document.numPages > 512 || document.isPureXfa) throw new Error("Unsupported PDF page count or dynamic form");
+  const pages = [];
+  let textLength = 0;
+  for (let number = 1; number <= document.numPages; number++) {
+    const page = await document.getPage(number);
+    const operators = await page.getOperatorList();
+    if (operators.fnArray.some(operator => imageOperators.has(operator))) throw new Error(`Page ${number} contains raster content outside the verifiable text layer`);
+    const content = await page.getTextContent({ disableNormalization: true });
+    const items = content.items.filter(item => typeof item.str === "string");
+    const text = items.map(item => item.str + (item.hasEOL ? "\n" : " ")).join("").normalize("NFC").replace(/[\t\f\v ]+/gu, " ").replace(/\s*\n\s*/gu, "\n").trim();
+    if (!text || /[\u0000\uFFFD\uE000-\uF8FF]/u.test(text)) throw new Error(`Page ${number} has no verifiable complete text layer`);
+    textLength += text.length;
+    if (textLength > MAX_TEXT) throw new Error("PDF text limit exceeded");
+    pages.push({ number, text, textItemCount: items.length });
+    page.cleanup();
+  }
+  if (warnings.length) throw new Error("PDF parsing reported a warning or recovery");
+  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v1`, pageCount: document.numPages, pages, text: pages.map(page => page.text).join("\n\n") }));
+} finally { await task.destroy(); }
