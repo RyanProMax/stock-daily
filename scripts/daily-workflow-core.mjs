@@ -15,7 +15,7 @@ import transmissionConfig from "../data/recap-transmission-sources.json" with { 
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v46";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v47";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v1";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";

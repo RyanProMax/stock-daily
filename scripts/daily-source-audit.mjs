@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { JSDOM } from "jsdom";
 import { GDP_NOW_FEED, gdpNowCommentaryRecord, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
+import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -1093,16 +1094,27 @@ export async function readExternalSource(
       if (!/(?:html|xhtml|plain|json)/iu.test(contentType)) {
         throw new Error(`外部证据正文类型不受支持：${contentType}`);
       }
-      const text = sourceBodyText(response.body, contentType);
-      if ([...text].length < 80) {
-        throw new Error(`外部证据正文过短：${current}`);
-      }
+      let text = sourceBodyText(response.body, contentType);
       let publishedAtCandidates = sourcePublishedAtCandidates(
         response.body,
         contentType,
         resolved.url.toString(),
       );
       const metadataReceipts = [];
+      let authorityDocument;
+      const nfraIdentity = nfraDocumentIdentity(resolved.url.toString());
+      if (nfraIdentity) {
+        if (!lookupPublicationMetadata || !/(?:html|xhtml)/iu.test(contentType)) throw new Error("金融监管总局公告缺少对应原始正文记录");
+        const destination = await publicDestination(nfraIdentity.recordUrl, resolveDestination);
+        const metadata = await requestContent(destination.url.toString(), destination.destination, { maxBytes, signal });
+        const receipt = { finalUrl: destination.url.toString(), status: metadata.status, contentType: metadata.contentType, rawBody: metadata.body };
+        authorityDocument = nfraDocumentRecord(decodeSourceBody(response.body, contentType), receipt, resolved.url.toString());
+        if (!authorityDocument) throw new Error("金融监管总局公告正文、身份或发布时间无法绑定原始记录");
+        text = authorityDocument.text;
+        publishedAtCandidates = authorityDocument.publishedAtCandidates;
+        if (includeRaw) metadataReceipts.push(receipt);
+      }
+      if ([...text].length < 80) throw new Error(`外部证据正文过短：${current}`);
       if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && beaReleaseIdentity(response.body, resolved.url.toString())) {
         try {
           const feed = await publicDestination(BEA_RELEASE_FEED, resolveDestination);
@@ -1180,8 +1192,8 @@ export async function readExternalSource(
         contentType,
         text,
         publishedAtCandidates,
-        publishedDateCandidates: sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
-        articleProvenance: /(?:html|xhtml)/iu.test(contentType) ? sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null,
+        publishedDateCandidates: authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
+        articleProvenance: authorityDocument?.articleProvenance ?? (/(?:html|xhtml)/iu.test(contentType) ? sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null),
         ...(includeRaw ? { rawBody: response.body, metadataReceipts } : {}),
       };
     }
