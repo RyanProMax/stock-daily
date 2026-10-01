@@ -2752,6 +2752,39 @@ test("shadow and publish workflows use immutable separate run identities", async
   assert.match(publish.runKey, /-publish$/u);
 });
 
+test("workflow upgrades preserve legacy manifests and snapshot bytes while current-version checkpoints still resume", async () => {
+  const workRoot = await mkdtemp(resolve(tmpdir(), "stock-daily-version-resume-"));
+  try {
+    const options = { input: fixtureInput(), market: "US", deliveryMode: "shadow", completeRecap: true, workRoot };
+    const current = new MarketWorkflow(options);
+    const common = `US-${current.envelope.marketAsOf}-${current.inputHash.slice(0, 12)}`;
+    const priorKeys = [`${common}-shadow-complete`, `${common}-stock-daily-multi-agent-v61-shadow-complete`];
+    const priorManifest = JSON.stringify({ workflowVersion: "stock-daily-multi-agent-v61", status: "failed", inputHash: current.inputHash, market: "US", deliveryMode: "shadow", agentRuns: [], lastError: "Unsupported old snapshot date", legacyMarker: "must remain unchanged" });
+    const priorSnapshot = "Frozen original bytes and previous parser fields; intentionally not a current snapshot book.\n";
+    for (const key of priorKeys) {
+      const dir = resolve(workRoot, key);
+      await mkdir(resolve(dir, "artifacts"), { recursive: true });
+      await writeFile(resolve(dir, "manifest.json"), priorManifest);
+      await writeFile(resolve(dir, "artifacts/recap-source-snapshots.json"), priorSnapshot);
+    }
+    await current.initialize();
+    assert.ok(!priorKeys.includes(current.runKey));
+    assert.ok(current.runKey.includes(WORKFLOW_VERSION));
+    assert.equal(current.manifest.legacyMarker, undefined);
+    assert.equal(current.searchQueryCount, 0);
+    current.manifest.currentMarker = "resume this current checkpoint";
+    await current.saveManifest();
+    const resumed = new MarketWorkflow(options);
+    await resumed.initialize();
+    assert.equal(resumed.runDir, current.runDir);
+    assert.equal(resumed.manifest.currentMarker, "resume this current checkpoint");
+    for (const key of priorKeys) {
+      assert.equal(await readFile(resolve(workRoot, key, "manifest.json"), "utf8"), priorManifest);
+      assert.equal(await readFile(resolve(workRoot, key, "artifacts/recap-source-snapshots.json"), "utf8"), priorSnapshot);
+    }
+  } finally { await rm(workRoot, { recursive: true, force: true }); }
+});
+
 test("workflow recovery charges searches persisted before an Agent interruption", async () => {
   const workRoot = await mkdtemp(resolve(tmpdir(), "stock-daily-search-resume-"));
   const options = {

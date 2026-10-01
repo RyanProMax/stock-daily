@@ -935,7 +935,10 @@ export class MarketWorkflow {
     this.searchQueryLimit = completeRecap ? 12 + 4 * recapTargets(this.envelope).length : 12;
     this.inputHash = marketInputHash(input, market);
     this.workRoot = workRoot;
-    this.baseRunKey = `${market}-${this.envelope.marketAsOf}-${this.inputHash.slice(0, 12)}-${deliveryMode}${completeRecap ? "-complete" : ""}`;
+    // A parser/validation upgrade must not overwrite an older terminal
+    // manifest or reopen its differently derived snapshots as current proof.
+    // Same-version resumptions and budgeted attempts retain a stable identity.
+    this.baseRunKey = `${market}-${this.envelope.marketAsOf}-${this.inputHash.slice(0, 12)}-${WORKFLOW_VERSION}-${deliveryMode}${completeRecap ? "-complete" : ""}`;
     this.runKey = this.baseRunKey;
     this.runDir = resolve(this.workRoot, this.runKey);
     this.manifestPath = resolve(this.runDir, "manifest.json");
@@ -2065,7 +2068,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v37",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v38",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
