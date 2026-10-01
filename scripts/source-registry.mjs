@@ -139,9 +139,15 @@ export function verifiedFirstPartyIssuerLabel(source) {
 export function verifiedFirstPartyIssuerIdentity(source) {
   let hostname; try { hostname = new URL(source).hostname.toLowerCase(); } catch { return null; }
   const filing = FILING_ISSUERS.find(record => hostnameMatches(hostname, record.domain));
-  if (filing) return { domain: filing.domain, label: filing.label };
+  if (filing) return { domain: filing.domain, label: filing.label, symbol: filing.symbol };
   for (const [domain, label] of VERIFIED_ISSUERS) if (hostnameMatches(hostname, domain)) return { domain, label };
   return null;
+}
+
+export function verifiedSecIssuerIdentity(cik) {
+  if (typeof cik !== "string" || !/^\d{1,10}$/u.test(cik)) return null;
+  const filing = FILING_ISSUERS.find(record => Number(record.cik) === Number(cik));
+  return filing ? { label: filing.label, symbol: filing.symbol } : null;
 }
 
 export function verifiedExternalSourceType(source, platform = "web") {

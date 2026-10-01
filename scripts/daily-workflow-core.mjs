@@ -5,13 +5,15 @@ import {
   verifiedExternalSourceLabel,
   verifiedExternalSourceType,
   verifiedFirstPartyIssuerLabel,
+  verifiedFirstPartyIssuerIdentity,
+  verifiedSecIssuerIdentity,
 } from "./source-registry.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v40";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v41";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -955,10 +957,9 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
       if (candidate.hypothesisIds.some((id) => !hypothesisIds.has(id))) {
         throw new Error(`${role} 研究引用了计划外假设`);
       }
-      if (
-        candidate.targets.length !== 1 ||
-        candidate.targets[0] !== anomaly.target
-      ) {
+      const constituentClaim = anomaly.researchPurpose === "comprehensive_recap" && candidate.scope === "company" && candidate.targets.length === 1 && (anomaly.observation.constituents ?? []).some(company => company.symbol === candidate.targets[0]);
+      const wholeCompanyClaim = anomaly.researchPurpose === "comprehensive_recap" && candidate.kind !== "background" && candidate.scope === "company" && ["sector", "ai_layer"].includes(anomaly.kind);
+      if (candidate.targets.length !== 1 || (!constituentClaim && (candidate.targets[0] !== anomaly.target || wholeCompanyClaim))) {
         throw new Error(
           `${role} 研究来源必须精确绑定计划中的确定性异动目标`,
         );
@@ -1387,6 +1388,22 @@ export function bodySupportsDeterministicTarget(body, envelope, target) {
   });
 }
 
+export function verifiedCurrentCompanySubjects(source, opened, envelope) {
+  if (source.kind === "background" || source.scope !== "company") return [];
+  const companies = [...envelope.sectorPerformance, ...envelope.aiChainPerformance].flatMap(item => item.constituents ?? []);
+  const company = source.targets?.length === 1 ? companies.find(item => item.symbol === source.targets[0]) : null;
+  if (!company) return [];
+  if (!bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, company.symbol)) throw new Error("公司级证据未在原始引文中确认该公司身份");
+  const issuer = secFilingIssuerIdentity(opened), registeredIssuer = verifiedFirstPartyIssuerIdentity(opened.finalUrl);
+  const archive = secArchiveIdentity(opened.finalUrl), registeredSecIssuer = archive ? verifiedSecIssuerIdentity(archive.cik) : null;
+  const identityKey = value => normalizedEvidenceText(String(value ?? "").replace(/(?:[\s,.]+(?:co|corp|corporation|company|inc|incorporated|ltd|limited|plc)\.?)+$/iu, ""));
+  const sameRegisteredIssuer = registeredIssuer && (registeredIssuer.symbol ? registeredIssuer.symbol === company.symbol : [company.symbol, company.name, company.nameEn].filter(Boolean).some(name => identityKey(name) === identityKey(registeredIssuer.label)));
+  if (source.role === "facts" && ((issuer && !issuer.symbols.includes(company.symbol)) || (registeredIssuer && !sameRegisteredIssuer) || (archive && !issuer && registeredSecIssuer?.symbol !== company.symbol))) throw new Error("公司级一手事实的原始发行人并非所引用公司或尚未确认");
+  // The ticker comes from the deterministic instrument after its exact
+  // original name/ticker is located, never a copied generated company list.
+  return [company.symbol];
+}
+
 export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
   const metric = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance].find(item => item.symbol === source.targets?.[0]);
   if (!metric) throw new Error("背景披露缺少确定性适用对象");
@@ -1506,6 +1523,7 @@ export async function verifyResearchSources(
             scope: "event_only",
           };
         }
+        const companySubjects = verifiedCurrentCompanySubjects(normalizedCandidate, opened, envelope);
         for (const comparison of candidate.comparisons) {
           for (const [display, expected] of [
             [comparison.actualDisplay, comparison.actualValue],
@@ -1539,6 +1557,7 @@ export async function verifyResearchSources(
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
+            ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,

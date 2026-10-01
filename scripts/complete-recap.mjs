@@ -7,12 +7,13 @@ import {
   publicComparison,
   requiresFinancialComparisons,
   stableHash,
+  bodySupportsDeterministicTarget,
 } from "./daily-workflow-core.mjs";
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
-import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution } from "./recap-attribution.mjs";
+import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution, hasConstituentAttribution } from "./recap-attribution.mjs";
 import { auditRecapRateFactors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
@@ -177,7 +178,7 @@ export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = nu
     const inference = inferenceCandidates.get(anomaly.target);
     const direct = facts.length && causal.length && facts.some(fact => causal.some(cause => cause.url !== fact.url));
     const gaps = [];
-    if (!direct && !inference.inferredIngredientsPresent) {
+    if (!direct && !inference.inferredIngredientsPresent && !inference.constituentIngredientsPresent) {
       if (!facts.length) gaps.push("official_facts");
       if (!causal.length) gaps.push("target_causality");
       if (!facts.some(fact => causal.some(cause => cause.url !== fact.url))) gaps.push("independent_origin");
@@ -205,6 +206,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const raw = byTarget.get(target.symbol);
     const chain = attributions?.get(target.symbol);
     const inferred = chain?.basis === "inferred";
+    const decomposed = chain ? hasConstituentAttribution(chain) : false;
     if (!["explained", "partial", "unresolved"].includes(raw.status) || !["high", "medium", "low"].includes(raw.confidence)) throw new Error(`${target.symbol} 复盘状态无效`);
     if (raw.status !== "explained" && raw.confidence === "high") throw new Error(`${target.symbol} 证据不足不能标为高置信`);
     const cause = ids(raw.evidenceIds, sourceMap, target.symbol, raw.status === "unresolved" ? 0 : 2);
@@ -213,11 +215,11 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const measurementIds = raw.magnitudeObservationIds ?? [];
     if (!Array.isArray(measurementIds)) throw new Error(`${target.symbol} 幅度观测引用无效`);
     const anomaly = completeRecapPlan(envelope).anomalies.find((item) => item.target === target.symbol);
-    const linkedIds = inferred ? new Set([...attributionEvidenceIds(chain), ...chain.counterEvidenceIds]) : new Set((chain?.chains ?? []).map(item => item.timingEvidenceId).filter(Boolean));
+    const linkedIds = chain ? new Set([...attributionEvidenceIds(chain), ...chain.counterEvidenceIds]) : new Set();
     if (cause.some(source => !linkedIds.has(source.id) && (source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) || size.some(source => source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) throw new Error(`${target.symbol} 引用了其他目标的证据`);
     if (chain && raw.status !== "unresolved" && (chain.basis === "unresolved" || attributionEvidenceIds(chain).some(id => !raw.evidenceIds.includes(id)))) throw new Error(`${target.symbol} 成稿未保留完整的已审查传导证据`);
     const causal = cause.filter((source) => source.anomalyId === anomaly.id && source.role === "causal" && source.targets.includes(target.symbol) && source.causalConnection && hasCausalPassage(source.supportingExcerpt));
-    if (!inferred && raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
+    if (!inferred && !decomposed && raw.status !== "unresolved" && causal.length === 0) throw new Error(`${target.symbol} 缺少对应目标的直接因果原文`);
     if (raw.status === "explained") {
       if (!cause.some((source) => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background") || new Set(cause.map((source) => source.url)).size < 2) throw new Error(`${target.symbol} 需要官方事实与独立价格反应证据`);
       if (inferred && raw.confidence !== "medium") throw new Error(`${target.symbol} 经传导机制作出的推断只能标为中等置信`);
@@ -227,12 +229,18 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
         const publishers = cause.filter(source => source.sourceType === "publisher");
         const identifiedOrigins = publishers.filter(source => source.provenanceChecked === true && source.reportingOrigin?.identified === true && typeof source.reportingOrigin.key === "string" && source.reportingOrigin.key.length >= 10).map(source => source.reportingOrigin.key);
         if (new Set(identifiedOrigins).size < 2 || new Set(publishers.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
+        if (decomposed) for (const company of target.constituents) {
+          const reports = chain.chains.filter(item => !item.subjectTargets?.length || item.subjectTargets.includes(company.symbol)).map(item => sourceMap.get(item.reactionEvidenceId));
+          const origins = reports.filter(source => source.provenanceChecked === true && source.reportingOrigin?.identified === true && typeof source.reportingOrigin.key === "string" && source.reportingOrigin.key.length >= 10).map(source => source.reportingOrigin.key);
+          if (new Set(origins).size < 2 || new Set(reports.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} ${company.symbol} 高置信解释缺少逐公司独立报道交叉佐证`);
+        }
       }
     }
     const { magnitudeEvidence, ...marketObservation } = observations.get(target.symbol);
     let grounding = [JSON.stringify(target), JSON.stringify(marketObservation), ...cause.map((s) => s.supportingExcerpt), ...size.map((s) => s.supportingExcerpt)].join(" ");
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);
     const whyEn = readerText(raw.whyEn, `${target.symbol} whyEn`, 40, 1_800);
+    if (decomposed && raw.status !== "unresolved" && target.constituents.some(company => !bodySupportsDeterministicTarget(why, envelope, company.symbol) || !bodySupportsDeterministicTarget(whyEn, envelope, company.symbol))) throw new Error(`${target.symbol} 两种语言必须分别保留所有成分股的解释，不能只写净额或一家公司`);
     if (inferred && (!/推断|推论|推测/u.test(why) || !/\binfer(?:ence|red|ring)?\b/iu.test(whyEn))) throw new Error(`${target.symbol} 推断必须在两种语言中明确标注`);
     if (cause.some(source => source.kind === "macro_observation") && (!/观测|观察/u.test(why) || !/平价/u.test(why) || !hasUnknownRatePublication(why) || !/\bobserv(?:ation|ed)\b/iu.test(whyEn) || !/\bpar\b/iu.test(whyEn) || !hasUnknownRatePublication(whyEn))) throw new Error(`${target.symbol} 两种语言须保留观测口径与未知公布时刻，不得把它写成新闻催化`);
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);

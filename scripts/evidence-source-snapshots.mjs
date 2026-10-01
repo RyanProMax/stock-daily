@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { isIP } from "node:net";
 import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, decodeSourceBody, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
-import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects } from "./daily-workflow-core.mjs";
+import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects, verifiedCurrentCompanySubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
@@ -147,6 +147,10 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     for (const comparison of source.comparisons ?? []) for (const value of [comparison.actualValue, comparison.baselineValue]) if (!hasUnitBoundComparisonValue(source.supportingExcerpt, comparison.unit, value)) throw new Error("类型化财务对比值未由冻结引文的数值和单位证明");
     if (source.role === "causal" && !hasCausalPassage(source.supportingExcerpt)) throw new Error("冻结引文没有原文因果联系");
     if (source.kind === "background" && envelope && stableHash(source.backgroundSubjects) !== stableHash(verifiedBackgroundExposureSubjects(source, original, envelope))) throw new Error("背景敞口主体未由原始发行主体重建");
+    if (envelope) {
+      const companySubjects = verifiedCurrentCompanySubjects(source, original, envelope);
+      if ((companySubjects.length || source.companySubjects || source.companySubjectChecked) && (source.companySubjectChecked !== true || stableHash(source.companySubjects) !== stableHash(companySubjects))) throw new Error("当前公司证据主体未由冻结原文重建");
+    }
   }
   return book;
 }

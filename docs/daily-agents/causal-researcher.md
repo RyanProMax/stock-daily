@@ -34,7 +34,7 @@ Determine whether a reliable same-session source explicitly connects the candida
 - Record competing explanations as supported, contradicted, or unresolved.
 - Record the page's displayed publication time, normalized to ISO 8601 with `Z` or an explicit numeric offset. Convert a displayed timezone abbreviation deterministically; never output the abbreviation itself.
 - A same-day event plus a price move is not enough unless the source explicitly connects them.
-- Every source must set `targets` to the single exact `anomaly.target` value; the opened body must actually contain that target's code or name.
+- Every source retains its narrowest supported subject. In comprehensive recap research, a company-only reaction must use `scope: company` and `targets: [the exact symbol of one supplied anomaly.observation.constituents member]`; its hypothesis IDs still belong to this anomaly. The original excerpt must identify that company and explicitly link its move to the event. It does not establish the whole basket/ETF's cause. Otherwise use the single exact `anomaly.target` and locate its actual code/name in the excerpt.
 
 # Constraints
 

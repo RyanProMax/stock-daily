@@ -44,7 +44,7 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 - Keep `facts` limited to event facts and figures. Do not write target-coverage caveats, eligibility notes, rejection reasons, or phrases such as “the page does not mention” and “只能作为”.
 - A market wrap may serve as a facts source when you copy only its event statement or quantified market facts, set `causalConnection` to false, and do not infer the cause. Another isolated worker may independently find the same page, but it must use a different supporting passage for causal evidence.
 - A fact source may precede the selected session by up to 72 hours when it is the event whose later price reaction is being tested. Do not use older background material as the claimed catalyst.
-- Every source must set `targets` to the single exact `anomaly.target` value. A source about an external event that does not name the reacting target must use `scope: event_only`; the separate causal worker is responsible for connecting that event to the target.
+- Every source retains its narrowest supported subject. In comprehensive recap research, a company-only passage must use `scope: company` and `targets: [the exact symbol of one supplied anomaly.observation.constituents member]`; its hypothesis IDs still belong to this anomaly. It establishes that company's facts, never a whole basket/ETF's move or cause. Otherwise set `targets` to the single exact `anomaly.target`. An external event that does not name the reacting target uses `scope: event_only`; the separate causal worker connects it to prices.
 
 # Constraints
 

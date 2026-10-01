@@ -51,6 +51,28 @@ test("repair never allocates an incomplete research pair or replenishes the fixe
   assert.throws(() => planRecapResearchRepair(f.plan, f.ledger, f.coverage, null, { remainingQueries: 12 }), /覆盖检查/);
 });
 
+test("near-flat baskets with large opposing company moves retain research priority and exclude already reviewed company causes", () => {
+  const f = fixture();
+  for (const entry of f.attribution.entries) entry.basis = "reported";
+  const basket = f.plan.anomalies.find(anomaly => anomaly.kind === "ai_layer" && anomaly.observation.benchmarkKind === "equal_weight_basket");
+  const sector = f.plan.anomalies.find(anomaly => anomaly.kind === "sector");
+  Object.assign(basket.observation, { change: "+0.01%", constituents: [
+    { symbol: "A", change: "+4.00%" }, { symbol: "B", change: "-3.96%" }, { symbol: "C", change: "+0.00%" }, { symbol: "D", change: "+0.00%" },
+  ] });
+  sector.observation.change = "-0.50%";
+  const reviewed = f.attribution.entries.find(entry => entry.target === basket.target);
+  reviewed.basis = "unresolved"; reviewed.chains = [{ basis: "reported", subjectTargets: ["A"] }];
+  f.attribution.entries.find(entry => entry.target === sector.target).basis = "unresolved";
+  const result = planRecapResearchRepair(f.plan, f.ledger, f.coverage, f.attribution, { remainingQueries: 4 });
+  assert.equal(result.jobs[0].target, basket.target);
+  assert.equal(result.jobs[0].absoluteClosingReturn, 0.01);
+  assert.equal(result.jobs[0].priorityMagnitude, 0.99);
+  assert.deepEqual(result.jobs[0].unresolvedConstituents, ["B", "C", "D"]);
+  assert.match(result.jobs[0].feedback, /Missing constituent causes: B, C, D/);
+  assert.match(result.jobs[0].feedback, /numeric offsets as causes/);
+  assert.deepEqual(result, planRecapResearchRepair(f.plan, f.ledger, f.coverage, f.attribution, { remainingQueries: 4 }));
+});
+
 test("two tool operations with batched extra queries cannot masquerade as the two-query research contract", () => {
   const events = batches => batches.map((queries, index) => JSON.stringify({ type: "item.completed", item: { id: `search-${index}`, type: "web_search", action: { type: "search", queries } } })).concat(JSON.stringify({ type: "turn.completed" })).join("\n");
   const valid = parseAgentEvents(events([["initial focused query"], ["adaptive focused query"]]), { requireSearch: true });
