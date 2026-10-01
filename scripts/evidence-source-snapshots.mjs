@@ -17,6 +17,7 @@ import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing
 import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
@@ -62,6 +63,13 @@ export function openedSourceFromSnapshot(snapshot) {
     publishedAtCandidates = record.publishedAtCandidates;
   }
   const nfraIdentity = nfraDocumentIdentity(snapshot.finalUrl);
+  if (pbocDocumentIdentity(snapshot.finalUrl)) {
+    const record = /(?:html|xhtml)/iu.test(snapshot.contentType) ? pbocDocumentRecord(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
+    if (!record || receipts.length) throw new Error("中国人民银行公告未由冻结原文绑定身份、正文及发布时间");
+    authorityDocument = { ...record, articleProvenance: sourceArticleProvenance(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) };
+    text = record.text;
+    publishedAtCandidates = record.publishedAtCandidates;
+  }
   if (nfraIdentity) publishedAtCandidates = [];
   for (const receipt of receipts) {
     const metadata = bytes(receipt);
@@ -161,8 +169,10 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const original = originals.get(source.originalUrl ?? source.url);
     if (!original || original.finalUrl !== source.url || original.status !== (source.status ?? original.status) || verifiedExternalSourceType(original.finalUrl) !== source.sourceType) throw new Error("证据来源与冻结原文地址、状态或身份不一致");
     assertAccessibleOriginalArticle(original);
-    if (mofDocumentIdentity(source.url) ? source.authorityDocumentVersion !== MOF_DOCUMENT_VERSION : source.authorityDocumentVersion) throw new Error("财政部公告身份核验版本未由冻结原文重建");
-    if (mofDocumentIdentity(source.url) && (source.publishedAt !== original.publishedAtCandidates[0] || source.timePrecision !== "instant" || source.timingLimitation)) throw new Error("财政部已绑定的精确发布时间不得退化为日期或被替换");
+    const authorityVersion = mofDocumentIdentity(source.url) ? MOF_DOCUMENT_VERSION : pbocDocumentIdentity(source.url) ? PBOC_DOCUMENT_VERSION : undefined;
+    if (source.authorityDocumentVersion !== authorityVersion) throw new Error("权威公告身份核验版本未由冻结原文重建");
+    if (authorityVersion && source.title !== original.text.split("\n")[0]) throw new Error("权威公告标题未由冻结原始正文重建");
+    if (authorityVersion && (source.publishedAt !== original.publishedAtCandidates[0] || source.timePrecision !== "instant" || source.timingLimitation)) throw new Error("权威公告已绑定的精确发布时间不得退化为日期或被替换");
     if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);

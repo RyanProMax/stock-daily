@@ -3,7 +3,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["contractVersion", "market", "marketAsOf", "entries"],
   "properties": {
-    "contractVersion": {"const": "verified-recap-attribution-v4", "type": "string"},
+    "contractVersion": {"const": "verified-recap-attribution-v5", "type": "string"},
     "market": {"type": "string", "enum": ["CN", "US"]},
     "marketAsOf": {"type": "string", "minLength": 10, "maxLength": 10},
     "entries": {
@@ -24,7 +24,7 @@
               "required": ["basis", "subjectTargets", "rootEvidenceId", "reactionEvidenceId", "timingEvidenceId", "mechanismEvidenceIds", "eventAnchors", "expectedDirection", "transmission", "limitations"],
               "properties": {
                 "basis": {"type": "string", "enum": ["reported", "inferred"]},
-                "subjectTargets": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+                "subjectTargets": {"type": "array", "description": "Empty for every whole-target chain, market index, sector index or ETF. Only an equal-weight four-stock AI basket's company chain may select its actual constituent symbols. Never select the entry's own target symbol.", "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
                 "rootEvidenceId": {"type": "string", "minLength": 1, "maxLength": 80},
                 "reactionEvidenceId": {"type": "string", "minLength": 1, "maxLength": 80},
                 "timingEvidenceId": {"type": ["string", "null"], "minLength": 1, "maxLength": 80},

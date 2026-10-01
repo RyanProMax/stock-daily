@@ -15,6 +15,7 @@ import { cninfoPdfIdentity, cninfoPdfPublication } from "./cninfo-pdf-publicatio
 import { CNINFO_HISTORY_URL, validateCninfoHistoryBody } from "./cninfo-history-request.mjs";
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -712,6 +713,7 @@ export function sourcePublishedAtCandidates(
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
+  if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publishedAt];
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
@@ -951,6 +953,7 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
   }
   const decoded = decodeSourceBody(body, contentType);
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
+  if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publicationDate];
   const values = jsonLdArticlePublishedValues(decoded, source);
@@ -1151,6 +1154,13 @@ export async function readExternalSource(
         publishedAtCandidates = record.publishedAtCandidates;
       }
       const nfraIdentity = nfraDocumentIdentity(resolved.url.toString());
+      if (pbocDocumentIdentity(resolved.url.toString())) {
+        const record = /(?:html|xhtml)/iu.test(contentType) ? pbocDocumentRecord(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null;
+        if (!record) throw new Error("中国人民银行公告正文、身份或发布时间无法绑定原文");
+        authorityDocument = { ...record, articleProvenance: sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) };
+        text = record.text;
+        publishedAtCandidates = record.publishedAtCandidates;
+      }
       if (nfraIdentity) {
         if (!lookupPublicationMetadata || !/(?:html|xhtml)/iu.test(contentType)) throw new Error("金融监管总局公告缺少对应原始正文记录");
         const destination = await publicDestination(nfraIdentity.recordUrl, resolveDestination);

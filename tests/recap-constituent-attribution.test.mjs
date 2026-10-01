@@ -60,6 +60,18 @@ test("missing, contradictory, wrong-subject and wrong-date company explanations 
   assert.doesNotThrow(() => validateRecapAttribution(zero.attribution, zero.envelope, recapTargets(zero.envelope), zero.ledger));
 });
 
+test("a market or sector chain cannot select its own index or representative companies as component subjects", () => {
+  for (const symbol of ["SPX", "XLF"]) {
+    for (const subjects of [[symbol], ["banking"], ["HPE"]]) {
+      const f = recapFixture(), entry = f.attribution.entries.find(e => e.target === symbol);
+      entry.chains[0].subjectTargets = subjects;
+      assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), error => error.message.startsWith(symbol) && /subjectTargets: \[\]/u.test(error.message));
+      // The validator preserves rejected output; no automatic scope widening.
+      assert.deepEqual(entry.chains[0].subjectTargets, subjects);
+    }
+  }
+});
+
 test("an unresolved basket may retain a verified company chain for further research but still cannot enter complete publication", () => {
   const f = decomposition(); f.entry.basis = "unresolved"; f.entry.chains = [f.entry.chains[2]];
   assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger));

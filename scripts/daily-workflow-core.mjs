@@ -17,10 +17,11 @@ import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition, isChinaPmiArticle } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v59";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v60";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
@@ -1504,27 +1505,29 @@ export async function verifyResearchSources(
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
         const cachedPdfIssuerValid = (!(pdfUrl || /^application\/pdf(?:;|$)/iu.test(cached?.contentType ?? "")) || cached?.pdfTextEvidence?.version === PDF_TEXT_EVIDENCE_VERSION) && (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
         const cachedPmiValid = !isChinaPmiArticle(candidate.originalUrl) || (cached?.surveyChecked === true && cached.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION);
-        const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
-        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION && cached.authorityTitleChecked === true && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
+        const cachedPbocValid = !pbocDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === PBOC_DOCUMENT_VERSION && cached.authorityTitleChecked === true && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
+        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cachedPbocValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
-        const mofRecord = mofDocumentIdentity(opened.finalUrl) && Buffer.isBuffer(opened.rawBody) ? mofDocumentRecord(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
-        if (mofDocumentIdentity(opened.finalUrl) && (!mofRecord || stableHash(opened.text) !== stableHash(mofRecord.text))) throw new Error("财政部证据缺少已绑定的原始正文记录");
+        const boundAuthority = mofDocumentIdentity(opened.finalUrl) || pbocDocumentIdentity(opened.finalUrl);
+        const boundRecord = boundAuthority && Buffer.isBuffer(opened.rawBody) ? (mofDocumentIdentity(opened.finalUrl) ? mofDocumentRecord : pbocDocumentRecord)(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
+        if (boundAuthority && (!boundRecord || stableHash(opened.text) !== stableHash(boundRecord.text))) throw new Error("权威公告证据缺少已绑定的原始正文记录");
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         assertCurrentPdfIssuer(candidate, opened);
         const corporateAction = verifiedCurrentCorporateAction(candidate, opened, envelope);
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publication = opened.articleProvenance?.publication;
-        if (mofRecord && (stableHash(opened.publishedAtCandidates) !== stableHash(mofRecord.publishedAtCandidates) || stableHash(opened.publishedDateCandidates) !== stableHash(mofRecord.publishedDateCandidates) || publication?.status !== "verified" || publication.initialPublishedAt !== mofRecord.publishedAtCandidates[0] || publication.currentVersionAt !== mofRecord.publishedAtCandidates[0] || publication.timeBasis !== "first_publication" || opened.articleProvenance?.origin?.key !== "authority:mof.gov.cn" || opened.articleProvenance.origin.identified !== true)) throw new Error("财政部证据时间或来源与原始正文记录不一致");
+        if (boundRecord && (stableHash(opened.publishedAtCandidates) !== stableHash(boundRecord.publishedAtCandidates) || stableHash(opened.publishedDateCandidates) !== stableHash(boundRecord.publishedDateCandidates) || publication?.status !== "verified" || publication.initialPublishedAt !== boundRecord.publishedAtCandidates[0] || publication.currentVersionAt !== boundRecord.publishedAtCandidates[0] || publication.timeBasis !== "first_publication" || opened.articleProvenance?.origin?.key !== (boundRecord.version === MOF_DOCUMENT_VERSION ? "authority:mof.gov.cn" : "authority:pbc.gov.cn") || opened.articleProvenance.origin.identified !== true)) throw new Error("权威公告证据时间或来源与原始正文记录不一致");
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
-        // A fully bound native MOF record supplies a precise publication clock.
+        // A fully bound native authority record supplies a publication clock.
         // Verify a supplied calendar claim before replacing its lower precision.
-        if (mofRecord && isCalendarDate(candidate.publishedAt)) verifiedSourceTime(candidate, envelope, mofRecord.publishedAtCandidates, mofRecord.publishedDateCandidates, sourceType, corporateAction);
-        const timedCandidate = mofRecord ? { ...candidate, publishedAt: mofRecord.publishedAtCandidates[0] } : candidate;
+        if (boundRecord && isCalendarDate(candidate.publishedAt)) verifiedSourceTime(candidate, envelope, boundRecord.publishedAtCandidates, boundRecord.publishedDateCandidates, sourceType, corporateAction);
+        const timedCandidate = boundRecord ? { ...candidate, publishedAt: boundRecord.publishedAtCandidates[0] } : candidate;
         const publishedAt = verifiedSourceTime(
           timedCandidate,
           envelope,
@@ -1536,7 +1539,7 @@ export async function verifyResearchSources(
         const closingChecks = checkSessionIntegrity ? assertSessionClosingClaims(opened.text, envelope, publishedAt) : [];
         let normalizedCandidate = {
           ...candidate,
-          title: readerText(candidate.title, "verified source title", 4, 220),
+          title: readerText(boundRecord?.title ?? candidate.title, "verified source title", 4, 220),
           facts: readerText(candidate.facts, "verified source facts", 20, 1_600),
           publishedAt,
           kind: normalizedSourceKind(
@@ -1624,7 +1627,7 @@ export async function verifyResearchSources(
             timingChecked: true,
             provenanceChecked: true,
             reportingOrigin: opened.articleProvenance?.origin ?? null,
-            ...(mofRecord ? { authorityDocumentVersion: MOF_DOCUMENT_VERSION } : {}),
+            ...(boundRecord ? { authorityDocumentVersion: boundRecord.version, authorityTitleChecked: true } : {}),
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),

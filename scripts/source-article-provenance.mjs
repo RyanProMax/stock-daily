@@ -2,8 +2,9 @@ import { JSDOM } from "jsdom";
 import { verifiedExternalSourceLabel, verifiedExternalSourceType, verifiedFirstPartyIssuerIdentity } from "./source-registry.mjs";
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v2";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v3";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -74,6 +75,10 @@ export function sourceArticleProvenance(decodedHtml, source) {
     return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:mof.gov.cn", identified: Boolean(record), basis: record ? "bound_authority_document" : "origin_unresolved" }, publication: record ? { status: "verified", initialPublishedAt: record.publishedAtCandidates[0], currentVersionAt: record.publishedAtCandidates[0], timeBasis: "first_publication" } : { status: "unverified_update" } };
   }
   const chinaPmi = chinaPmiDocument(decodedHtml, source);
+  if (pbocDocumentIdentity(source)) {
+    const record = pbocDocumentRecord(decodedHtml, source);
+    return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:pbc.gov.cn", identified: Boolean(record), basis: record ? "bound_authority_document" : "origin_unresolved" }, publication: record ? { status: "verified", initialPublishedAt: record.publishedAtCandidates[0], currentVersionAt: record.publishedAtCandidates[0], timeBasis: "first_publication" } : { status: "unverified_update" } };
+  }
   if (chinaPmi) return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:stats.gov.cn", identified: true, basis: "bound_authority_document" }, publication: { status: "verified", initialPublishedAt: chinaPmi.publishedAt, currentVersionAt: chinaPmi.publishedAt, timeBasis: "first_publication" } };
   const sourceType = verifiedExternalSourceType(source), issuer = verifiedFirstPartyIssuerIdentity(source);
   if (sourceType !== "publisher" && !(sourceType === "first_party" && issuer)) return null;

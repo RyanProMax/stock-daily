@@ -16,6 +16,7 @@
 - [x] Bind the reviewed MOF policy interpretation to its native article, visible dates and publication clock; accept exact CNINFO report titles without an issuer prefix while retaining original issuer/file/calendar checks.
 - [x] Recover native company originals through validated CDN destinations, bind reviewed cover/profile formats, and independently rederive economic passages while rejecting accounting, undertaking and standalone strategy filler.
 - [x] Preserve public authority events' original discovery labels while allowing independently reported same-event target connections; retain company scope, event anchors, timing, sign and separate publication review.
+- [x] Bind the reviewed PBOC news format to its original title, owned body, publication clock and authority identity; retain all policy conditions, reject stale title/identity caches and misleading CMS/path times, and preserve actual rejected attempts when repairing target selectors or literal anchors.
 - [ ] Demonstrate independently accepted real qualified-inference chains; background alone must never complete attribution.
 - [ ] Correct verified calendar/ordinal/unit translations and date-only pre-close confirmation; revalidate frozen candidates before spending more research queries.
 - [ ] Demonstrate a real accepted all-sector report and exact production readback; implementation tests do not count as this outcome.

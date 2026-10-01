@@ -6,8 +6,9 @@ import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, h
 import { isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity } from "./mof-document.mjs";
 import { CHINA_PMI_EVIDENCE_VERSION, isChinaPmiArticle } from "./china-pmi-release.mjs";
+import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity } from "./pboc-document.mjs";
 
-export const ATTRIBUTION_VERSION = "verified-recap-attribution-v4";
+export const ATTRIBUTION_VERSION = "verified-recap-attribution-v5";
 const DIRECTIONS = ["positive", "negative", "flat"];
 const GENERIC_TERMS = /^(?:market|markets|stock|stocks|shares|prices?|demand|supply|costs?|growth|rates?|interest rates|earnings|news|report|rose|fell|美国|中国|市场|股票|需求|供给|成本|利率|上涨|下跌)$/iu;
 const CALENDAR_TERM = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday)$/iu;
@@ -67,7 +68,8 @@ function reportedEventRootCovers(source, symbol) {
   // Only original formats with a native authority identity reader qualify.
   // A matching government hostname or a claimed origin key is insufficient.
   return (origin.key === "authority:mof.gov.cn" && source.authorityDocumentVersion === MOF_DOCUMENT_VERSION && Boolean(mofDocumentIdentity(source.url)))
-    || (origin.key === "authority:stats.gov.cn" && source.surveyChecked === true && source.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION && isChinaPmiArticle(source.url));
+    || (origin.key === "authority:stats.gov.cn" && source.surveyChecked === true && source.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION && isChinaPmiArticle(source.url))
+    || (origin.key === "authority:pbc.gov.cn" && source.authorityDocumentVersion === PBOC_DOCUMENT_VERSION && Boolean(pbocDocumentIdentity(source.url)));
 }
 
 function constituentClaims(source, symbol) {
@@ -175,7 +177,7 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
     const entry = entries.get(target.symbol);
     if (!["reported", "inferred", "unresolved"].includes(entry.basis) || entry.observedReturn !== target.change || !Array.isArray(entry.chains)) throw new Error(`${target.symbol} 归因依据或实际方向无效`);
     const decomposed = hasConstituentAttribution(entry);
-    if (entry.chains.length > (decomposed ? 8 : 3) || (decomposed && (target.kind !== "ai_layer" || target.benchmarkKind !== "equal_weight_basket" || target.constituents?.length !== 4 || new Set(target.constituents.map(company => company.symbol)).size !== 4 || target.constituents.some(company => company.asOf !== envelope.marketAsOf)))) throw new Error(`${target.symbol} 公司分解只适用于四只已确认成分的等权篮子`);
+    if (entry.chains.length > (decomposed ? 8 : 3) || (decomposed && (target.kind !== "ai_layer" || target.benchmarkKind !== "equal_weight_basket" || target.constituents?.length !== 4 || new Set(target.constituents.map(company => company.symbol)).size !== 4 || target.constituents.some(company => company.asOf !== envelope.marketAsOf)))) throw new Error(`${target.symbol} 公司分解只适用于四只已确认成分的等权篮子；大盘、行业指数和 ETF 的整条传导链必须使用 subjectTargets: []，不得填入目标自身、行业名称或代表股。不要通过清空名单将公司事件扩大为整个指数的原因。`);
     const subjectDirections = new Map((decomposed ? target.constituents : []).map(company => [company.symbol, new Set()]));
     selected(entry.counterEvidenceIds, map, "反证", 0, 6);
     assessmentText(entry.counterAssessment, "反证分析", 40, 1_200);
