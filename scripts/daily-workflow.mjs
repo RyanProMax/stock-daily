@@ -60,6 +60,7 @@ import {
 import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
 import { chinaPmiResearchSources, chinaPmiSourceReader } from "./recap-china-pmi-data.mjs";
+import { collectRecapPbocNewsData, validateRecapPbocNewsData, pbocNewsResearchContext, pbocNewsResearchSources, pbocNewsSourceReader } from "./recap-pboc-news-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
@@ -917,6 +918,7 @@ export class MarketWorkflow {
     macroCollector = collectRecapMacroData,
     transmissionCollector = collectRecapTransmissionData,
     companyBackgroundCollector = collectRecapCompanyBackgroundData,
+    pbocNewsCollector = collectRecapPbocNewsData,
   }) {
     this.input = validateInput(input);
     this.market = market;
@@ -954,6 +956,7 @@ export class MarketWorkflow {
     this.macroCollector = macroCollector;
     this.transmissionCollector = transmissionCollector;
     this.companyBackgroundCollector = companyBackgroundCollector;
+    this.pbocNewsCollector = pbocNewsCollector;
     this.verifiedEvidenceCache = new Map();
     this.excludedSources = [];
     this.researchSourceDomains = publishableExternalSourceDomains();
@@ -1932,6 +1935,7 @@ export class MarketWorkflow {
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps, ...(this.macroData.chinaPmi ? { chinaPmiContext: this.macroData.chinaPmi.context, chinaPmiGaps: this.macroData.chinaPmi.gaps } : {}) } : {}),
       ...(this.recapResearchEvidence ? { sharedEvidence: this.recapResearchEvidence } : {}),
+      ...(this.pbocNewsContext?.articles.length || this.pbocNewsContext?.gaps.length ? { primaryPolicyContext: this.pbocNewsContext } : {}),
     };
   }
 
@@ -2942,7 +2946,22 @@ export class MarketWorkflow {
       this.manifest.companyBackgroundHash = stableHash(companyBackground);
       await this.saveManifest();
     }
-    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), chinaPmiSourceReader(macroData.chinaPmi, companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission))));
+    const pbocPath = resolve(this.runDir, "artifacts/recap-pboc-news-data.json");
+    let pbocNews, partialPbocNews;
+    if (await exists(pbocPath)) {
+      const stored = validateRecapPbocNewsData(await readJson(pbocPath), this.envelope, { allowPartial: true });
+      if (stored.completed && this.manifest.pbocNewsHash === stableHash(stored)) pbocNews = stored;
+      else partialPbocNews = stored;
+    }
+    if (!pbocNews) {
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(4 * 60_000, this.remainingTime())));
+      pbocNews = validateRecapPbocNewsData(await this.pbocNewsCollector(this.envelope, { signal, resumeBook: partialPbocNews, onCheckpoint: value => atomicJson(pbocPath, value) }), this.envelope);
+      await atomicJson(pbocPath, pbocNews);
+      this.manifest.pbocNewsHash = stableHash(pbocNews);
+      await this.saveManifest();
+    }
+    this.pbocNewsContext = pbocNewsResearchContext(pbocNews, this.envelope);
+    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), pbocNewsSourceReader(pbocNews, chinaPmiSourceReader(macroData.chinaPmi, companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission)))));
     this.recapSourceReader = this.recapSnapshotReader.reader;
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
@@ -2950,8 +2969,9 @@ export class MarketWorkflow {
     let nextEvidence = [];
     let ledger;
     const chinaPmiSources = chinaPmiResearchSources(macroData.chinaPmi, this.envelope, plan);
-    if (transmission.sources.length || companyBackground.sources.length || chinaPmiSources.length) {
-      outputs.push({ sources: [...transmission.sources, ...companyBackground.sources, ...chinaPmiSources], rejectedSources: [], alternatives: [] });
+    const pbocNewsSources = pbocNewsResearchSources(pbocNews, this.envelope, plan);
+    if (transmission.sources.length || companyBackground.sources.length || chinaPmiSources.length || pbocNewsSources.length) {
+      outputs.push({ sources: [...transmission.sources, ...companyBackground.sources, ...chinaPmiSources, ...pbocNewsSources], rejectedSources: [], alternatives: [] });
       ledger = await this.verifyEvidence(outputs);
       nextEvidence = ledger.sources;
     }
@@ -3662,7 +3682,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
-  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json", "recap-pboc-news-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }
   await writeFile(

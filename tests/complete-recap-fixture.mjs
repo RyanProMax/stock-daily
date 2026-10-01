@@ -6,6 +6,7 @@ import { tradingRequests } from "../scripts/recap-market-data.mjs";
 import { ATTRIBUTION_VERSION } from "../scripts/recap-attribution.mjs";
 import { COMPANY_BACKGROUND_VERSION } from "../scripts/recap-company-background-data.mjs";
 import { unavailableChinaPmiData } from "../scripts/recap-china-pmi-data.mjs";
+import { PBOC_NEWS_DATA_VERSION, PBOC_NEWS_HOME } from "../scripts/recap-pboc-news-data.mjs";
 
 export function recapFixture(market = "US") {
   const envelope = marketEnvelope(fixtureInput(), market);
@@ -41,5 +42,6 @@ export function recapFixture(market = "US") {
   if (market === "CN") macroData.chinaPmi = unavailableChinaPmiData(envelope.marketAsOf, "Test fixture has no original Chinese PMI release.");
   const transmissionData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], sources: [], gaps: [] };
   const companyBackgroundData = { version: COMPANY_BACKGROUND_VERSION, market, marketAsOf: envelope.marketAsOf, registry: null, profiles: [], filings: [], sources: [], gaps: [...new Set(plan.anomalies.filter(item => item.kind === "ai_layer").flatMap(item => item.observation.constituents.map(company => company.symbol)))].map(symbol => ({ symbol, reason: "Test fixture does not claim access to an original company disclosure." })) };
-  return { envelope, plan, ledger, social, raw, tradingData, macroData, attribution, transmissionData, companyBackgroundData };
+  const pbocNewsData = { version: PBOC_NEWS_DATA_VERSION, market, marketAsOf: envelope.marketAsOf, completed: true, index: null, articles: [], gaps: market === "CN" ? [{ stage: "index", url: PBOC_NEWS_HOME, reason: "Test fixture has no frozen PBOC news homepage." }] : [] };
+  return { envelope, plan, ledger, social, raw, tradingData, macroData, attribution, transmissionData, companyBackgroundData, pbocNewsData };
 }

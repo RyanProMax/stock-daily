@@ -39,6 +39,8 @@ Determine whether a reliable same-session source explicitly connects the candida
 
 # Constraints
 
+- Supplied `primaryPolicyContext` contains frozen official policy leads, not approved price causes. Use the complete owned attachment to identify the actual event and conditions; a synopsis describes only its announcement. Require an independent explicit same-event target reaction, preserving its literal event anchors. Policy beneficiaries do not establish constituent exposure, implementation or a whole-sector causal effect. Respect discovery gaps and missing bodies rather than inventing terms or treating the bounded homepage as exhaustive.
+
 - Check any `adjustmentReview` in the supplied target/constituent trading observations. Provider adjustment flags and action leads require the independent issuer fact before causal use. A quote-close decline or opening gap can include an ex-dividend/reference-price effect; never attribute it wholly to selling pressure, deteriorating operations or a new announcement merely because the effective date matches this session. Keep quote-close ratios, exchange reference-price changes and total investor return distinct. An unverified action keeps that explanation unresolved.
 
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.

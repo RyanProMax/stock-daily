@@ -53,6 +53,8 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 
 # Constraints
 
+- Treat supplied `primaryPolicyContext` as frozen original-source leads, subject to the usual evidence checks. A complete official announcement synopsis establishes only the announcement; inspect `fullOwnedBody` for attached conditions, dates, beneficiaries and implementation status. Intended beneficiaries are not proof of any constituent's existing exposure. Never substitute these policy facts for a same-session target reaction or treat future lending instructions as realized lending. Respect discovery gaps and body limits; absence from this bounded homepage collection does not establish absence of a policy.
+
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.
 - Do not infer a price cause and set `causalConnection` to false.
 - Do not use social posts, mirrors, search pages, inaccessible pages, or undated pages. Date-only evidence is restricted to the official first-party release rule above.

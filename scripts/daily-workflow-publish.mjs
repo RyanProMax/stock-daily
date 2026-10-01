@@ -23,6 +23,7 @@ import { validateRecapMacroData } from "./recap-macro-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { validateRecapTransmissionData } from "./recap-transmission-data.mjs";
 import { validateRecapCompanyBackgroundData } from "./recap-company-background-data.mjs";
+import { validateRecapPbocNewsData, auditRecapPbocNewsSources } from "./recap-pboc-news-data.mjs";
 import { auditLedgerSourceSnapshots } from "./evidence-source-snapshots.mjs";
 import {
   buildReportContent,
@@ -524,7 +525,7 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
   if (manifest.coverageRequired) {
     if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
     const root = resolve(dirname(resolve(manifestPath)), "artifacts");
-    const [ledger, social, draft, review, tradingData, macroData, attribution, transmission, companyBackground] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
+    const [ledger, social, draft, review, tradingData, macroData, attribution, transmission, companyBackground, pbocNews] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json", "recap-pboc-news-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
     const sourceSnapshots = JSON.parse(await readFile(resolve(root, "recap-source-snapshots.json"), "utf8"));
     if (stableHash(sourceSnapshots) !== manifest.sourceSnapshotsHash) throw new Error("完整复盘原文快照哈希不一致");
     auditLedgerSourceSnapshots(ledger, sourceSnapshots, { envelope: researchMarketEnvelope(input, manifest.market), macroData });
@@ -535,6 +536,10 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
     validateRecapTransmissionData(transmission, researchMarketEnvelope(input, manifest.market), completeRecapPlan(researchMarketEnvelope(input, manifest.market), tradingData));
     if (stableHash(companyBackground) !== manifest.companyBackgroundHash) throw new Error("完整复盘公司身份、申报与敞口原文哈希不一致");
     validateRecapCompanyBackgroundData(companyBackground, researchMarketEnvelope(input, manifest.market), completeRecapPlan(researchMarketEnvelope(input, manifest.market), tradingData));
+    if (stableHash(pbocNews) !== manifest.pbocNewsHash) throw new Error("完整复盘央行新闻目录与原文哈希不一致");
+    const envelope = researchMarketEnvelope(input, manifest.market);
+    validateRecapPbocNewsData(pbocNews, envelope);
+    auditRecapPbocNewsSources(pbocNews, envelope, completeRecapPlan(envelope, tradingData), ledger, sourceSnapshots);
     if (stableHash(attribution) !== manifest.recapAttributionHash) throw new Error("完整复盘事件传导审查哈希不一致");
     validateRecapAttribution(attribution, researchMarketEnvelope(input, manifest.market), recapTargets(researchMarketEnvelope(input, manifest.market)), ledger, { requireComplete: true, macroData });
     if (!Object.values(manifest.stages ?? {}).some((stage) => stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger))) throw new Error("完整复盘证据尚未通过原文验证");

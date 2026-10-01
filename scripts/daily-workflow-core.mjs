@@ -21,7 +21,7 @@ import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from 
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v60";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v61";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";

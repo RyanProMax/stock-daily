@@ -191,6 +191,7 @@ async function completePublicationFixture() {
   manifest.recapAttributionHash = stableHash(f.attribution);
   manifest.transmissionHash = stableHash(f.transmissionData);
   manifest.companyBackgroundHash = stableHash(f.companyBackgroundData);
+  manifest.pbocNewsHash = stableHash(f.pbocNewsData);
   manifest.sourceSnapshotsHash = stableHash(snapshots);
   manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), attributionStage: "recap-attributor-attempt-1", writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
   manifest.stages["recap-verification"] = { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(f.ledger) };
@@ -203,7 +204,7 @@ async function completePublicationFixture() {
   const root = resolve(fixture.manifestPath, "../artifacts");
   await writeFile(resolve(root, "evidence-ledger.json"), JSON.stringify(headlines) + "\n");
   await writeFile(resolve(root, "recap-source-snapshots.json"), JSON.stringify(snapshots) + "\n");
-  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "recap-company-background-data.json": f.companyBackgroundData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
+  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "recap-company-background-data.json": f.companyBackgroundData, "recap-pboc-news-data.json": f.pbocNewsData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.attributionStage}.json`), JSON.stringify(f.attribution) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.writerStage}.json`), JSON.stringify(f.raw) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.reviewerStage}.json`), JSON.stringify(review) + "\n");
@@ -235,16 +236,18 @@ test("the comprehensive latest alias retains exact independent writer and review
   assert.equal(result.status, "valid");
   assert.equal(result.completeRecap, true);
   assert.equal(result.recapTargetCount, 20);
+  assert.deepEqual(JSON.parse(await readFile(resolve(projectDir, "work/artifacts/recap-pboc-news-data.json"), "utf8")), recapFixture().pbocNewsData);
 });
 
 test("recap evidence, low review scores and rewritten reader claims stop before network writes", async () => {
-  for (const mutation of ["ledger", "review", "report", "trading", "macro", "attribution", "transmission", "source-snapshots"]) {
+  for (const mutation of ["ledger", "review", "report", "trading", "macro", "attribution", "transmission", "pboc-news", "source-snapshots"]) {
     const f = await completePublicationFixture();
     if (mutation === "ledger") await writeFile(resolve(f.root, "recap-ledger.json"), '{"sources":[]}');
     if (mutation === "trading") await writeFile(resolve(f.root, "recap-trading-data.json"), '{"entries":[]}');
     if (mutation === "macro") await writeFile(resolve(f.root, "recap-macro-data.json"), '{"context":{"rates":{"tenYear":999}}}');
     if (mutation === "attribution") await writeFile(resolve(f.root, "recap-attribution.json"), '{"entries":[]}');
     if (mutation === "transmission") await writeFile(resolve(f.root, "recap-transmission-data.json"), '{"sources":[]}');
+    if (mutation === "pboc-news") await writeFile(resolve(f.root, "recap-pboc-news-data.json"), '{"articles":[]}');
     if (mutation === "source-snapshots") await writeFile(resolve(f.root, "recap-source-snapshots.json"), '{"snapshots":[]}');
     if (mutation === "review") {
       f.review.entries[0].scores.magnitude = 3;
