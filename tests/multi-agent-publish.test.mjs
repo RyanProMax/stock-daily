@@ -190,6 +190,7 @@ async function completePublicationFixture() {
   manifest.socialHash = stableHash(f.social);
   manifest.recapAttributionHash = stableHash(f.attribution);
   manifest.transmissionHash = stableHash(f.transmissionData);
+  manifest.companyBackgroundHash = stableHash(f.companyBackgroundData);
   manifest.sourceSnapshotsHash = stableHash(snapshots);
   manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), attributionStage: "recap-attributor-attempt-1", writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
   manifest.stages["recap-verification"] = { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(f.ledger) };
@@ -202,7 +203,7 @@ async function completePublicationFixture() {
   const root = resolve(fixture.manifestPath, "../artifacts");
   await writeFile(resolve(root, "evidence-ledger.json"), JSON.stringify(headlines) + "\n");
   await writeFile(resolve(root, "recap-source-snapshots.json"), JSON.stringify(snapshots) + "\n");
-  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
+  for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "recap-company-background-data.json": f.companyBackgroundData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.attributionStage}.json`), JSON.stringify(f.attribution) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.writerStage}.json`), JSON.stringify(f.raw) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.reviewerStage}.json`), JSON.stringify(review) + "\n");

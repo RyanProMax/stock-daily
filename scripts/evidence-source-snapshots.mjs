@@ -3,11 +3,12 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isIP } from "node:net";
 import { fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
-import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches } from "./daily-workflow-core.mjs";
+import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { auditRecapRateFactors } from "./recap-rate-factors.mjs";
+import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -47,6 +48,7 @@ export function openedSourceFromSnapshot(snapshot) {
     const metadata = bytes(receipt);
     if (publishedAtCandidates.length) throw new Error("已有原始发布时间时不得覆盖为附加时间");
     if (receipt.finalUrl === "https://www.federalreserve.gov/feeds/speeches.xml" && new URL(snapshot.finalUrl).hostname === "www.federalreserve.gov") publishedAtCandidates = fedSpeechPublishedAtCandidates(body, metadata, snapshot.finalUrl);
+    else if (receipt.finalUrl === secCompanySubmissionsUrl(snapshot.finalUrl)) publishedAtCandidates = secCompanySubmissionTime(metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secSubmissionMetadataUrl(snapshot.finalUrl)) publishedAtCandidates = sourcePublishedAtCandidates(metadata, receipt.contentType, receipt.finalUrl);
     else throw new Error("附加时间元数据不对应原始文章或 SEC 申报");
   }
@@ -134,6 +136,7 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     assertMaterialEarningsContext(source, original.text);
     for (const comparison of source.comparisons ?? []) for (const value of [comparison.actualValue, comparison.baselineValue]) if (!hasUnitBoundComparisonValue(source.supportingExcerpt, comparison.unit, value)) throw new Error("类型化财务对比值未由冻结引文的数值和单位证明");
     if (source.role === "causal" && !hasCausalPassage(source.supportingExcerpt)) throw new Error("冻结引文没有原文因果联系");
+    if (source.kind === "background" && envelope && stableHash(source.backgroundSubjects) !== stableHash(verifiedBackgroundExposureSubjects(source, original, envelope))) throw new Error("背景敞口主体未由原始发行主体重建");
   }
   return book;
 }

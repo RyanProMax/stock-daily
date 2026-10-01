@@ -16,7 +16,7 @@ function backgroundFixture() {
     queries: [anomaly.factQueries[0], "2026-08-21 US XLU Utilities State Street prospectus interest rates financing costs"], alternatives: [],
     sources: [{ url, sourceLabel: "SEC", title: "State Street Utilities Select Sector SPDR ETF disclosure", publishedAt: "2026-01-30T20:55:54Z", kind: "background", supportingExcerpt: excerpt, facts: "公用事业基金集中于公用事业行业，受该行业表现影响更大；受监管公用事业股价可能与利率变化呈反向关系。", scope: "sector", targets: ["XLU"], hypothesisIds: [anomaly.hypotheses[1].id], causalConnection: false, comparisons: [] }],
   };
-  const reader = async () => ({ finalUrl: url, status: 200, contentType: "text/html", text: excerpt, publishedAtCandidates: ["2026-01-30T20:55:54Z"], publishedDateCandidates: [] });
+  const reader = async () => ({ finalUrl: url, status: 200, contentType: "text/html", text: "Select Sector SPDR Trust\n" + excerpt, publishedAtCandidates: ["2026-01-30T20:55:54Z"], publishedDateCandidates: [] });
   return { ...f, anomaly, output, reader };
 }
 
@@ -25,7 +25,7 @@ test("first-party background preserves structural exposure without counting as a
   const research = validateResearchOutput(f.output, "facts", f.anomaly, f.envelope);
   assert.equal(research.sources.length, 1);
   const ledger = await verifyResearchSources([research], f.envelope, { reader: f.reader });
-  assert.equal(ledger.sources.length, 1);
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
   assert.deepEqual(ledger.sources[0].backgroundSubjects, ["XLU"]);
   assert.equal(ledger.sources[0].causalConnection, false);
   assert.ok(ledger.sources[0].useLimitation.includes("not a current-session event"));
@@ -76,20 +76,23 @@ test("a constituent disclosure records only that constituent, without broadening
   const f = backgroundFixture();
   f.anomaly = f.plan.anomalies.find(item => item.kind === "ai_layer");
   const constituent = f.anomaly.observation.constituents[0];
+  constituent.symbol = "NVDA"; constituent.nameEn = "NVIDIA";
   const text = `${constituent.nameEn}: Demand changes and financing costs can affect this company's business and financial performance.`;
+  const companyUrl = "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm";
+  const rawBody = Buffer.from(`<ix:nonNumeric name="dei:EntityCentralIndexKey">0001045810</ix:nonNumeric><ix:nonNumeric name="dei:DocumentType">10-K</ix:nonNumeric><ix:nonNumeric name="dei:EntityRegistrantName">NVIDIA CORP</ix:nonNumeric><ix:nonNumeric name="dei:TradingSymbol">${constituent.symbol}</ix:nonNumeric><p>${text}</p>`);
   f.output.anomalyId = f.anomaly.id;
   f.output.queries = [f.anomaly.factQueries[0], `2026-08-21 US ${constituent.nameEn} official risk demand financing costs`];
-  Object.assign(f.output.sources[0], { targets: [f.anomaly.target], hypothesisIds: [f.anomaly.hypotheses[1].id], scope: "company", supportingExcerpt: text, facts: "公司披露需求变化和融资成本可能影响其业务及财务表现。" });
+  Object.assign(f.output.sources[0], { url: companyUrl, targets: [f.anomaly.target], hypothesisIds: [f.anomaly.hypotheses[1].id], scope: "company", supportingExcerpt: text, facts: "公司披露需求变化和融资成本可能影响其业务及财务表现。" });
   const research = validateResearchOutput(f.output, "facts", f.anomaly, f.envelope);
-  const ledger = await verifyResearchSources([research], f.envelope, { reader: async () => ({ finalUrl: url, text, publishedAtCandidates: ["2026-01-30T20:55:54Z"] }) });
-  assert.equal(ledger.sources.length, 1);
+  const ledger = await verifyResearchSources([research], f.envelope, { reader: async () => ({ finalUrl: companyUrl, rawBody, text, publishedAtCandidates: ["2026-01-30T20:55:54Z"] }) });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
   assert.deepEqual(ledger.sources[0].backgroundSubjects, [constituent.symbol]);
   assert.equal(ledger.sources[0].scope, "company");
   assert.equal(assessRecapEvidenceCoverage(f.envelope, ledger).eligibleCount, 0);
   f.output.sources[0].scope = "ai_layer";
   f.output.sources[0].supportingExcerpt += " The chips business is sensitive to demand and financing costs.";
   const broadened = validateResearchOutput(f.output, "facts", f.anomaly, f.envelope);
-  const rejected = await verifyResearchSources([broadened], f.envelope, { reader: async () => ({ finalUrl: url, text: f.output.sources[0].supportingExcerpt, publishedAtCandidates: ["2026-01-30T20:55:54Z"] }) });
+  const rejected = await verifyResearchSources([broadened], f.envelope, { reader: async () => ({ finalUrl: companyUrl, rawBody, text: f.output.sources[0].supportingExcerpt, publishedAtCandidates: ["2026-01-30T20:55:54Z"] }) });
   assert.equal(rejected.sources.length, 0);
   assert.match(rejected.rejected[0].reason, /不能自动扩大/);
 });

@@ -63,6 +63,7 @@ import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
 import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
+import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "./recap-company-background-data.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -908,6 +909,7 @@ export class MarketWorkflow {
     sourceVerifier = verifyResearchSources,
     macroCollector = collectRecapMacroData,
     transmissionCollector = collectRecapTransmissionData,
+    companyBackgroundCollector = collectRecapCompanyBackgroundData,
   }) {
     this.input = validateInput(input);
     this.market = market;
@@ -944,6 +946,7 @@ export class MarketWorkflow {
     this.sourceVerifier = sourceVerifier;
     this.macroCollector = macroCollector;
     this.transmissionCollector = transmissionCollector;
+    this.companyBackgroundCollector = companyBackgroundCollector;
     this.verifiedEvidenceCache = new Map();
     this.excludedSources = [];
     this.researchSourceDomains = publishableExternalSourceDomains();
@@ -2050,7 +2053,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v16",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v17",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2910,15 +2913,29 @@ export class MarketWorkflow {
       this.manifest.transmissionHash = stableHash(transmission);
       await this.saveManifest();
     }
-    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), transmissionSourceReader(transmission));
+    const companyPath = resolve(this.runDir, "artifacts/recap-company-background-data.json");
+    let companyBackground, partialCompanyBackground;
+    if (await exists(companyPath)) {
+      const stored = validateRecapCompanyBackgroundData(await readJson(companyPath), this.envelope, plan);
+      if (this.manifest.companyBackgroundHash === stableHash(stored)) companyBackground = stored;
+      else partialCompanyBackground = stored;
+    }
+    if (!companyBackground) {
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(8 * 60_000, this.remainingTime())));
+      companyBackground = validateRecapCompanyBackgroundData(await this.companyBackgroundCollector(this.envelope, plan, { signal, resumeBook: partialCompanyBackground, onCheckpoint: value => atomicJson(companyPath, value) }), this.envelope, plan);
+      await atomicJson(companyPath, companyBackground);
+      this.manifest.companyBackgroundHash = stableHash(companyBackground);
+      await this.saveManifest();
+    }
+    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission)));
     this.recapSourceReader = this.recapSnapshotReader.reader;
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
     let nextAccess = initialAccess;
     let nextEvidence = [];
     let ledger;
-    if (transmission.sources.length) {
-      outputs.push({ sources: transmission.sources, rejectedSources: [], alternatives: [] });
+    if (transmission.sources.length || companyBackground.sources.length) {
+      outputs.push({ sources: [...transmission.sources, ...companyBackground.sources], rejectedSources: [], alternatives: [] });
       ledger = await this.verifyEvidence(outputs);
       nextEvidence = ledger.sources;
     }
@@ -3565,7 +3582,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
-  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "recap-company-background-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }
   await writeFile(

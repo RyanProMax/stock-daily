@@ -961,6 +961,7 @@ export async function readExternalSource(
     signal,
     structured = false,
     includeRaw = false,
+    lookupPublicationMetadata = true,
   } = {},
 ) {
   const resolveDestination =
@@ -1040,7 +1041,7 @@ export async function readExternalSource(
         resolved.url.toString(),
       );
       const metadataReceipts = [];
-      if (publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {
+      if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {
         try {
           // The page supplies only a date. Use this exact speech's official
           // RSS item for its actual publication time; never invent midnight.
@@ -1056,7 +1057,7 @@ export async function readExternalSource(
         }
       }
       const submissionUrl =
-        publishedAtCandidates.length === 0
+        lookupPublicationMetadata && publishedAtCandidates.length === 0
           ? secSubmissionMetadataUrl(resolved.url.toString())
           : null;
       if (submissionUrl) {

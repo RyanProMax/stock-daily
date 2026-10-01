@@ -123,6 +123,12 @@ function hostnameMatches(hostname, domain) {
   return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
+export function verifiedFirstPartyIssuerLabel(source) {
+  let hostname; try { hostname = new URL(source).hostname.toLowerCase(); } catch { return null; }
+  for (const [domain, label] of VERIFIED_ISSUERS) if (hostnameMatches(hostname, domain)) return label;
+  return null;
+}
+
 export function verifiedExternalSourceType(source, platform = "web") {
   if (platform === "x") return "expert";
   let hostname, pathname;

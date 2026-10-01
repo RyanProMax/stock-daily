@@ -38,7 +38,8 @@ function reaction(source, envelope) {
 }
 
 function background(source, envelope, target) {
-  return verified(source) && source.kind === "background" && source.role === "facts" && source.sourceType === "first_party" && source.causalConnection === false && source.targets.includes(target.symbol) && backgroundEvidenceInWindow(source.publishedAt, envelope) && Array.isArray(source.backgroundSubjects);
+  if (!verified(source) || source.kind !== "background" || source.role !== "facts" || source.sourceType !== "first_party" || source.causalConnection !== false || !backgroundEvidenceInWindow(source.publishedAt, envelope) || !Array.isArray(source.backgroundSubjects)) return false;
+  return source.targets.includes(target.symbol) || (source.scope === "company" && source.subjectIdentityChecked === true && target.kind === "ai_layer" && source.backgroundSubjects.length === 1 && target.constituents.some(item => source.backgroundSubjects.includes(item.symbol)));
 }
 
 function mechanismsCover(sources, target) {

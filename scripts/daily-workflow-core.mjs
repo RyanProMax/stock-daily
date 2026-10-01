@@ -4,11 +4,14 @@ import { marketAsOfFromInput, marketAsOfFromReport } from "./daily-policy.mjs";
 import {
   verifiedExternalSourceLabel,
   verifiedExternalSourceType,
+  verifiedFirstPartyIssuerLabel,
 } from "./source-registry.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
+import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
+import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v35";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v36";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1384,6 +1387,32 @@ export function bodySupportsDeterministicTarget(body, envelope, target) {
   });
 }
 
+export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
+  const metric = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance].find(item => item.symbol === source.targets?.[0]);
+  if (!metric) throw new Error("背景披露缺少确定性适用对象");
+  const expectedScope = envelope.sectorPerformance.includes(metric) ? "sector" : envelope.aiChainPerformance.includes(metric) ? "ai_layer" : "market";
+  if (source.scope !== "company" && source.scope !== expectedScope) throw new Error("背景披露的适用范围与对应目标不一致");
+  const host = new URL(opened.finalUrl).hostname;
+  const authorities = ["commerce.gov", "conference-board.org", "eia.gov", "energy.gov", "federalreserve.gov", "gov.cn", "miit.gov.cn", "ndrc.gov.cn", "stats.gov.cn"];
+  const authority = authorities.some(domain => host === domain || host.endsWith(`.${domain}`));
+  let subjects;
+  if (source.scope === "company") {
+    const issuer = secFilingIssuerIdentity(opened);
+    const label = verifiedFirstPartyIssuerLabel(opened.finalUrl);
+    const own = label && normalizedEvidenceText(label);
+    subjects = (metric.constituents ?? []).filter(item => issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
+    if (!issuer && !label && !authority) throw new Error("公司背景原文未证明发行主体，不能将被提及的客户或竞争对手当作披露主体");
+    if ((issuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
+  } else {
+    const fund = expectedScope === "sector" && secArchiveIdentity(opened.finalUrl)?.cik === "1064641" && normalizedEvidenceText(opened.text).includes(normalizedEvidenceText(transmissionConfig.issuer)) && source.supportingExcerpt.includes(`${transmissionConfig.sectors[metric.symbol]} Sector Risk:`);
+    if (!authority && !fund) throw new Error("发行人或单家公司披露不能自动扩大为整个行业或 AI 环节的背景机制");
+    subjects = bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, metric.symbol) ? [metric.symbol] : [];
+  }
+  if (!subjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
+  if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+  return subjects;
+}
+
 function normalizedSourceKind(source, envelope) {
   if (source.kind !== "market_wrap") return source.kind;
   return Date.parse(source.publishedAt) < Date.parse(envelope.session.windowEnd)
@@ -1411,12 +1440,12 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || cached.subjectIdentityChecked === true) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024 } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
@@ -1464,15 +1493,7 @@ export async function verifyResearchSources(
         );
         let backgroundSubjects;
         if (candidate.kind === "background") {
-          const metric = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance].find(item => item.symbol === candidate.targets[0]);
-          const expectedScope = envelope.sectorPerformance.includes(metric) ? "sector" : envelope.aiChainPerformance.includes(metric) ? "ai_layer" : "market";
-          if (candidate.scope !== "company" && candidate.scope !== expectedScope) throw new Error("背景披露的适用范围与对应目标不一致");
-          const industryAuthorities = ["commerce.gov", "conference-board.org", "eia.gov", "energy.gov", "federalreserve.gov", "gov.cn", "miit.gov.cn", "ndrc.gov.cn", "stats.gov.cn"];
-          const sourceHost = new URL(opened.finalUrl).hostname;
-          if (expectedScope === "ai_layer" && candidate.scope !== "company" && !industryAuthorities.some(domain => sourceHost === domain || sourceHost.endsWith(`.${domain}`))) throw new Error("发行人或单家公司披露不能自动扩大为整个 AI 环节的背景机制");
-          backgroundSubjects = candidate.scope === "company" ? (metric?.constituents ?? []).filter(item => bodySupportsDeterministicTarget(candidate.supportingExcerpt, envelope, item.symbol)).map(item => item.symbol) : excerptSupportsTarget ? [candidate.targets[0]] : [];
-          if (!backgroundSubjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
-          if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|regulat\w*|risks?)\b/iu.test(candidate.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+          backgroundSubjects = verifiedBackgroundExposureSubjects(candidate, opened, envelope);
         }
         if (candidate.role === "causal" && !excerptSupportsTarget) {
           throw new Error("因果支持段落未出现确定性归因目标的代码或名称");
@@ -1512,7 +1533,7 @@ export async function verifyResearchSources(
             comparisonNotesChecked: true,
             timingChecked: true,
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
-            ...(backgroundSubjects ? { backgroundSubjects, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
+            ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,

@@ -77,6 +77,8 @@ npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
 
 完整复盘会把所用页面的原始字节、引文、采集时间和发布时间元数据冻结在 `recap-source-snapshots.json`。同一轮与续跑沿用这份原文；发布前重新解析并核对引文、数字及时间。SEC 申报头、美联储 RSS 等附加时间来源也保留对应原文。日期级官方发布不会被补造为精确时刻；收盘后的反应报道需另有收盘前、确认同一事件和值的精确时间原文。
 
+美国 AI 成分公司的背景敞口另从 SEC 原始代码表、对应申报记录和年报原文重建，冻结在 `recap-company-background-data.json`，发布前按相同规则复核。引用只适用于已确认的披露主体，不能把客户或竞争对手的提及变成其自身敞口；历史披露及其限定条件只说明可能的传导渠道，不能代替当日事件和价格反应。
+
 手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
 指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`
 或 `--update-kind evening`。

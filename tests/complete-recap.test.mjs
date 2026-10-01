@@ -214,6 +214,7 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     const f = recapFixture();
     const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root,
       transmissionCollector: async () => f.transmissionData,
+      companyBackgroundCollector: async () => f.companyBackgroundData,
       sourceVerifier: async outputs => ({ sources: [f.ledger.sources[0]], rejected: outputs.slice(0, 2).map((output, i) => ({ anomalyId: output.anomalyId, url: `https://apnews.com/article/refused-${i}`, reason: "HTTP 403" })) }),
     });
     await workflow.initialize();
