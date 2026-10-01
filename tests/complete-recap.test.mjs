@@ -135,6 +135,20 @@ test("identical wire passages on different domains cannot produce high confidenc
   assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social).entries[0].confidence, "medium");
 });
 
+test("an original X post and an unrelated official citation cannot validate the post's factual numbers", () => {
+  const f = recapFixture();
+  f.social.leads = [{ id: "x-test", authorHandle: "Analyst", url: "https://x.com/Analyst/status/123", publishedAt: "2026-08-21T18:00:00Z", text: "The share of consumers expecting higher interest rates rose to 68.4%, which may affect risk appetite." }];
+  f.raw.entries[0].opinions = [{ postId: "x-test", evidenceIds: ["0-facts", "0-causal"], text: "该评论者指出，预期利率上涨的消费者比例达到68.4%，并认为这一预期可能影响风险偏好。", textEn: "The commentator notes that the share expecting higher interest rates reached 68.4% and considers this a possible influence on risk appetite." }];
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 事实数字的官方佐证/);
+  // A publisher or the post itself is still insufficient for primary facts.
+  f.ledger.sources[1].supportingExcerpt += " Consumers expecting higher interest rates rose to 68.4%.";
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 事实数字的官方佐证/);
+  f.ledger.sources[0].supportingExcerpt = "The share of consumers expecting higher interest rates rose to 68.4% in the current survey.";
+  assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social).entries[0].opinions.length, 1);
+  f.raw.entries[0].opinions[0].text = "该评论者指出，预期利率上涨的消费者比例下降至68.4%，并认为这一预期可能影响风险偏好。";
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /单位和方向/);
+});
+
 test("financial attributions show two actual/baseline/code-delta comparisons in both languages", () => {
   const f = recapFixture(), source = f.ledger.sources[0];
   source.comparisons = [

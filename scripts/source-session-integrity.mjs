@@ -19,7 +19,7 @@ export function assertAccessibleOriginalArticle(opened) {
   const host = new URL(opened.finalUrl).hostname;
   // This is the article's explicit truncation prompt, not Yahoo's general
   // subscription links. A 200 response with only a teaser is not a full read.
-  if (host === "finance.yahoo.com" && /Upgrade to read this [^.\n]{1,100} article\s+and get so much more\./iu.test(opened.text)) throw new Error("来源正文需订阅，当前可访问内容不足以核查引文");
+  if ((host === "finance.yahoo.com" || host.endsWith(".finance.yahoo.com")) && /Upgrade to read this [^.\n]{1,100} article\s+and get so much more\./iu.test(opened.text)) throw new Error("来源正文需订阅，当前可访问内容不足以核查引文");
 }
 
 export function assertSessionClosingClaims(text, envelope, publishedAt) {

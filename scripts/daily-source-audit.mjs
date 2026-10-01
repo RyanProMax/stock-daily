@@ -622,6 +622,52 @@ function fedSpeechArticleDate(body, source) {
   return visible === expected ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : null;
 }
 
+export const BEA_RELEASE_FEED = "https://apps.bea.gov/rss/rss.xml";
+
+function beaReleaseIdentity(body, source) {
+  let url; try { url = new URL(source); } catch { return null; }
+  if (url.protocol !== "https:" || !["bea.gov", "www.bea.gov"].includes(url.hostname) || !/^\/news\/20\d{2}\/[a-z0-9-]+$/u.test(url.pathname) || url.search || url.hash) return null;
+  const document = new JSDOM(decodeSourceBody(Buffer.from(body), "text/html")).window.document;
+  const articles = [...document.querySelectorAll("article[about]")].filter(item => item.getAttribute("about") === url.pathname);
+  if (articles.length !== 1) return null;
+  const article = articles[0], headers = [...article.querySelectorAll("h1")].map(item => item.textContent.trim()).filter(title => title && title !== "News Release");
+  const dates = article.querySelectorAll(".release-embargo .field--name-field-release-date");
+  const content = article.querySelector(".field--name-body")?.textContent ?? "";
+  if (headers.length !== 1 || dates.length !== 1 || !content.slice(0, 1_000).includes("released today") || !content.slice(0, 1_000).includes("U.S. Bureau of Economic Analysis")) return null;
+  const match = /^EMBARGOED UNTIL RELEASE AT (?:[1-9]|1[0-2]):[0-5]\d [ap]\.m\. (?:EDT|EST|ET), (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), ([A-Za-z]+) (\d{1,2}), (20\d{2})$/u.exec(dates[0].textContent.trim());
+  if (!match) return null;
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const month = months.indexOf(match[2]);
+  if (month < 0) return null;
+  const date = `${match[4]}-${String(month + 1).padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date || new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(parsed) !== match[1]) return null;
+  return { url, date, title: headers[0] };
+}
+
+export function beaReleasePublishedAtCandidates(articleBody, feedBody, source) {
+  const article = beaReleaseIdentity(articleBody, source);
+  if (!article) return [];
+  const key = value => {
+    try { const url = new URL(value); return url.protocol === "https:" && ["bea.gov", "www.bea.gov"].includes(url.hostname) && !url.search && !url.hash ? url.pathname : null; } catch { return null; }
+  };
+  const document = new JSDOM(decodeSourceBody(Buffer.from(feedBody), "application/xml"), { contentType: "text/xml" }).window.document;
+  const matches = [...document.querySelectorAll("rss > channel > item")].filter(item => key(item.querySelector("link")?.textContent.trim()) === article.url.pathname && key(item.querySelector("guid")?.textContent.trim()) === article.url.pathname);
+  if (matches.some(item => ["link", "guid", "title", "pubDate"].some(name => item.querySelectorAll(`:scope > ${name}`).length !== 1))) return [];
+  if (matches.length !== 1 || normalizedEvidenceText(matches[0].querySelector("title")?.textContent) !== normalizedEvidenceText(article.title)) return [];
+  const raw = matches[0].querySelector("pubDate")?.textContent.trim() ?? "";
+  const clock = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (20\d{2}) (?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d (?:EDT|EST|GMT|UTC|[+-](?:[01]\d|2[0-3])[0-5]\d)$/u.exec(raw);
+  if (!clock || !Number.isFinite(Date.parse(raw))) return [];
+  const calendar = new Date(`${clock[3]} ${clock[2]}, ${clock[4]} 12:00:00 GMT`);
+  if (calendar.getUTCDate() !== Number(clock[2]) || new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(calendar) !== clock[1]) return [];
+  const published = new Date(raw);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(published).map(item => [item.type, item.value]));
+  if (`${parts.year}-${parts.month}-${parts.day}` !== article.date) return [];
+  // The embargo banner supplies the release date, never its publication
+  // clock. The matching RSS publication record may show a later minute.
+  return [published.toISOString()];
+}
+
 export function fedSpeechPublishedAtCandidates(articleBody, feedBody, source) {
   const articleDate = fedSpeechArticleDate(articleBody, source);
   if (!articleDate) return [];
@@ -882,6 +928,8 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
   for (const match of decoded.matchAll(/<time[^>]+datetime=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:itemprop=["']datePublished["']|class=["'][^"']*(?:published|publish-date|article-date)[^"']*["'])[^>]*>/giu)) values.push(match[1]);
   let url;
   try { url = new URL(source); } catch { return []; }
+  const bea = beaReleaseIdentity(body, source);
+  if (bea) values.push(bea.date);
   if (url.hostname === "www.sec.gov" && /^\/Archives\/edgar\/data\/\d+\/\d+\/[^/]+\.html?$/u.test(url.pathname)) {
     const header = sourceBodyText(body, contentType).slice(0, 4_096);
     const filed = /(?:^|\n)As filed with the U\.S\. Securities and Exchange Commission on\s+([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\n|$)/u.exec(header);
@@ -1041,6 +1089,19 @@ export async function readExternalSource(
         resolved.url.toString(),
       );
       const metadataReceipts = [];
+      if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && beaReleaseIdentity(response.body, resolved.url.toString())) {
+        try {
+          const feed = await publicDestination(BEA_RELEASE_FEED, resolveDestination);
+          const metadata = await requestContent(feed.url.toString(), feed.destination, { maxBytes, signal });
+          if (metadata.status >= 200 && metadata.status < 300) {
+            publishedAtCandidates = beaReleasePublishedAtCandidates(response.body, metadata.body, resolved.url.toString());
+            if (includeRaw && publishedAtCandidates.length) metadataReceipts.push({ finalUrl: feed.url.toString(), status: metadata.status, contentType: metadata.contentType || "application/xml", rawBody: metadata.body });
+          }
+        } catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error;
+          // Missing or inconsistent official records leave the hour unknown.
+        }
+      }
       if (lookupPublicationMetadata && publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {
         try {
           // The page supplies only a date. Use this exact speech's official

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isIP } from "node:net";
-import { fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
+import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
 import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
@@ -48,6 +48,7 @@ export function openedSourceFromSnapshot(snapshot) {
     const metadata = bytes(receipt);
     if (publishedAtCandidates.length) throw new Error("已有原始发布时间时不得覆盖为附加时间");
     if (receipt.finalUrl === "https://www.federalreserve.gov/feeds/speeches.xml" && new URL(snapshot.finalUrl).hostname === "www.federalreserve.gov") publishedAtCandidates = fedSpeechPublishedAtCandidates(body, metadata, snapshot.finalUrl);
+    else if (receipt.finalUrl === BEA_RELEASE_FEED) publishedAtCandidates = beaReleasePublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secCompanySubmissionsUrl(snapshot.finalUrl)) publishedAtCandidates = secCompanySubmissionTime(metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secSubmissionMetadataUrl(snapshot.finalUrl)) publishedAtCandidates = sourcePublishedAtCandidates(metadata, receipt.contentType, receipt.finalUrl);
     else throw new Error("附加时间元数据不对应原始文章或 SEC 申报");

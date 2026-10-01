@@ -266,9 +266,14 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       const post = socialMap.get(item.postId);
       if (!post) throw new Error("KOL 观点未引用本轮原站记录");
       const corroboration = ids(item.evidenceIds, sourceMap, "KOL 事实佐证");
-      if (!corroboration.some((source) => source.sourceType === "first_party")) throw new Error("KOL 涉及事实缺少官方佐证");
+      const primary = corroboration.filter(source => source.sourceType === "first_party");
+      if (!primary.length) throw new Error("KOL 涉及事实缺少官方佐证");
       const text = readerText(item.text, "KOL 观点", 20, 500), textEn = readerText(item.textEn, "KOL perspective", 30, 900);
-      for (const copy of [text, textEn]) assertNumbersGrounded(copy, post.text + " " + corroboration.map((s) => s.supportingExcerpt).join(" "), "KOL 数字");
+      const primaryText = primary.map(source => source.supportingExcerpt).join(" ");
+      for (const copy of [text, textEn]) {
+        assertNumbersGrounded(copy, primaryText, "KOL 事实数字的官方佐证");
+        assertFactsNumbersInExcerpt({ facts: copy, supportingExcerpt: primaryText });
+      }
       return { text, textEn, authorHandle: post.authorHandle, url: post.url, publishedAt: post.publishedAt, sources: corroboration.map(publicRecapSource) };
     });
     return {

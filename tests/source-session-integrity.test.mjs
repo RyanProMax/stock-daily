@@ -20,7 +20,7 @@ test("clearly dated historical examples, intraday quotes and related index famil
 });
 
 test("a public 200 subscription teaser cannot masquerade as a complete original article", () => {
-  assert.throws(() => assertAccessibleOriginalArticle({ finalUrl: "https://finance.yahoo.com/markets/articles/example.html", text: "Broad Market Indicators. Upgrade to read this MT Newswires article and get so much more." }), /正文需订阅/);
+  for (const host of ["finance.yahoo.com", "ca.finance.yahoo.com", "nz.finance.yahoo.com"]) assert.throws(() => assertAccessibleOriginalArticle({ finalUrl: `https://${host}/markets/articles/example.html`, text: "Broad Market Indicators. Upgrade to read this MT Newswires article and get so much more." }), /正文需订阅/);
   assert.doesNotThrow(() => assertAccessibleOriginalArticle({ finalUrl: "https://finance.yahoo.com/markets/articles/example.html", text: "Full public article. Subscribe to our newsletter or explore Yahoo Finance Premium." }));
 });
 
