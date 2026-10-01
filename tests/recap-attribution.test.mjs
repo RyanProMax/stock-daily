@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { recapFixture } from "./complete-recap-fixture.mjs";
-import { recapTargets, validateCompleteRecap } from "../scripts/complete-recap.mjs";
+import { assessRecapEvidenceCoverage, recapTargets, validateCompleteRecap } from "../scripts/complete-recap.mjs";
 import { recapAttributionCandidates, validateRecapAttribution } from "../scripts/recap-attribution.mjs";
 import { recapEvidenceTiming } from "../scripts/evidence-timing.mjs";
+import { MOF_DOCUMENT_VERSION } from "../scripts/mof-document.mjs";
+import { CHINA_PMI_EVIDENCE_VERSION } from "../scripts/china-pmi-release.mjs";
 
 function inferredFixture() {
   const f = recapFixture();
@@ -56,6 +58,74 @@ test("a primary policy event preserves its scope while an independent report sup
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /直接对应/);
   f.report.targets = [entry.target]; f.root.scope = "company"; f.root.companySubjectChecked = true; f.root.companySubjects = ["unrelated-company"];
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /直接对应/);
+});
+
+function reusedPublicEventFixture() {
+  const f = inferredFixture();
+  f.entry = f.attribution.entries.find(item => item.target === "XLF");
+  Object.assign(f.root, {
+    url: "https://jrs.mof.gov.cn/zhengcejiedu/202608/t20260821_3998314.htm", scope: "event_only", causalConnection: false,
+    provenanceChecked: true, authorityDocumentVersion: MOF_DOCUMENT_VERSION, reportingOrigin: { key: "authority:mof.gov.cn", identified: true, basis: "bound_authority_document" },
+    supportingExcerpt: "Residential mortgage subsidy provides 1 percentage point for qualifying first-home loans; eligibility remains limited.",
+  });
+  const directReport = { ...f.report, id: "xlf-policy-reaction", anomalyId: f.plan.anomalies.find(item => item.target === f.entry.target).id, targets: [f.entry.target], supportingExcerpt: "XLF rose because Residential mortgage subsidy provides 1 percentage point for qualifying first-home loans and improved expectations, while borrowing costs limited the advance." };
+  f.ledger.sources.push(directReport);
+  f.entry.basis = "reported";
+  Object.assign(f.entry.chains[0], { rootEvidenceId: f.root.id, reactionEvidenceId: directReport.id, mechanismEvidenceIds: [], eventAnchors: ["Residential mortgage subsidy", "1 percentage point"] });
+  const target = recapTargets(f.envelope).find(item => item.symbol === f.entry.target);
+  const value = { ...f.attribution, entries: [f.entry] };
+  return { ...f, directReport, target, value };
+}
+
+test("a bound public event is reusable without changing discovery labels or granting other targets a reaction", () => {
+  const f = reusedPublicEventFixture(), original = structuredClone(f.root);
+  assert.ok(!f.root.targets.includes(f.entry.target));
+  assert.doesNotThrow(() => validateRecapAttribution(f.value, f.envelope, [f.target], f.ledger, { requireComplete: true }));
+  const candidates = recapAttributionCandidates(f.envelope, recapTargets(f.envelope), f.ledger);
+  assert.equal(candidates.find(item => item.target === f.entry.target).reportedEligible, true);
+  const isolated = recapAttributionCandidates(f.envelope, recapTargets(f.envelope), { sources: [f.root, f.directReport] });
+  assert.equal(isolated.find(item => item.target === f.entry.target).reportedEligible, true);
+  assert.ok(isolated.filter(item => item.target !== f.entry.target).every(item => !item.reportedEligible));
+  const coverage = assessRecapEvidenceCoverage(f.envelope, { sources: [f.root, f.directReport] });
+  assert.ok(!coverage.entries.find(item => item.target === f.entry.target).gaps.some(gap => ["official_facts", "target_causality", "independent_origin"].includes(gap)));
+  assert.ok(coverage.entries.filter(item => item.target !== f.entry.target).every(item => item.gaps.includes("target_causality")));
+  assert.deepEqual(f.root, original);
+});
+
+test("public event reuse still rejects unknown origins, company widening, forecasts, missing target reactions and bad anchors", () => {
+  for (const mutate of [
+    f => { f.root.reportingOrigin = null; },
+    f => { f.root.reportingOrigin.identified = false; },
+    f => { f.root.reportingOrigin.basis = "original_agency_domain"; },
+    f => { f.root.reportingOrigin.key = "authority:stats.gov.cn"; },
+    f => { f.root.authorityDocumentVersion = "older-document-version"; },
+    f => { f.root.url = "https://jrs.mof.gov.cn/unbound-page.html"; },
+    f => { f.root.url = "https://www.sec.gov/Archives/company-announcement"; f.root.reportingOrigin.key = "authority:sec.gov"; },
+    f => { f.root.provenanceChecked = false; },
+    f => { f.root.scope = "company"; f.root.companySubjectChecked = true; f.root.companySubjects = [f.root.targets[0]]; },
+    f => { f.root.scope = "sector"; },
+    f => { f.root.kind = "background"; },
+    f => { f.root.causalConnection = true; },
+    f => { f.root.forecastDefinition = { measure: "model_estimate" }; },
+    f => { f.directReport.targets = [...f.root.targets]; },
+    f => { f.directReport.supportingExcerpt = "XLU rose because an unrelated tax announcement supported expectations."; },
+    f => { f.root.publishedAt = "2026-08-21T21:00:00Z"; },
+    f => { f.entry.chains[0].expectedDirection = Number(f.entry.observedReturn.slice(0, -1)) > 0 ? "negative" : "positive"; },
+  ]) {
+    const f = reusedPublicEventFixture(); mutate(f);
+    assert.throws(() => validateRecapAttribution(f.value, f.envelope, [f.target], f.ledger, { requireComplete: true }));
+  }
+});
+
+test("a native PMI survey root can be reused as an event without becoming target exposure", () => {
+  const f = reusedPublicEventFixture();
+  Object.assign(f.root, { url: "https://www.stats.gov.cn/sj/zxfb/202608/t20260821_1965449.html", reportingOrigin: { key: "authority:stats.gov.cn", identified: true, basis: "bound_authority_document" }, surveyChecked: true, surveyDefinition: { version: CHINA_PMI_EVIDENCE_VERSION }, supportingExcerpt: "The manufacturing purchasing managers index improved to 49.7 points; this monthly survey is not realized output growth." });
+  f.directReport.supportingExcerpt = "XLF rose because the manufacturing purchasing managers index improved to 49.7 points, supporting expectations; the survey does not establish realized growth.";
+  f.entry.chains[0].eventAnchors = ["manufacturing purchasing managers index", "49.7 points"];
+  delete f.root.authorityDocumentVersion;
+  assert.doesNotThrow(() => validateRecapAttribution(f.value, f.envelope, [f.target], f.ledger));
+  f.root.surveyChecked = false;
+  assert.throws(() => validateRecapAttribution(f.value, f.envelope, [f.target], f.ledger), /直接对应/);
 });
 
 test("unrelated, generic, misdated, unverified and direction-contradicted chains cannot complete attribution", () => {

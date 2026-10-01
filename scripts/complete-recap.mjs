@@ -188,7 +188,7 @@ export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = nu
     const inference = inferenceCandidates.get(anomaly.target);
     const direct = facts.length && causal.length && facts.some(fact => causal.some(cause => cause.url !== fact.url));
     const gaps = [];
-    if (!direct && !inference.inferredIngredientsPresent && !inference.constituentIngredientsPresent) {
+    if (!direct && !inference.reportedEligible && !inference.inferredIngredientsPresent && !inference.constituentIngredientsPresent) {
       if (!facts.length) gaps.push("official_facts");
       if (!causal.length) gaps.push("target_causality");
       if (!facts.some(fact => causal.some(cause => cause.url !== fact.url))) gaps.push("independent_origin");

@@ -4,8 +4,10 @@ import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
 import { isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
+import { MOF_DOCUMENT_VERSION, mofDocumentIdentity } from "./mof-document.mjs";
+import { CHINA_PMI_EVIDENCE_VERSION, isChinaPmiArticle } from "./china-pmi-release.mjs";
 
-export const ATTRIBUTION_VERSION = "verified-recap-attribution-v3";
+export const ATTRIBUTION_VERSION = "verified-recap-attribution-v4";
 const DIRECTIONS = ["positive", "negative", "flat"];
 const GENERIC_TERMS = /^(?:market|markets|stock|stocks|shares|prices?|demand|supply|costs?|growth|rates?|interest rates|earnings|news|report|rose|fell|美国|中国|市场|股票|需求|供给|成本|利率|上涨|下跌)$/iu;
 const CALENDAR_TERM = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday)$/iu;
@@ -52,6 +54,20 @@ function mechanismsCover(sources, target) {
 
 function directlyCovers(source, symbol) {
   return source.targets.includes(symbol) && (source.scope !== "company" || (source.companySubjectChecked === true && source.companySubjects?.includes(symbol)));
+}
+
+function reportedEventRootCovers(source, symbol) {
+  if (directlyCovers(source, symbol)) return true;
+  // A bound public authority document describes its event, not the target that
+  // happened to discover it. Reuse the SAME original only with an independently
+  // verified target reaction and exact shared anchors below. Company releases,
+  // generic government pages, backgrounds and forecasts receive no exception.
+  const origin = source.reportingOrigin;
+  if (source.scope !== "event_only" || source.role !== "facts" || !["official", "event"].includes(source.kind) || source.causalConnection !== false || source.provenanceChecked !== true || source.forecastDefinition || origin?.identified !== true || origin.basis !== "bound_authority_document") return false;
+  // Only original formats with a native authority identity reader qualify.
+  // A matching government hostname or a claimed origin key is insufficient.
+  return (origin.key === "authority:mof.gov.cn" && source.authorityDocumentVersion === MOF_DOCUMENT_VERSION && Boolean(mofDocumentIdentity(source.url)))
+    || (origin.key === "authority:stats.gov.cn" && source.surveyChecked === true && source.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION && isChinaPmiArticle(source.url));
 }
 
 function constituentClaims(source, symbol) {
@@ -102,7 +118,7 @@ export function recapAttributionCandidates(envelope, targets, ledger, { macroDat
   return targets.map(target => {
     const mechanisms = ledger.sources.filter(source => background(source, envelope, target));
     const targetReports = reports.filter(source => directlyCovers(source, target.symbol));
-    const targetRoots = roots.filter(source => directlyCovers(source, target.symbol));
+    const targetRoots = roots.filter(source => reportedEventRootCovers(source, target.symbol));
     const pairs = roots.flatMap(root => reports.filter(report => independent(root, report) && (root.kind !== "corporate_action" || constituentClaims(report, root.corporateAction.symbol))).flatMap(report => {
       if (chronology(root, report, envelope)) return [{ root: root.id, reaction: report.id, timingEvidenceIds: [] }];
       const eligible = confirmations.filter(confirmation => chronology(root, report, envelope, confirmation));
@@ -198,7 +214,7 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       const mechanisms = selected(chain.mechanismEvidenceIds, map, "背景传导", basis === "inferred" && !directMarketFactor ? 1 : 0);
       if (mechanisms.some(source => !background(source, envelope, target))) throw new Error(`${target.symbol} 背景传导证据类型或适用对象无效`);
       if (basis === "reported") {
-        if (subjects.length ? subjects.some(symbol => !constituentClaims(root, symbol) || !constituentClaims(report, symbol)) : !directlyCovers(root, target.symbol) || !directlyCovers(report, target.symbol)) throw new Error(`${target.symbol} 报道归因未直接对应分链主体`);
+        if (subjects.length ? subjects.some(symbol => !constituentClaims(root, symbol) || !constituentClaims(report, symbol)) : !reportedEventRootCovers(root, target.symbol) || !directlyCovers(report, target.symbol)) throw new Error(`${target.symbol} 报道归因未直接对应分链主体`);
       } else if (!directMarketFactor && (subjects.length ? subjects.some(symbol => !mechanisms.some(source => source.backgroundSubjects.includes(symbol))) : !mechanismsCover(mechanisms, target))) throw new Error(`${target.symbol} 推断缺少全部适用对象的一手传导披露`);
       for (const symbol of subjects.length ? subjects : subjectDirections.keys()) subjectDirections.get(symbol).add(chain.expectedDirection);
     }
