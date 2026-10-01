@@ -11,7 +11,7 @@ import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./s
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v38";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v39";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =

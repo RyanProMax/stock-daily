@@ -61,9 +61,10 @@ import { collectRecapTradingData, validateRecapTradingData } from "./recap-marke
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
-import { createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
+import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
 import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "./recap-company-background-data.mjs";
+import { planRecapResearchRepair } from "./recap-research-repair.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -178,6 +179,10 @@ export async function agentStageFingerprint(role, payload, promptSuffix = "") {
     promptSuffix,
   );
   return { promptHash, schemaHash };
+}
+
+export function assertResearchQueryCount(events, role) {
+  if (events.searchCount !== 2) throw new Error(`${role} Agent 必须执行两条独立查询；批量查询逐条计数，实际 ${events.searchCount} 条`);
 }
 
 async function exists(path) {
@@ -971,7 +976,7 @@ export class MarketWorkflow {
   async selectNoClaimRetryAttempt() {
     const needsFreshResearch = (manifest) => manifest.status === "no_claims" || (
       manifest.status === "failed" &&
-      /搜索.*预算不足|研究已耗尽.*预算|(?:四十五|五十五)分钟硬停止|整体预算耗尽|复盘(?:证据)?覆盖不完整/u.test(manifest.lastError ?? "")
+      /搜索.*(?:预算不足|超过预算)|研究已耗尽.*预算|(?:四十五|五十五)分钟硬停止|整体预算耗尽|复盘(?:证据)?覆盖不完整/u.test(manifest.lastError ?? "")
     );
     if (!(await exists(this.manifestPath))) return;
     let baseManifest;
@@ -1715,6 +1720,7 @@ export class MarketWorkflow {
         events = parseAgentEvents(result.stdout, {
           requireSearch: definition.search,
         });
+        if (definition.search) assertResearchQueryCount(events, role);
         outputText = await readFile(sandboxOutputPath, "utf8");
         output = JSON.parse(outputText);
         await writeFile(outputPath, outputText, "utf8");
@@ -1821,7 +1827,7 @@ export class MarketWorkflow {
 
   researchPromptSuffix(anomaly, role, suffix = "") {
     const suffixText = suffix
-      ? `\n\n# Targeted repair\n${suffix}\nThe planner seed for this role was already consumed. Do not execute it again. Run exactly two new focused searches for the missing evidence and copy those two fresh queries into the output.\n`
+      ? `\n\n# Targeted repair\n${suffix}\nThe planner seed for this role was already consumed. Do not execute it again. Run exactly two new individual query strings for the missing evidence, one query per search operation, and copy both into the output. Batched site-specific queries each consume a slot; never put multiple queries in one operation or omit any executed query. After two individual queries, only inspect their results and return limited/none if evidence is missing.\n`
       : "";
     const crossLead = this.materialCrossAnomaly(anomaly);
     return role === "facts" && crossLead
@@ -2078,14 +2084,21 @@ export class MarketWorkflow {
         const cached = await readJson(path);
         if (
           Array.isArray(cached.rejected) &&
-          cached.rejected.length === 0 &&
           existing.outputHash === stableHash(cached)
         ) {
-          for (const source of cached.sources ?? []) {
-            if (source.candidateHash) this.verifiedEvidenceCache.set(source.candidateHash, source);
+          // A mixed ledger still has immutable verified positives. Reaudit
+          // them before reuse so transient refusals can be reconsidered without
+          // changing accepted timestamps and invalidating every repair payload.
+          if (this.recapSnapshotReader) auditLedgerSourceSnapshots(cached, this.recapSnapshotReader.book, { envelope: this.envelope, macroData: this.macroData });
+          if (!cached.rejected.length || this.recapSnapshotReader) {
+            for (const source of cached.sources ?? []) {
+              if (source.candidateHash) this.verifiedEvidenceCache.set(source.candidateHash, source);
+            }
           }
-          await atomicJson(canonicalPath, cached);
-          return cached;
+          if (!cached.rejected.length) {
+            await atomicJson(canonicalPath, cached);
+            return cached;
+          }
         }
       } catch {
         // A damaged checkpoint is reopened and verified below.
@@ -2968,15 +2981,27 @@ export class MarketWorkflow {
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
     await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
     this.manifest.recapLedgerHash = stableHash(ledger);
-    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
+    let coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
-    if (!coverage.eligibleCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
-    const financialComparisons = ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length);
-    const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps };
-    const attributor = await this.runValidatedAgentStage({ baseKey: "recap-attributor", role: "recap_attributor", payload: { ...payload, coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, payload.targets, ledger, { macroData }) });
-    const attribution = attributor.output;
+    const attributionPayload = () => ({ envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps });
+    const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
+    let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;
+    if (attributor) await atomicJson(resolve(this.runDir, "artifacts/recap-attribution-before-research-repair.json"), attributor.output);
+    const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null });
+    if (repair.researched) {
+      ledger = repair.ledger;
+      coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
+      await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
+      await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
+      this.manifest.recapLedgerHash = stableHash(ledger);
+      this.manifest.recapCoverage = coverage;
+      await this.saveManifest();
+      attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor-after-research-repair") : null;
+    }
+    if (!attributor) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
+    const attribution = attributor.output, payload = attributionPayload();
     await atomicJson(resolve(this.runDir, "artifacts/recap-attribution.json"), attribution);
     this.manifest.recapAttributionHash = stableHash(attribution);
     payload.attribution = attribution;
@@ -2996,6 +3021,58 @@ export class MarketWorkflow {
     validateCompleteRecap(writer.output, this.envelope, ledger, social, { ...recapOptions, requireComplete: true });
     this.recapResearchActive = false;
     return recap;
+  }
+
+  async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution }) {
+    const inputHash = stableHash({ plan, ledger, coverage, attribution });
+    const planName = `recap-research-repair-plan-${inputHash.slice(0, 12)}.json`;
+    const planPath = resolve(this.runDir, "artifacts", planName);
+    let repairPlan;
+    if (await exists(planPath)) {
+      const stored = await readJson(planPath);
+      if (this.manifest.recapResearchRepairPlans?.[inputHash]?.planHash !== stableHash(stored)) throw new Error("复盘返工计划哈希不一致");
+      if (stored.inputHash === inputHash) {
+        const replayed = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: stored.remainingQueriesAtPlanning });
+        if (stableHash(replayed) !== stableHash(stored)) throw new Error("复盘返工计划不能由冻结输入重建");
+        repairPlan = stored;
+      }
+    }
+    if (!repairPlan) {
+      repairPlan = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: Math.max(0, this.searchQueryLimit - this.searchQueryCount - this.reservedSearchQueryCount) });
+      await atomicJson(planPath, repairPlan);
+      this.manifest.recapResearchRepairPlans ??= {};
+      this.manifest.recapResearchRepairPlans[inputHash] = { planArtifact: planName, planHash: stableHash(repairPlan) };
+      await this.saveManifest();
+    }
+    if (!repairPlan.jobs.length) return { researched: false, ledger };
+    const access = recapResearchSourceAccess(this.manifest.sourceAccess ?? { urls: [], unavailableDomains: [] }, ledger);
+    const context = { sharedEvidence: ledger.sources, access };
+    const contextName = `recap-research-repair-context-${inputHash.slice(0, 12)}.json`;
+    const contextPath = resolve(this.runDir, "artifacts", contextName);
+    if (await exists(contextPath)) {
+      const stored = await readJson(contextPath);
+      if (this.manifest.recapResearchRepairPlans[inputHash].contextHash !== stableHash(stored) || stableHash(stored) !== stableHash(context)) throw new Error("复盘返工上下文不能由冻结输入重建");
+    } else await atomicJson(contextPath, context);
+    Object.assign(this.manifest.recapResearchRepairPlans[inputHash], { contextArtifact: contextName, contextHash: stableHash(context) });
+    this.recapResearchEvidence = ledger.sources;
+    this.recapResearchEvidenceArtifact = contextName;
+    this.excludedSources = access.urls;
+    this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !access.unavailableDomains.includes(domain));
+    await this.saveManifest();
+    const anomalies = new Map(plan.anomalies.map(anomaly => [anomaly.id, anomaly]));
+    let requiredQueries = 0;
+    for (const job of repairPlan.jobs) requiredQueries += await this.assertResearchCapacity([anomalies.get(job.anomalyId)], job.feedback);
+    if (this.searchQueryCount + this.reservedSearchQueryCount + requiredQueries > this.searchQueryLimit) throw new Error("完整复盘返工的累计搜索预算不足");
+    if (requiredQueries && this.remainingTime() < 30_000) throw new Error("完整复盘返工的整体预算耗尽");
+    // Complete pairs remain isolated and all started siblings must settle. The
+    // preserved plan/context reproduce the same payloads on resume, while the
+    // exact checkpoint fingerprints decide whether fresh queries are needed.
+    const repaired = await settleAgentResults(repairPlan.jobs.map(job => this.researchAnomaly(anomalies.get(job.anomalyId), job.feedback)));
+    outputs.push(...repaired.flat());
+    const combined = await this.verifyEvidence(outputs);
+    this.manifest.recapResearchRepair = { planHash: stableHash(repairPlan), contextHash: stableHash(context), targets: repairPlan.jobs.map(job => job.target), ledgerHash: stableHash(combined), searchQueryCount: this.searchQueryCount, status: "researched" };
+    await this.saveManifest();
+    return { researched: true, ledger: combined };
   }
 }
 

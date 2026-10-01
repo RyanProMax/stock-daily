@@ -39,6 +39,7 @@ Determine whether a reliable same-session source explicitly connects the candida
 # Constraints
 
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.
+- This limit counts individual query strings, not tool calls. A call containing four queries spends four slots and is invalid even when followed by only one more call. Put exactly one query in each search operation; do not batch extra publisher-specific queries. Copy every executed query in order. After two queries, open/click/find within their results or return limited/none; no further search is allowed.
 - Every returned source must set `causalConnection` to true.
 - Always return an empty `comparisons` array. Typed actual-versus-baseline figures belong only to the independent facts researcher.
 - Do not widen a company cause to a sector or index.

@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { sourceArticleProvenance } from "../scripts/source-article-provenance.mjs";
 import { sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "../scripts/daily-source-audit.mjs";
-import { snapshotFromOpenedSource, openedSourceFromSnapshot, auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
+import { snapshotFromOpenedSource, openedSourceFromSnapshot, auditLedgerSourceSnapshots, createSnapshotSourceReader, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
 import { stableHash, verifyResearchSources } from "../scripts/daily-workflow-core.mjs";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { validateCompleteRecap } from "../scripts/complete-recap.mjs";
+import { MarketWorkflow } from "../scripts/daily-workflow.mjs";
+import { fixtureInput } from "./daily-v10-fixture.mjs";
 
 const url = "https://www.wral.com/news/ap/original-wrap/", title = "Stocks fall as bond yields rise";
 const initial = "2026-08-21T03:03:10.000Z", updated = "2026-08-21T21:08:12.000Z";
@@ -92,4 +97,35 @@ test("different passages and publisher domains from the same wire remain one ori
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /独立报道交叉佐证/);
   second.reportingOrigin = { identified: true };
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /独立报道交叉佐证/);
+});
+
+test("resumed mixed ledgers reaudited against frozen originals retain accepted proof times while reconsidering refusals", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-mixed-proof-resume-"));
+  try {
+    const f = recapFixture(), refused = "https://www.wral.com/news/ap/refused-wrap/", reads = [];
+    const candidate = { ...f.ledger.sources[1], originalUrl: url, title, facts: "The index rose because demand improved, while borrowing costs limited the advance.", supportingExcerpt: quote, comparisons: [], publishedAt: initial };
+    const outputs = [{ sources: [candidate, { ...candidate, originalUrl: refused }], rejectedSources: [], alternatives: [] }];
+    const create = async () => {
+      const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root });
+      await workflow.initialize();
+      workflow.recapSnapshotReader = await createSnapshotSourceReader(resolve(workflow.runDir, "artifacts/recap-source-snapshots.json"), async source => {
+        reads.push(source);
+        if (source === refused) throw new Error("外部证据返回 HTTP 403");
+        assert.equal(source, url);
+        return original();
+      });
+      workflow.recapSourceReader = workflow.recapSnapshotReader.reader;
+      return workflow;
+    };
+    const firstWorkflow = await create(), first = await firstWorkflow.verifyEvidence(outputs);
+    assert.equal(first.sources.length, 1);
+    assert.equal(first.rejected.length, 1);
+    const resumed = await create(), second = await resumed.verifyEvidence(outputs);
+    assert.deepEqual(second.sources, first.sources);
+    assert.equal(second.rejected.length, 1);
+    assert.equal(reads.filter(source => source === url).length, 1);
+    assert.equal(reads.filter(source => source === refused).length, 2);
+    assert.equal(second.sources[0].publishedAt, updated);
+    assert.equal(second.sources[0].reportingOrigin.key, "agency:associated_press");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
