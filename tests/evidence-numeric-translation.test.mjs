@@ -86,11 +86,54 @@ test("an explicitly quoted price level cannot borrow a following percentage's mo
 
 });
 
+test("bare intraday low/high quotations retain their levels without borrowing the following return", () => {
+  const supportingExcerpt = "示例地产盘中最低下探至2.17元，收盘报2.48元，涨0.89%。另一只股票盘中最高触及8.35元，收盘报8.20元，跌0.18%。";
+  const facts = "示例地产盘中最低2.17元、收报2.48元并上涨0.89%；另一只股票盘中最高8.35元、收报8.20元并下跌0.18%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt}));
+  for (const changed of [facts.replace("上涨0.89", "下跌0.89"), facts.replace("下跌0.18", "上涨0.18"), facts.replace("最低2.17元", "最低2.18元"), facts.replace("最高8.35元", "最高8.35%")]) assert.throws(() => assertFactsNumbersInExcerpt({facts:changed,supportingExcerpt}), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({facts:"股价上涨2.17元。",supportingExcerpt}), /数字/);
+});
+
+test("directly bound incremental turnover retains its sign, amount and currency", () => {
+  const supportingExcerpt = "全市场成交10400亿元，较上一日增量168亿元，全市场超2100只个股下跌。另一市场成交较上一日减量约27.3亿元。";
+  const facts = "全市场成交10400亿元，较上一日增加168亿元，超2100只个股下跌；另一市场成交较上一日减少约27.3亿元。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt}));
+  for (const changed of [facts.replace("增加168", "减少168"), facts.replace("减少约27.3", "增加约27.3"), facts.replace("168亿元", "168万美元")]) assert.throws(() => assertFactsNumbersInExcerpt({facts:changed,supportingExcerpt}), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({facts:"股价上涨5元。",supportingExcerpt:"增量资金仍在等待，收盘报5元。"}), /数字/);
+});
+
+test("a directly bound profit-change magnitude does not lend an amount comparator a reversed sign", () => {
+  const supportingExcerpt = "214只概念股中已有12股净利增幅超500%，另有8股净利减幅超20%。";
+  const facts = "214只概念股中有12股净利增幅超过500%，另有8股净利减幅超过20%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt}));
+  for (const changed of [facts.replace("12股", "13股"), facts.replace("增幅超过500", "减幅超过500"), facts.replace("减幅超过20", "增幅超过20"), facts.replace("500%", "500个百分点")]) assert.throws(() => assertFactsNumbersInExcerpt({facts:changed,supportingExcerpt}), /数字/);
+  assert.doesNotThrow(()=>assertFactsNumbersInExcerpt({facts:"净利增长低于5%，另一公司净利下降高于3%。",supportingExcerpt:"净利增幅低于5%，另一公司净利减幅高于3%。"}));
+  assert.throws(()=>assertFactsNumbersInExcerpt({facts:"净利下降低于5%。",supportingExcerpt:"净利增幅低于5%。"}),/数字/);
+});
+
+test("a literal abbreviated currency threshold denotes one unit without turning a unit label into a value", () => {
+  const supportingExcerpt = "26股主力资金净流出超亿元，另有2项交易金额超过亿美元。";
+  const facts = "26股主力资金净流出超过1亿元，另有2项交易金额超过1亿美元。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt}));
+  for (const changed of [facts.replace("1亿元", "2亿元"), facts.replace("超过1亿元", "低于1亿元")]) assert.throws(() => assertFactsNumbersInExcerpt({facts:changed,supportingExcerpt}), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({facts:"净流出超过1亿美元。",supportingExcerpt:"净流出超亿元。"}), /数字/);
+  for (const excerpt of ["资金表格使用亿元作为单位。", "净流出超千亿元。", "净流出金额超过。金额单位：亿元。", "公司交易金额不足亿元。"]) assert.throws(() => assertFactsNumbersInExcerpt({facts:"资金净流出超过1亿元。",supportingExcerpt:excerpt}), /数字/);
+});
+
+test("a magnitude bound cannot override the immediately preceding movement verb", () => {
+  assert.doesNotThrow(()=>assertFactsNumbersInExcerpt({facts:"股价上涨超过3.2%。",supportingExcerpt:"股价涨超3.2%。"}));
+  assert.throws(()=>assertFactsNumbersInExcerpt({facts:"股价下跌超过3.2%。",supportingExcerpt:"股价涨超3.2%。"}),/数字/);
+  assert.doesNotThrow(()=>assertFactsNumbersInExcerpt({facts:"成交金额减少超过3.2亿元。",supportingExcerpt:"成交金额下降超过3.2亿元。"}));
+  assert.throws(()=>assertFactsNumbersInExcerpt({facts:"成交金额增加超过3.2亿元。",supportingExcerpt:"成交金额下降超过3.2亿元。"}),/数字/);
+  assert.doesNotThrow(()=>assertFactsNumbersInExcerpt({facts:"股价下降不超过3.2%。",supportingExcerpt:"股价下跌不超过3.2%。"}));
+  assert.throws(()=>assertFactsNumbersInExcerpt({facts:"股价上涨不超过3.2%。",supportingExcerpt:"股价下跌不超过3.2%。"}),/数字/);
+});
+
 test("legacy numeric caches cannot retain a newly recognized reversed Chinese close", async () => {
   const f = recapFixture("CN"), anomaly = f.plan.anomalies[0];
   const source = { originalUrl: "https://www.reuters.com/markets/china/example-close", title: "China market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "沪指收涨0.31%，市场成交维持平稳，行业表现出现分化，投资者继续关注经济数据和政策变化。", facts: "沪指收跌0.31%，市场成交维持平稳，行业表现出现分化。", causalConnection: false, comparisons: [] };
   const candidateHash = stableHash(source);
-  for (const marker of [undefined, "verified-number-direction-v0"]) {
+  for (const marker of [undefined, "verified-number-direction-v0", "verified-number-direction-v1"]) {
     let reads = 0;
     const cache = new Map([[candidateHash, { ...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: marker }]]);
     const result = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { verifiedCache: cache, reader: async () => { reads++; return { finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt] }; } });

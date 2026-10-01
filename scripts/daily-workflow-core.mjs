@@ -15,8 +15,8 @@ import transmissionConfig from "../data/recap-transmission-sources.json" with { 
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v48";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v1";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v49";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v2";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v1";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1082,9 +1082,9 @@ function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], s
 const FACT_NUMBER_MENTION =
   /(?<outerSign>[+-]?)(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|ppts?\b|pp\b|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|US dollars?\b|USD\b|%|％|个百分点|百分点|个基点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
-  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|放量(?=\s*(?:[+-]?\d|超|逾|近|约|至))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
+  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|缩量(?=\s*(?:[+-]?\d|超|逾|近|约|至))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
@@ -1145,7 +1145,7 @@ function nearestDirection(value, start, end, rawNumber) {
   // A closing/low price is an explicitly bound level. A movement verb
   // following it belongs to the later return, not backwards to this level.
   // Explicit preceding movement still binds and must retain its sign.
-  const quotedPriceLevel = /(?:收于|收报|收盘报|报收|(?:指数|成指|板指|股指|沪指)报|最低(?:触及|下探至)|盘中最低下探至)\s*$/u.test(value.slice(Math.max(0, start - 24), start));
+  const quotedPriceLevel = /(?:收于|收报|收盘报|报收|(?:指数|成指|板指|股指|沪指)报|(?:盘中)?(?:最低|最高)(?:触及|下探至|上探至)?)\s*$/u.test(value.slice(Math.max(0, start - 24), start));
   const candidates = [];
   for (const [direction, pattern] of [
     ["positive", POSITIVE_DIRECTION],
@@ -1154,6 +1154,8 @@ function nearestDirection(value, start, end, rawNumber) {
     pattern.lastIndex = 0;
     for (const match of clause.matchAll(pattern)) {
       if (quotedPriceLevel && (match.index ?? 0) >= numberOffset) continue;
+      // "下跌超过5%" bounds the loss; "超过" must not reverse it.
+      if (/^(?:超过|高于|低于)$/u.test(match[0]) && /(?:上涨|上升|上行|增长|增加|提高|下跌|下降|下行|减少|降低|增幅|减幅|(?:收)?涨|(?:收)?跌)\s*(?:不|未)?\s*$/u.test(clause.slice(0, match.index))) continue;
       if (match[0].toLowerCase() === "up" && /\b(?:gave|give|given)\s+$/iu.test(clause.slice(0, match.index))) continue;
       if (/^(?:超过|高于|低于)$/u.test(match[0]) && /^\s*(?:只|家|项|人)/u.test(value.slice(end)) && (match.index ?? 0) < numberOffset) continue;
       candidates.push({
@@ -1187,7 +1189,11 @@ function canonicalMention(mention) {
 function numericMentions(value) {
   // Convert only explicitly bound mixed fractional durations, never bare
   // fractions in ratios, dates, currencies or quoted financial amounts.
-  const copy = String(value).replace(/−/gu, "-").replace(/\b(\d+)-(\d+)\/(\d+)(?=-?years?\b)/giu, (raw, whole, numerator, denominator) => Number(denominator) > 0 && Number(numerator) < Number(denominator) ? String(Number(whole) + Number(numerator) / Number(denominator)) : raw);
+  const copy = String(value).replace(/−/gu, "-")
+    // "超亿元" is an explicit > one-hundred-million threshold, not a
+    // bare unit label. Do not infer one from a table heading or "超千亿元".
+    .replace(/(?:超过|超)(亿元|亿美元|百万元|万元|万美元)/gu, (_raw, unit) => `超过1${unit}`)
+    .replace(/\b(\d+)-(\d+)\/(\d+)(?=-?years?\b)/giu, (raw, whole, numerator, denominator) => Number(denominator) > 0 && Number(numerator) < Number(denominator) ? String(Number(whole) + Number(numerator) / Number(denominator)) : raw);
   const dates = [...copy.matchAll(/\b\d{4}-\d{2}-\d{2}\b/gu)].filter(match => isCalendarDate(match[0]));
   FACT_NUMBER_MENTION.lastIndex = 0;
   const mentions = [...copy.matchAll(FACT_NUMBER_MENTION)].filter(match => !dates.some(date => match.index >= date.index && match.index < date.index + date[0].length)).map(match => {
