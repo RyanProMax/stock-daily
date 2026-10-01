@@ -11,7 +11,7 @@ import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./s
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v37";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v38";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1440,7 +1440,7 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || cached.subjectIdentityChecked === true) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || cached.subjectIdentityChecked === true) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1449,10 +1449,12 @@ export async function verifyResearchSources(
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
+        const publication = opened.articleProvenance?.publication;
+        if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
         const publishedAt = verifiedSourceTime(
           candidate,
           envelope,
-          opened.publishedAtCandidates ?? [],
+          publication?.status === "verified" ? [publication.currentVersionAt] : opened.publishedAtCandidates ?? [],
           opened.publishedDateCandidates ?? [],
           sourceType,
         );
@@ -1532,6 +1534,9 @@ export async function verifyResearchSources(
             earningsContextChecked: true,
             comparisonNotesChecked: true,
             timingChecked: true,
+            provenanceChecked: true,
+            reportingOrigin: opened.articleProvenance?.origin ?? null,
+            ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",

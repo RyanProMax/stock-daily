@@ -225,7 +225,8 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
       if (raw.confidence === "low") throw new Error(`${target.symbol} 低置信归因不能视为完成`);
       if (raw.confidence === "high") {
         const publishers = cause.filter(source => source.sourceType === "publisher");
-        if (new Set(publishers.map(source => new URL(source.url).hostname)).size < 2 || new Set(publishers.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
+        const identifiedOrigins = publishers.filter(source => source.provenanceChecked === true && source.reportingOrigin?.identified === true && typeof source.reportingOrigin.key === "string" && source.reportingOrigin.key.length >= 10).map(source => source.reportingOrigin.key);
+        if (new Set(identifiedOrigins).size < 2 || new Set(publishers.map(source => normalizedEvidenceText(source.supportingExcerpt))).size < 2) throw new Error(`${target.symbol} 高置信归因缺少独立报道交叉佐证`);
       }
     }
     const { magnitudeEvidence, ...marketObservation } = observations.get(target.symbol);

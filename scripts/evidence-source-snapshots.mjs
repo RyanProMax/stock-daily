@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isIP } from "node:net";
-import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
+import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, decodeSourceBody, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
+import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches, verifiedBackgroundExposureSubjects } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
@@ -55,7 +56,8 @@ export function openedSourceFromSnapshot(snapshot) {
   }
   const publishedDateCandidates = sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl);
   if (stableHash(publishedAtCandidates) !== stableHash(snapshot.publishedAtCandidates) || stableHash(publishedDateCandidates) !== stableHash(snapshot.publishedDateCandidates)) throw new Error("原文快照的发布时间未由冻结原文证明");
-  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, rawBody: body };
+  const articleProvenance = /(?:html|xhtml)/iu.test(snapshot.contentType) ? sourceArticleProvenance(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
+  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, articleProvenance, rawBody: body };
 }
 
 export function snapshotFromOpenedSource(source, opened, fetchedAt = new Date().toISOString()) {
@@ -130,7 +132,14 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);
     if (quote.length < 20 || stableHash(quote) !== source.excerptHash || !supportingExcerptMatches(body, quote, source.supportingExcerpt)) throw new Error("证据引文未由冻结原文证明");
-    const clock = isCalendarDate(source.publishedAt) ? source.sourceType === "first_party" && original.publishedDateCandidates.includes(source.publishedAt) : Number.isFinite(Date.parse(source.publishedAt)) && /(?:Z|[+-]\d{2}:\d{2})$/u.test(source.publishedAt ?? "") && original.publishedAtCandidates.some(value => !isCalendarDate(value) && Date.parse(value) === Date.parse(source.publishedAt));
+    const publication = original.articleProvenance?.publication;
+    if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
+    if (source.provenanceChecked || source.reportingOrigin) {
+      if (stableHash(source.reportingOrigin ?? null) !== stableHash(original.articleProvenance?.origin ?? null)) throw new Error("报道原始署名或来源未由冻结文章重建");
+    }
+    const clocks = publication?.status === "verified" ? [publication.currentVersionAt] : original.publishedAtCandidates;
+    if (publication?.status === "verified" && (source.initialPublishedAt !== publication.initialPublishedAt || source.timeBasis !== publication.timeBasis)) throw new Error("首次发布与当前版本时间必须分别保留");
+    const clock = isCalendarDate(source.publishedAt) ? source.sourceType === "first_party" && original.publishedDateCandidates.includes(source.publishedAt) : Number.isFinite(Date.parse(source.publishedAt)) && /(?:Z|[+-]\d{2}:\d{2})$/u.test(source.publishedAt ?? "") && clocks.some(value => !isCalendarDate(value) && Date.parse(value) === Date.parse(source.publishedAt));
     if (!clock) throw new Error("证据发布时间未由冻结原文或对应时间元数据证明");
     assertFactsNumbersInExcerpt({ ...source, facts: source.facts ?? "" });
     assertComparisonNotesInExcerpt(source);

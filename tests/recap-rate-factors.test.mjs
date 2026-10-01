@@ -75,6 +75,13 @@ test("an observed market variable supplies ingredients but no target-specific at
   assert.ok(candidates.every(item => !item.inferredIngredientsPresent));
 });
 
+test("a bounded explanatory clause and climbed preserve the exact maturity and prior-session rate comparison", async () => {
+  const f = await fixture(), factor = f.ledger.sources.find(source => source.kind === "macro_observation" && source.years === 30);
+  const quote = "The 30-year Treasury yield, which takes into account expectations for inflation and economic growth many years down the line, climbed to 5.59% from 5.56% late Thursday.";
+  assert.equal(reportedRateFactorMatch(factor, { ...f.report, supportingExcerpt: quote }, f.envelope).changeBasisPoints, 3);
+  for (const altered of [quote.replace("climbed", "fell"), quote.replace("30-year", "10-year"), quote.replace("Thursday", "Wednesday"), quote.replace("5.59%", "5.54%"), quote.replace("which takes", "after the 10-year yield, which takes"), quote.replace("many years down the line, climbed", "many years down the line. Separately, another yield climbed")]) assert.equal(reportedRateFactorMatch(factor, { ...f.report, supportingExcerpt: altered }, f.envelope), null);
+});
+
 test("observed factors cannot be promoted to a reported event or omit anchors and unknown publication limitations", async () => {
   const f = await fixture();
   f.envelope.markets.find(item => item.symbol === "SPX").change = "-0.17%";

@@ -60,12 +60,12 @@ export function reportedRateFactorMatch(factor, report, envelope) {
   // session comparison, rather than a generic bond/rate/cost word. Keep the
   // news quotation distinct from Treasury's indicative par-yield definition.
   const priorDay = dayName(envelope.session.previousAsOf);
-  const pattern = new RegExp(`\\b${factor.years}-year (?:U\\.S\\. )?Treasury(?: (?:yield|note|bond))? (rose|fell|declined|slipped|increased|decreased) to (\\d+(?:\\.\\d+)?)% from (\\d+(?:\\.\\d+)?)% (?:late )?${priorDay}\\b`, "iu");
+  const pattern = new RegExp(`\\b${factor.years}-year (?:U\\.S\\. )?Treasury(?: (?:yield|note|bond))?(?:,[^,.;\\d]{1,180},)? (rose|climbed|fell|declined|slipped|increased|decreased) to (\\d+(?:\\.\\d+)?)% from (\\d+(?:\\.\\d+)?)% (?:late )?${priorDay}\\b`, "iu");
   const match = pattern.exec(report.supportingExcerpt);
   if (!match) return null;
   const currentPercent = Number(match[2]), previousPercent = Number(match[3]);
   const delta = currentPercent - previousPercent;
-  const verbSign = /^(?:rose|increased)$/iu.test(match[1]) ? 1 : -1;
+  const verbSign = /^(?:rose|climbed|increased)$/iu.test(match[1]) ? 1 : -1;
   if (delta === 0 || Math.sign(delta) !== verbSign || Math.sign(delta) !== Math.sign(factor.values.changeBasisPoints)) return null;
   // A conservative consistency screen, not equality between two instruments
   // or statistical confidence. Wider differences need additional quote/time

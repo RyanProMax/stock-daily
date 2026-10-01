@@ -73,6 +73,7 @@ const ESTABLISHED_PUBLISHER_HOSTS = new Set([
   "wap.eastmoney.com",
   "wsj.com",
   "wtop.com",
+  "wral.com",
   "xinhuanet.com",
   "yicai.com",
 ]);
@@ -106,6 +107,7 @@ const SOURCE_LABELS = new Map([
   ["szse.cn", "深圳证券交易所"],
   ["thepaper.cn", "澎湃新闻"],
   ["wsj.com", "The Wall Street Journal"],
+  ["wral.com", "WRAL"],
   ["xinhuanet.com", "新华社"],
   ["yicai.com", "第一财经"],
 ]);

@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { JSDOM } from "jsdom";
+import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -518,7 +519,7 @@ function sourceEncodingCandidates(body, contentType) {
     .map((value) => value.toLocaleLowerCase());
 }
 
-function decodeSourceBody(body, contentType) {
+export function decodeSourceBody(body, contentType) {
   const candidates = [
     ...new Set(sourceEncodingCandidates(body, contentType)),
   ];
@@ -1154,6 +1155,7 @@ export async function readExternalSource(
         text,
         publishedAtCandidates,
         publishedDateCandidates: sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
+        articleProvenance: /(?:html|xhtml)/iu.test(contentType) ? sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null,
         ...(includeRaw ? { rawBody: response.body, metadataReceipts } : {}),
       };
     }
