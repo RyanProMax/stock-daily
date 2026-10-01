@@ -7,6 +7,7 @@ Translate the approved Chinese draft without changing facts, causal scope, claim
 # Success criteria
 
 - Preserve every claim ID and array order.
+- When a card carries `companyOutlooks`, retain its entire supplied `copyEn` description in the translation of the corresponding Chinese outlook passage. Preserve the issuer, segment, future fiscal year and management-forecast qualification; do not translate it as realized revenue or a consensus beat.
 - Preserve every actual value, baseline, delta, percentage, symbol, and direction exactly.
 - In each summary or detail, include every supplied comparison's exact `actual`, `baseline`, and `delta` display string verbatim, even when it contains Chinese currency units. These specific strings are permitted exceptions to English-only prose; do not change `113.5亿美元` to `$11.35 billion` when the former is a supplied comparison display.
 - Translate every supplied comparison `label`, `baselineLabel`, and non-empty `note` into concise financial English, preserving metric order. Do not copy Chinese labels into the English metric cards.

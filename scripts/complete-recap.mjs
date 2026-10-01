@@ -16,6 +16,7 @@ import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
 import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution, hasConstituentAttribution } from "./recap-attribution.mjs";
 import { auditRecapRateFactors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
+import { verifiedCompanyOutlooks, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
 const SIZE_EVIDENCE = /成交|量能|缩量|放量|振幅|波幅|盘中|涨跌家数|抵消|对冲|分化|权重|\b(?:volume|turnover|intraday|range|breadth|offset|counter|divergen|weight|narrow|restrain|limit)\w*/iu;
@@ -277,7 +278,10 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const selectedMeasurements = validateMagnitudeObservationIds(measurementIds, measured, { copy: magnitude, copyEn: magnitudeEn });
     grounding += " " + JSON.stringify(selectedMeasurements.map(item => item.values));
     const financialCopy = `${why} ${whyEn} ${magnitude} ${magnitudeEn}`;
-    if (/财报|季报|年报|每股收益|营收|季度(?:业绩|结果)|盈利指引|\b(?:EPS|revenue|quarterly results|financial results|earnings guidance)\b/iu.test(financialCopy) && requiresFinancialComparisons(financialCopy)) {
+    const companyOutlooks = verifiedCompanyOutlooks(cause);
+    assertCompanyOutlookDescriptions(why, companyOutlooks, `${target.symbol} 中文归因`, "zh");
+    assertCompanyOutlookDescriptions(whyEn, companyOutlooks, `${target.symbol} 英文归因`, "en");
+    if (/财报|季报|年报|每股收益|营收|季度(?:业绩|结果)|盈利指引|\b(?:EPS|revenue|quarterly results|financial results|earnings guidance)\b/iu.test(financialCopy) && requiresFinancialComparisons(financialCopy, { companyOutlooks })) {
       const comparisons = cause.flatMap((source) => source.comparisons ?? []).filter(item => /每股|营收|收入|利润|盈利|指引|\b(?:EPS|revenue|sales|profit|income|earnings|guidance)\b/iu.test(item.label));
       if (new Set(comparisons.map((item) => `${item.label}|${item.unit}|${item.actualValue}|${item.baselineValue}`)).size < 2) throw new Error(`${target.symbol} 财报归因缺少类型化实际值与预期对照`);
       if (cause.some((source) => (source.comparisons ?? []).some((item) => /EPS|每股收益/iu.test(item.label)) && source.earningsContextChecked !== true)) throw new Error(`${target.symbol} 每股收益尚未核对非经常性收益口径`);

@@ -7,6 +7,7 @@ import { validateResearchOutput, verifyResearchSources, verifiedCurrentCompanySu
 import { sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "../scripts/daily-source-audit.mjs";
 import { snapshotFromOpenedSource, auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
 import { sourceArticleProvenance } from "../scripts/source-article-provenance.mjs";
+import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions } from "../scripts/company-outlook.mjs";
 
 // Synthetic test returns exercise assembly, not a real report acceptance.
 function decomposition() {
@@ -39,6 +40,25 @@ test("four separately reported company reactions can explain an equal-weight bas
   assert.ok(candidate.constituents.find(company => company.symbol === "HPE").reportedPairs.some(pair => pair.root === "HPE-facts" && pair.reaction === "HPE-causal"));
   assert.ok(!f.ledger.sources.find(source => source.id === "HPE-causal").targets.includes(f.target.symbol));
   assert.equal(assessRecapEvidenceCoverage(f.envelope, f.ledger).entries.find(item => item.target === f.target.symbol).status, "eligible_for_review");
+});
+
+test("a future company outlook keeps its prospective wording at the recap gate without fabricated result metrics", () => {
+  const f = decomposition(), source = f.ledger.sources.find(item => item.id === "HPE-facts"), reaction = f.ledger.sources.find(item => item.id === "HPE-causal");
+  source.supportingExcerpt = "HPE is raising its FY27 Networking segment revenue growth outlook to between high teens to low-20s percent.";
+  source.causalConnection = false;
+  source.companyOutlookEvidenceVersion = COMPANY_OUTLOOK_VERSION;
+  source.companyOutlooks = companyOutlookDefinitions(source, { finalUrl: source.url, text: source.supportingExcerpt });
+  assert.equal(source.companyOutlooks.length, 1);
+  reaction.supportingExcerpt = "Hewlett Packard Enterprise rose because its Networking revenue outlook increased; other events remained possible.";
+  f.entry.chains[2].eventAnchors = ["Networking", "revenue"];
+  const outlook = source.companyOutlooks[0];
+  f.rawEntry.why += outlook.copyZh; f.rawEntry.whyEn += ` ${outlook.copyEn}`;
+  assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }).status, "complete");
+  f.rawEntry.whyEn += " Reported quarterly revenue grew.";
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }), /财报归因缺少/);
+  f.rawEntry.whyEn = f.rawEntry.whyEn.replace(" Reported quarterly revenue grew.", "");
+  delete source.companyOutlooks; delete source.companyOutlookEvidenceVersion;
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }), /财报归因缺少/);
 });
 
 test("missing, contradictory, wrong-subject and wrong-date company explanations cannot hide inside a matching net basket", () => {

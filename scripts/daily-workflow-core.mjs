@@ -21,8 +21,9 @@ import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from 
 import { SNOWFLAKE_PRESS_RELEASE_VERSION, snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
+import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v64";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v65";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v4";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
@@ -42,8 +43,10 @@ const FINANCIAL_PRE_EVENT_COPY =
 const FINANCIAL_RESULT_DISCLOSURE_COPY =
   /(?<!未)(?:公布|披露|发布|报告|实现|录得|显示)(?!前).{0,40}(?:财报|业绩|季报|年报|季度结果|营收|收入|利润|净利|每股收益|指引)(?!(?:发布|公布)?前)|(?:财报|业绩|季报|年报|季度结果|营收|收入|利润|净利|每股收益|指引).{0,32}(?:为|达到|升至|降至|增长|下降|实现|录得)|\b(?:reported|posted|announced|disclosed|recorded|delivered)\b.{0,64}(?:quarterly results?|financial results?|earnings|revenue|sales|profit|net income|operating income|eps|guidance)|(?:quarterly results?|financial results?|\bearnings\b|\brevenue\b|\bsales\b|\bprofit\b|\bnet income\b|\boperating income\b|\beps\b|\bguidance\b).{0,40}\b(?:was|were|reached|totaled|rose|fell|grew|increased|decreased)\b/iu;
 
-export function requiresFinancialComparisons(value) {
+export function requiresFinancialComparisons(value, { companyOutlooks = [] } = {}) {
   const copy = String(value);
+  const prospective = prospectiveCompanyCopyRemainder(copy, companyOutlooks);
+  if (prospective.matched) return hasUnverifiedResultOrSurprise(prospective.remainder) || hasOtherFinancialStatement(prospective.remainder);
   // An explicit beat/miss remains a reported-result claim even when the same
   // sentence also discusses positioning ahead of a later event.  The
   // pre-event exemption is only for copy that contains no result comparison.
@@ -1520,7 +1523,8 @@ export async function verifyResearchSources(
         const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION && cached.authorityTitleChecked === true && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
         const cachedPbocValid = !pbocDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === PBOC_DOCUMENT_VERSION && cached.authorityTitleChecked === true && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
         const cachedSnowflakeValid = !snowflakePressReleaseIdentity(candidate.originalUrl) || (cached?.issuerDocumentVersion === SNOWFLAKE_PRESS_RELEASE_VERSION && cached.issuerTitleChecked === true && cached.timePrecision === "date" && isCalendarDate(cached.publishedAt) && Boolean(cached.timingLimitation) && !cached.initialPublishedAt);
-        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cachedPbocValid && cachedSnowflakeValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const cachedOutlookValid = !(candidate.role === "facts" && candidate.scope === "company" && verifiedExternalSourceType(candidate.originalUrl) === "first_party") || cached?.scope !== "company" || cached?.companyOutlookEvidenceVersion === COMPANY_OUTLOOK_VERSION;
+        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cachedPbocValid && cachedSnowflakeValid && cachedOutlookValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1613,6 +1617,7 @@ export async function verifyResearchSources(
           };
         }
         const companySubjects = verifiedCurrentCompanySubjects(normalizedCandidate, opened, envelope);
+        const outlooks = companyOutlookDefinitions({ ...normalizedCandidate, sourceType }, opened, companySubjects);
         for (const comparison of candidate.comparisons) {
           for (const [display, expected] of [
             [comparison.actualDisplay, comparison.actualValue],
@@ -1650,6 +1655,7 @@ export async function verifyResearchSources(
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
+            ...(candidate.role === "facts" && normalizedCandidate.scope === "company" && sourceType === "first_party" ? { companyOutlookEvidenceVersion: COMPANY_OUTLOOK_VERSION, companyOutlooks: outlooks } : {}),
             ...(pdfTextEvidence ? { pdfTextEvidence } : {}),
             ...((companySubjects.length || backgroundSubjects?.length) && opened.pdfDocument?.issuer ? { pdfIssuerEvidenceVersion: PDF_ISSUER_EVIDENCE_VERSION } : {}),
             ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
@@ -2027,15 +2033,17 @@ export function validateAdjudication(value, plan, ledger, envelope) {
       40,
       600,
     );
+    const companyOutlooks = verifiedCompanyOutlooks(evidence);
+    assertCompanyOutlookDescriptions(factSummary, companyOutlooks, `${claim.anomalyId} 归因卡片`);
     assertNumbersGrounded(
       `${title} ${factSummary} ${causalStatement}`,
       `${JSON.stringify(anomaly)} ${evidence
         .map((item) => `${item.facts} ${JSON.stringify(item.comparisons)}`)
-        .join(" ")}`,
+        .join(" ")} ${JSON.stringify(companyOutlooks)}`,
       `${claim.anomalyId} 归因卡片`,
     );
     if (
-      requiresFinancialComparisons(`${title} ${factSummary} ${causalStatement}`) &&
+      requiresFinancialComparisons(`${title} ${factSummary} ${causalStatement}`, { companyOutlooks }) &&
       comparisons.length < 2
     ) {
       throw new Error(`${claim.anomalyId} 的财报归因缺少至少两项实际值与预期值对比`);
@@ -2125,6 +2133,7 @@ export function validateAdjudication(value, plan, ledger, envelope) {
       evidenceIds,
       comparisonIds,
       comparisons: comparisons.map(publicComparison),
+      ...(companyOutlooks.length ? { companyOutlooks } : {}),
       alternativeAssessment: text(
         claim.alternativeAssessment,
         `${claim.anomalyId}.alternativeAssessment`,
@@ -2251,11 +2260,14 @@ function claimMap(cards) {
   return new Map(cards.map((item) => [item.id, item]));
 }
 
-export function assertFinancialCopyIncludesMetrics(copy, claim, label) {
+export function assertFinancialCopyIncludesMetrics(copy, claim, label, { language } = {}) {
+  const context = { companyOutlooks: claim.companyOutlooks ?? [] };
+  assertCompanyOutlookDescriptions(copy, context.companyOutlooks, label, language);
   const claimRequiresComparisons = requiresFinancialComparisons(
     `${claim.title} ${claim.factSummary} ${claim.causalStatement ?? ""}`,
+    context,
   );
-  const copyRequiresComparisons = requiresFinancialComparisons(copy);
+  const copyRequiresComparisons = requiresFinancialComparisons(copy, context);
   if (!claimRequiresComparisons && !copyRequiresComparisons) return;
   if (claim.comparisons.length < 2) {
     throw new Error(`${label} 的财报或业绩表述缺少至少两项实际值与基准对比`);
@@ -2347,6 +2359,7 @@ export function validateWriterDraft(value, cards, market, groundingByClaim = {})
       `${title} ${summary} ${mechanism}`,
       claim,
       label,
+      { language: "zh" },
     );
     assertNumbersGrounded(
       `${title} ${summary} ${mechanism}`,
@@ -2640,6 +2653,7 @@ export function validateTranslation(value, draft, cards, market) {
         `${title} ${summary} ${detail}`,
         claim,
         `translation.${type}[${index}]`,
+        { language: "en" },
       );
       return {
         claimId: item.claimId,

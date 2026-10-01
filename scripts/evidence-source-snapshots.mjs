@@ -20,6 +20,7 @@ import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./
 import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { SNOWFLAKE_PRESS_RELEASE_VERSION, snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
 import { verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
+import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions } from "./company-outlook.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -221,6 +222,11 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     if (envelope) {
       const companySubjects = verifiedCurrentCompanySubjects(source, original, envelope);
       if ((companySubjects.length || source.companySubjects || source.companySubjectChecked) && (source.companySubjectChecked !== true || stableHash(source.companySubjects) !== stableHash(companySubjects))) throw new Error("当前公司证据主体未由冻结原文重建");
+    }
+    // Older immutable ledgers remain readable, but have no outlook exemption.
+    // Verify original issuer/scope before rebuilding any new outlook receipt.
+    if (source.companyOutlookEvidenceVersion !== undefined || source.companyOutlooks !== undefined) {
+      if (!envelope || source.role !== "facts" || source.scope !== "company" || source.sourceType !== "first_party" || source.companyOutlookEvidenceVersion !== COMPANY_OUTLOOK_VERSION || stableHash(source.companyOutlooks) !== stableHash(companyOutlookDefinitions(source, original, verifiedCurrentCompanySubjects(source, original, envelope)))) throw new Error("公司未来展望口径未由冻结一手原文和发行主体重建");
     }
   }
   return book;
