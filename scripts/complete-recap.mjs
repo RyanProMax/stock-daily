@@ -317,6 +317,11 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
         assertGdpNowCopy(copy, primary);
         assertNumbersGrounded(copy, primaryText, "KOL 事实数字的官方佐证");
         assertFactsNumbersInExcerpt({ facts: copy, supportingExcerpt: primaryText });
+        // Official truth and faithful attribution are separate requirements.
+        // A later official value, or another topic's official number, cannot
+        // become something this author said in the selected original post.
+        assertNumbersGrounded(copy, post.text, "KOL 署名内容的原帖数字");
+        assertFactsNumbersInExcerpt({ facts: copy, supportingExcerpt: post.text });
       }
       return { text, textEn, authorHandle: post.authorHandle, url: post.url, publishedAt: post.publishedAt, sources: corroboration.map(publicRecapSource) };
     });

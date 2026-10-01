@@ -1,8 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertFactsNumbersInExcerpt, bodySupportsDeterministicTarget, marketEnvelope, stableHash, verifyResearchSources } from "../scripts/daily-workflow-core.mjs";
+import { assertFactsNumbersInExcerpt, assertNumbersGrounded, bodySupportsDeterministicTarget, marketEnvelope, stableHash, verifyResearchSources } from "../scripts/daily-workflow-core.mjs";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
+
+test("the actual GDPNow post's compact quarter and signed baseline support faithful bilingual paraphrases", () => {
+  const original = "Big drop in latest 3Q2026 real GDP estimate from @AtlantaFed GDPNow model … +3.7%, down from prior September 25 read of +5.0% https://t.co/nTCgjFirQH";
+  const official = "The GDPNow model estimate for real GDP growth (seasonally adjusted annual rate) in the third quarter of 2026 is 3.7 percent on September 30, down from 5.0 percent on September 25.";
+  const chinese = "GDPNow对2026年第三季度实际GDP增长的模型估计为3.7%，低于9月25日的5.0%。";
+  const english = "The GDPNow model estimate for real GDP growth in the third quarter of 2026 was 3.7 percent, down from 5.0 percent on September 25.";
+  for (const facts of [chinese, english]) for (const supportingExcerpt of [original, official]) {
+    assert.doesNotThrow(() => assertNumbersGrounded(facts, supportingExcerpt, "original"));
+    assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt }));
+  }
+  for (const facts of [chinese.replace("第三", "第四"), chinese.replace("2026", "2025"), chinese.replace("9月25日", "10月25日"), chinese.replace("9月25日", "9月26日"), chinese.replace("3.7%", "-3.7%"), chinese.replace("5.0%", "-5.0%"), chinese.replace("5.0%", "5.0个百分点"), english.replace("third", "second")]) {
+    assert.throws(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt: original }), /数字/);
+  }
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "2026年第三季度估计为3.7%。", supportingExcerpt: "Product A3Q2026 has a reading of 3.7%." }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "GDP增长下跌5.0%。", supportingExcerpt: original }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "股价上涨5.0%。", supportingExcerpt: "Shares fell by 5.0%." }), /数字/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "加息概率由71%升至86%。", supportingExcerpt: "The probability rose to 86% from 71%." }));
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "The rate change rose to +0.9 bps from -3.5 bps.", supportingExcerpt: "The rate change rose to +0.9 bps from -3.5 bps." }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "The rate change rose to +0.9 bps from +3.5 bps.", supportingExcerpt: "The rate change rose to +0.9 bps from -3.5 bps." }), /数字/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "Second-quarter 2026 real GDP increased at a 2.2 percent annual rate.", supportingExcerpt: "Real GDP increased at an annual rate of 2.2 percent in the second quarter of 2026." }));
+});
+
+test("translated calendar grounding cannot lend an unquoted value to a price in the same copy", () => {
+  assert.doesNotThrow(() => assertNumbersGrounded("9月25日的观察。", "An observation on September 25.", "original"));
+  for (const copy of ["价格为9美元。", "9月25日，价格为9美元。", "10月25日的观察。"]) {
+    assert.throws(() => assertNumbersGrounded(copy, "An observation on September 25.", "original"), /数字/);
+  }
+});
 
 test("translated calendar months and ordinal periods preserve the actual reported values", () => {
   const supportingExcerpt = "The Consumer Confidence Index declined for a third straight month to its lowest level since April 2014. A print of 81.9 for September was well below a consensus forecast for an increase to 89.0 from a revised 88.6 in August.";
@@ -143,7 +171,7 @@ test("legacy numeric caches cannot retain a newly recognized reversed Chinese cl
   const f = recapFixture("CN"), anomaly = f.plan.anomalies[0];
   const source = { originalUrl: "https://www.reuters.com/markets/china/example-close", title: "China market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "沪指收涨0.31%，市场成交维持平稳，行业表现出现分化，投资者继续关注经济数据和政策变化。", facts: "沪指收跌0.31%，市场成交维持平稳，行业表现出现分化。", causalConnection: false, comparisons: [] };
   const candidateHash = stableHash(source);
-  for (const marker of [undefined, "verified-number-direction-v0", "verified-number-direction-v1", "verified-number-direction-v2"]) {
+  for (const marker of [undefined, "verified-number-direction-v0", "verified-number-direction-v1", "verified-number-direction-v2", "verified-number-direction-v3"]) {
     let reads = 0;
     const cache = new Map([[candidateHash, { ...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: marker }]]);
     const result = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { verifiedCache: cache, reader: async () => { reads++; return { finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt] }; } });

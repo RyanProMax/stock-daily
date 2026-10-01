@@ -2757,9 +2757,11 @@ test("workflow upgrades preserve legacy manifests and snapshot bytes while curre
   try {
     const options = { input: fixtureInput(), market: "US", deliveryMode: "shadow", completeRecap: true, workRoot };
     const current = new MarketWorkflow(options);
-    const common = `US-${current.envelope.marketAsOf}-${current.inputHash.slice(0, 12)}`;
+    const priorInputHash = stableHash({ ...marketEnvelope(options.input, "US"), workflowVersion: "stock-daily-multi-agent-v61" });
+    assert.notEqual(priorInputHash, current.inputHash, "the existing input fingerprint already binds the workflow version");
+    const common = `US-${current.envelope.marketAsOf}-${priorInputHash.slice(0, 12)}`;
     const priorKeys = [`${common}-shadow-complete`, `${common}-stock-daily-multi-agent-v61-shadow-complete`];
-    const priorManifest = JSON.stringify({ workflowVersion: "stock-daily-multi-agent-v61", status: "failed", inputHash: current.inputHash, market: "US", deliveryMode: "shadow", agentRuns: [], lastError: "Unsupported old snapshot date", legacyMarker: "must remain unchanged" });
+    const priorManifest = JSON.stringify({ workflowVersion: "stock-daily-multi-agent-v61", status: "failed", inputHash: priorInputHash, market: "US", deliveryMode: "shadow", agentRuns: [], lastError: "Unsupported old snapshot date", legacyMarker: "must remain unchanged" });
     const priorSnapshot = "Frozen original bytes and previous parser fields; intentionally not a current snapshot book.\n";
     for (const key of priorKeys) {
       const dir = resolve(workRoot, key);

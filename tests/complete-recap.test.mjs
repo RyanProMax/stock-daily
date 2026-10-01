@@ -175,6 +175,27 @@ test("an original X post and an unrelated official citation cannot validate the 
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /单位和方向/);
 });
 
+test("an officially supported number cannot be falsely attributed to an unrelated complete KOL original", () => {
+  const f = recapFixture();
+  f.ledger.sources[0].supportingExcerpt += " The PCE price index increased 0.3 percent in August.";
+  f.social.leads = [{ id: "gdpnow-original", authorHandle: "Analyst", url: "https://x.com/Analyst/status/123", publishedAt: "2026-08-21T18:00:00Z", textComplete: true, text: "The latest real GDP estimate from the GDPNow model fell to +3.7%, down from the prior reading of +5.0%." }];
+  f.raw.entries[0].opinions = [{ postId: "gdpnow-original", evidenceIds: ["0-facts"], text: "该评论者指出，八月PCE价格指数上涨0.3%，并讨论这一变化对市场的意义。", textEn: "The commentator said that the PCE price index increased 0.3 percent in August and discussed its relevance for markets." }];
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 署名内容的原帖数字/);
+});
+
+test("each language preserves the author's original values instead of substituting a newer officially supported value", () => {
+  for (const language of ["text", "textEn"]) {
+    const f = recapFixture();
+    f.ledger.sources[0].supportingExcerpt += " The PCE price index increased 0.3 percent in August. A revised estimate says the PCE price index increased 0.4 percent.";
+    f.social.leads = [{ id: "pce-original", authorHandle: "Analyst", url: "https://x.com/Analyst/status/123", publishedAt: "2026-08-21T18:00:00Z", textComplete: true, text: "The PCE price index increased 0.3 percent in August; this is an observation, not a claim about what caused today's stocks." }];
+    const opinion = { postId: "pce-original", evidenceIds: ["0-facts"], text: "该评论者指出，八月PCE价格指数上涨0.3%，同时保留这只是数据观察的限制。", textEn: "The commentator said that the PCE price index increased 0.3 percent in August and retained its interpretation as a data observation." };
+    f.raw.entries[0].opinions = [opinion];
+    assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social).entries[0].opinions.length, 1);
+    opinion[language] = opinion[language].replace("0.3", "0.4");
+    assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 署名内容的原帖数字/);
+  }
+});
+
 test("financial attributions show two actual/baseline/code-delta comparisons in both languages", () => {
   const f = recapFixture(), source = f.ledger.sources[0];
   source.comparisons = [

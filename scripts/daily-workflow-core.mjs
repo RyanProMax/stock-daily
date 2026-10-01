@@ -22,8 +22,8 @@ import { SNOWFLAKE_PRESS_RELEASE_VERSION, snowflakePressReleaseIdentity, snowfla
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v62";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v63";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v4";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1128,6 +1128,11 @@ function nearestDirection(value, start, end, rawNumber) {
   // A calendar component is not a market movement. A bound on a count (e.g.
   // “超过3600只个股下跌”) must not override the actual movement verb.
   if (/^[年月日]/u.test(value.slice(end))) return null;
+  // A comparison's explicitly named starting level is not its change.
+  // In "down from ... +5.0%", +5.0 is still a positive GDP level; "down"
+  // describes the revision to the new estimate, not a negative baseline.
+  const preceding = value.slice(Math.max(0, start - 100), start);
+  if (/\b(?:up|down|rose|fell|increased|decreased|declined|dropped|climbed)\s+from\s+(?:(?:the|prior|previous|earlier)\s+)*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s+)?(?:(?:read|reading|estimate|level)\s+of\s+)?$/iu.test(preceding) || /\bfrom\s*$/iu.test(preceding) || /(?:从|由)\s*$/u.test(preceding) || /(?:低于|高于)(?:(?:此前|先前|之前|上次|前次|上一期)(?:的)?|\d{1,2}月\d{1,2}日)(?:的)?\s*$/u.test(preceding)) return null;
   if (rawNumber.startsWith("+")) return "positive";
   if (rawNumber.startsWith("-")) return "negative";
   // In a quoted (signed bp change, yield level) pair, the sign belongs to
@@ -1192,7 +1197,7 @@ function canonicalMention(mention) {
   // rule must never turn a positive dollar/EPS level into a negative one.
   if (["basis_points", "percentage_points"].includes(mention.unit)) {
     const amount = Math.abs(mention.number) * (mention.unit === "percentage_points" ? 100 : 1);
-    return { ...mention, unit: "rate_difference", number: Number((amount * (mention.direction === "negative" ? -1 : 1)).toPrecision(15)) };
+    return { ...mention, unit: "rate_difference", number: Number((amount * (mention.direction === "negative" || mention.number < 0 ? -1 : 1)).toPrecision(15)) };
   }
   return mention;
 }
@@ -1201,6 +1206,9 @@ function numericMentions(value) {
   // Convert only explicitly bound mixed fractional durations, never bare
   // fractions in ratios, dates, currencies or quoted financial amounts.
   const copy = String(value).replace(/−/gu, "-")
+    // Compact, explicitly bound quarter/year notation has the same two
+    // calendar values as Q3 in 2026. Never split an arbitrary product ID.
+    .replace(/\b([1-4])Q((?:19|20|21)\d{2})\b/giu, (_raw, quarter, year) => `Q${quarter} in ${year}`)
     // "超亿元" is an explicit > one-hundred-million threshold, not a
     // bare unit label. Do not infer one from a table heading or "超千亿元".
     .replace(/(?:超过|超)(亿元|亿美元|百万元|万元|万美元)/gu, (_raw, unit) => `超过1${unit}`)
@@ -1225,7 +1233,7 @@ function numericMentions(value) {
       if (/(?:S&P|Standard (?:&|and) Poor[’']s|标普)\s*$/iu.test(before)) unit = "index_identifier_sp";
       else if (/科创\s*$/u.test(before) && /^指数/u.test(after)) unit = "index_identifier_star";
       else if (/^月(?!份?的?期)/u.test(after)) unit = "calendar_month";
-      else if (number >= 1900 && number <= 2199 && (/^(?:财)?年/u.test(after) || /(?:\b(?:since|in|FY|fiscal year)\s*|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}[, ]*)?)$/iu.test(before))) unit = "calendar_year";
+      else if (number >= 1900 && number <= 2199 && (/^(?:财)?年/u.test(after) || /(?:\b(?:since|in|FY|fiscal year)\s*|\b(?:first|second|third|fourth)[ -]+quarter\s+(?:of\s+)?|\bQ[1-4]\s+(?:of\s+)?|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}[, ]*)?)$/iu.test(before))) unit = "calendar_year";
       else if (/^日/u.test(after) || /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*$/u.test(before)) unit = "calendar_day";
       else if (/^季度/u.test(after) && /第$/u.test(before) || /\bQ$/u.test(before)) unit = "quarter_number";
       else if (/第$/u.test(before) || /^(?:st|nd|rd|th)\b/u.test(after)) unit = "ordinal_number";
@@ -1237,6 +1245,9 @@ function numericMentions(value) {
   for (const date of dates) {
     const [year, month, day] = date[0].split("-").map(Number);
     for (const [number, unit] of [[year, "calendar_year"], [month, "calendar_month"], [day, "calendar_day"]]) mentions.push({ number, unit, direction: null, display: date[0] });
+  }
+  for (const match of copy.matchAll(/第([一二三四])季度/gu)) {
+    mentions.push({ number: "一二三四".indexOf(match[1]) + 1, unit: "quarter_number", direction: null, display: match[0] });
   }
   for (let i = 0; i < CALENDAR_MONTHS.length; i++) {
     const name = CALENDAR_MONTHS[i];
@@ -2279,8 +2290,16 @@ function numericValueSet(value) {
 
 export function assertNumbersGrounded(copy, grounding, label) {
   const allowed = numericValueSet(grounding);
+  const copyMentions = numericMentions(copy);
+  const originalMentions = numericMentions(grounding);
+  const calendarUnits = new Set(["calendar_year", "calendar_month", "calendar_day", "quarter_number", "ordinal_number"]);
   for (const value of numericValueSet(copy)) {
     if (!allowed.has(value)) {
+      // A translated September may be written as 9月. Admit that calendar
+      // component only when every occurrence of this missing value is a
+      // matching calendar/ordinal mention, never as an unquoted price.
+      const translated = copyMentions.filter(mention => String(Math.abs(mention.number)) === value);
+      if (translated.length && translated.every(mention => calendarUnits.has(mention.unit) && originalMentions.some(original => original.number === mention.number && original.unit === mention.unit))) continue;
       throw new Error(`${label} 引用了未进入类型化事实字段的数字 ${value}`);
     }
   }
