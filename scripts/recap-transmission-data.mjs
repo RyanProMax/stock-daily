@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { stableHash, bodySupportsDeterministicTarget } from "./daily-workflow-core.mjs";
 import { readExternalSource, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates, normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { backgroundEvidenceInWindow } from "./evidence-timing.mjs";
+import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
 const CONFIG = new URL("../data/recap-transmission-sources.json", import.meta.url);
 const FACTOR = /demand|supply|costs?|rates?|financing|regulat/iu;
@@ -36,11 +37,8 @@ function derive(snapshot, envelope, plan) {
       const name = config.sectors[anomaly.target];
       if (!name) throw new Error("缺少对应基金的原始风险标题");
       const heading = `${name} Sector Risk:`;
-      const at = text.indexOf(heading);
-      if (at < 0) throw new Error("原文未包含对应行业风险段落");
-      const tail = text.slice(at + heading.length);
-      const next = /\n[A-Z][^\n:]{1,100} Risk:/u.exec(tail);
-      const section = heading + tail.slice(0, next ? next.index : 3_000);
+      const section = uniqueFundRiskSection(text, name);
+      if (!section) throw new Error("原文未包含唯一、明确的对应基金行业风险段落");
       const sentences = completeRiskSentences(section), first = sentences[0];
       // Segment an unpaged view, then recover the full original sentence.
       // A footer cannot orphan a subject or remove an economic qualification.

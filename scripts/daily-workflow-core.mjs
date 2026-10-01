@@ -12,8 +12,10 @@ import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
+import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v42";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v43";
+export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1425,6 +1427,10 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
   } else {
     const fund = expectedScope === "sector" && secArchiveIdentity(opened.finalUrl)?.cik === "1064641" && normalizedEvidenceText(opened.text).includes(normalizedEvidenceText(transmissionConfig.issuer)) && source.supportingExcerpt.includes(`${transmissionConfig.sectors[metric.symbol]} Sector Risk:`);
     if (!authority && !fund) throw new Error("发行人或单家公司披露不能自动扩大为整个行业或 AI 环节的背景机制");
+    if (fund) {
+      const section = uniqueFundRiskSection(opened.text, transmissionConfig.sectors[metric.symbol]);
+      if (!section || !supportingExcerptMatches(normalizedEvidenceText(section), normalizedEvidenceText(source.supportingExcerpt), source.supportingExcerpt)) throw new Error("背景引文未在唯一的对应基金行业风险段落内定位，不能借用其他基金或其他风险的句子");
+    }
     subjects = bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, metric.symbol) ? [metric.symbol] : [];
   }
   if (!subjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
@@ -1459,7 +1465,7 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || cached.subjectIdentityChecked === true) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1558,7 +1564,7 @@ export async function verifyResearchSources(
             reportingOrigin: opened.articleProvenance?.origin ?? null,
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
-            ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
+            ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),

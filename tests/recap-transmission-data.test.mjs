@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "../scripts/recap-transmission-data.mjs";
-import { verifyResearchSources, stableHash } from "../scripts/daily-workflow-core.mjs";
+import { verifyResearchSources, stableHash, supportingExcerptMatches } from "../scripts/daily-workflow-core.mjs";
+import { normalizedEvidenceText } from "../scripts/daily-source-audit.mjs";
+import { auditLedgerSourceSnapshots, snapshotFromOpenedSource, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
 
 const config = JSON.parse(await readFile(new URL("../data/recap-transmission-sources.json", import.meta.url), "utf8"));
 function original({ date = "January 28, 2026", header = true, footerBreak = false } = {}) {
@@ -71,4 +73,51 @@ test("factor sentences split by an XLRE page footer retain their subject and qua
   assert.ok(longQuote.supportingExcerpt.length <= 700);
   const longLedger = await verifyResearchSources([{ sources: [longQuote], alternatives: [] }], f.envelope, { reader: transmissionSourceReader(longBook) });
   assert.equal(longLedger.sources.length, 1, JSON.stringify(longLedger.rejected));
+});
+
+test("a fund heading cannot lend its scope to another fund's later risk sentence, including frozen publication replay", async () => {
+  const f = recapFixture();
+  const rawHtml = original().replaceAll('Share values may fluctuate.', 'Share values may fluctuate when interest rates change.');
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(rawHtml) });
+  const sourceReader = transmissionSourceReader(book);
+  const opened = await sourceReader(config.url);
+  const source = book.sources.find(item => item.targets[0] === "XLF");
+  const valid = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: sourceReader });
+  assert.equal(valid.sources.length, 1, JSON.stringify(valid.rejected));
+  const wrong = { ...source, supportingExcerpt: source.supportingExcerpt.split('\n')[0] + '\nCompanies in the technology sector are affected by supply and demand, operating costs and government regulation.' };
+  assert.ok(supportingExcerptMatches(normalizedEvidenceText(opened.text), normalizedEvidenceText(wrong.supportingExcerpt), wrong.supportingExcerpt), 'Every selected sentence really exists, in order, in this same filing');
+  const rejected = await verifyResearchSources([{ sources: [wrong], alternatives: [] }], f.envelope, { reader: sourceReader });
+  assert.equal(rejected.sources.length, 0);
+  assert.match(rejected.rejected[0].reason, /对应基金.*风险段落/);
+  const forged = structuredClone(valid);
+  forged.sources[0].supportingExcerpt = wrong.supportingExcerpt;
+  forged.sources[0].excerptHash = stableHash(normalizedEvidenceText(wrong.supportingExcerpt));
+  const snapshots = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [snapshotFromOpenedSource(config.url, opened)] };
+  assert.throws(() => auditLedgerSourceSnapshots(forged, snapshots, { envelope: f.envelope }), /对应基金.*风险段落/);
+  const otherRisk = { ...source, supportingExcerpt: source.supportingExcerpt.split('\n')[0] + '\nShare values may fluctuate when interest rates change.' };
+  assert.ok(supportingExcerptMatches(normalizedEvidenceText(opened.text), normalizedEvidenceText(otherRisk.supportingExcerpt), otherRisk.supportingExcerpt));
+  const wrongRisk = await verifyResearchSources([{ sources: [otherRisk], alternatives: [] }], f.envelope, { reader: sourceReader });
+  assert.equal(wrongRisk.sources.length, 0);
+  assert.match(wrongRisk.rejected[0].reason, /对应基金.*风险段落/);
+});
+
+test("ambiguous repeated fund risk headings cannot establish an exposure, and older verification caches are rechecked", async () => {
+  const f = recapFixture();
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(original()) });
+  const sourceReader = transmissionSourceReader(book), source = book.sources.find(item => item.targets[0] === "XLF");
+  const cache = new Map();
+  const valid = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: sourceReader, verifiedCache: cache });
+  assert.equal(valid.sources.length, 1);
+  const cached = cache.get(stableHash(source));
+  delete cached.subjectIdentityVersion;
+  const opened = await sourceReader(config.url);
+  let reads = 0;
+  const ambiguousReader = async () => { reads++; return { ...opened, text: opened.text + '\n' + source.supportingExcerpt }; };
+  const rejected = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: ambiguousReader, verifiedCache: cache });
+  assert.equal(reads, 1);
+  assert.equal(rejected.sources.length, 0);
+  assert.match(rejected.rejected[0].reason, /对应基金.*风险段落/);
+  const ambiguous = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(original() + '<p>' + source.supportingExcerpt + '</p>') });
+  assert.ok(!ambiguous.sources.some(item => item.targets[0] === 'XLF'));
+  assert.ok(ambiguous.gaps.some(item => item.target === 'XLF'));
 });
