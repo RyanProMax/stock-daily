@@ -16,10 +16,11 @@ import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdp
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition, isChinaPmiArticle } from "./china-pmi-release.mjs";
+import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v52";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v2";
-export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v2";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v53";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v3";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
@@ -1206,6 +1207,9 @@ function numericMentions(value) {
     // "超亿元" is an explicit > one-hundred-million threshold, not a
     // bare unit label. Do not infer one from a table heading or "超千亿元".
     .replace(/(?:超过|超)(亿元|亿美元|百万元|万元|万美元)/gu, (_raw, unit) => `超过1${unit}`)
+    // A directly bound abbreviated threshold is the same comparator as
+    // "超过". Existing movement/count binding still decides its direction.
+    .replace(/超(?=\s*[+-]?\d)/gu, "超过")
     .replace(/\b(\d+)-(\d+)\/(\d+)(?=-?years?\b)/giu, (raw, whole, numerator, denominator) => Number(denominator) > 0 && Number(numerator) < Number(denominator) ? String(Number(whole) + Number(numerator) / Number(denominator)) : raw);
   const dates = [...copy.matchAll(/\b\d{4}-\d{2}-\d{2}\b/gu)].filter(match => isCalendarDate(match[0]));
   FACT_NUMBER_MENTION.lastIndex = 0;
@@ -1504,18 +1508,22 @@ export async function verifyResearchSources(
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
         const cachedPdfIssuerValid = (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
         const cachedPmiValid = !isChinaPmiArticle(candidate.originalUrl) || (cached?.surveyChecked === true && cached.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION);
-        if (cachedPdfIssuerValid && cachedPmiValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION;
+        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
+        const mofRecord = mofDocumentIdentity(opened.finalUrl) && Buffer.isBuffer(opened.rawBody) ? mofDocumentRecord(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
+        if (mofDocumentIdentity(opened.finalUrl) && (!mofRecord || stableHash(opened.text) !== stableHash(mofRecord.text))) throw new Error("财政部证据缺少已绑定的原始正文记录");
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         assertCurrentPdfIssuer(candidate, opened);
         const corporateAction = verifiedCurrentCorporateAction(candidate, opened, envelope);
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publication = opened.articleProvenance?.publication;
+        if (mofRecord && (stableHash(opened.publishedAtCandidates) !== stableHash(mofRecord.publishedAtCandidates) || stableHash(opened.publishedDateCandidates) !== stableHash(mofRecord.publishedDateCandidates) || publication?.status !== "verified" || publication.initialPublishedAt !== mofRecord.publishedAtCandidates[0] || publication.currentVersionAt !== mofRecord.publishedAtCandidates[0] || publication.timeBasis !== "first_publication" || opened.articleProvenance?.origin?.key !== "authority:mof.gov.cn" || opened.articleProvenance.origin.identified !== true)) throw new Error("财政部证据时间或来源与原始正文记录不一致");
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
         const publishedAt = verifiedSourceTime(
           candidate,
@@ -1615,6 +1623,7 @@ export async function verifyResearchSources(
             timingChecked: true,
             provenanceChecked: true,
             reportingOrigin: opened.articleProvenance?.origin ?? null,
+            ...(mofRecord ? { authorityDocumentVersion: MOF_DOCUMENT_VERSION } : {}),
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),

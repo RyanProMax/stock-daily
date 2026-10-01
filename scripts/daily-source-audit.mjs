@@ -13,6 +13,7 @@ import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
 import { pdfSourceRecord } from "./pdf-source.mjs";
 import { cninfoPdfIdentity, cninfoPdfPublication } from "./cninfo-pdf-publication.mjs";
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
+import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -706,6 +707,7 @@ export function sourcePublishedAtCandidates(
   if (isGdpNowCommentary(source)) return [];
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
+  if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publishedAt];
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
@@ -944,6 +946,7 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
     return record ? [record.updateDate] : [];
   }
   const decoded = decodeSourceBody(body, contentType);
+  if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publicationDate];
   const values = jsonLdArticlePublishedValues(decoded, source);
@@ -1129,6 +1132,13 @@ export async function readExternalSource(
         }
       }
       let authorityDocument;
+      if (mofDocumentIdentity(resolved.url.toString())) {
+        const record = /(?:html|xhtml)/iu.test(contentType) ? mofDocumentRecord(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null;
+        if (!record) throw new Error("财政部公告正文、身份或发布时间无法绑定原文");
+        authorityDocument = { ...record, articleProvenance: sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) };
+        text = record.text;
+        publishedAtCandidates = record.publishedAtCandidates;
+      }
       const nfraIdentity = nfraDocumentIdentity(resolved.url.toString());
       if (nfraIdentity) {
         if (!lookupPublicationMetadata || !/(?:html|xhtml)/iu.test(contentType)) throw new Error("金融监管总局公告缺少对应原始正文记录");

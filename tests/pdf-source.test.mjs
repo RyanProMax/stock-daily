@@ -124,6 +124,20 @@ test("an original CNINFO record binds securities identity and retains only calen
   assert.deepEqual(unavailable.publishedDateCandidates, []); assert.equal(unavailable.pdfDocument.issuer, undefined);
 });
 
+test("native quarterly titles without an issuer prefix still require exact PDF and record issuer binding", async () => {
+  const quarterly = fixturePdf([["样例医药股份有限公司2026 年第一季度报告", "1 / 2", "证券代码：600123 证券简称：样例医药", "样例医药股份有限公司", "2026 年第一季度报告", "本公司董事会及全体董事保证本公告内容不存在任何虚假记载、误导性陈述或者", "重大遗漏，并对其内容的真实性、准确性和完整性承担法律责任。"], ["本公司面对全球研发需求变化及监管风险，需要持续投入研发能力。"]]);
+  const value = metadata(); value.announcement.announcementTitle = "2026年第一季度报告";
+  const record = receipt(value);
+  assert.equal(cninfoPdfPublication(quarterly, record, url)?.issuer.symbol, "600123.SS");
+  assert.equal(cninfoPdfPublication(quarterly, record, url)?.timePrecision, "date");
+  for (const mutate of [v => v.announcement.secCode = "600999", v => v.announcement.secName = "其他医药", v => v.announcement.announcementTitle = "2026年第二季度报告", v => v.announcement.announcementTitle += "摘要", v => v.announcement.announcementId = "1225200544", v => v.announcement.adjunctUrl = "finalpage/2026-08-20/1225200544.PDF"]) {
+    const changed = structuredClone(value); mutate(changed);
+    assert.equal(cninfoPdfPublication(quarterly, receipt(changed), url), null);
+  }
+  const original = await readExternalSource(url, { includeRaw: true, resolver: async () => [{ address: "8.8.8.8", family: 4 }], requester: async source => ({ status: 200, contentType: source === url ? "application/pdf" : "application/json", body: source === url ? quarterly : record.rawBody }) });
+  assert.equal(openedSourceFromSnapshot(snapshotFromOpenedSource(url, original)).pdfDocument.issuer.symbol, "600123.SS");
+});
+
 test("another issuer, changed title, unrelated document and upload time cannot bind the announcement", () => {
   for (const mutate of [v => v.announcement.secCode = "600999", v => v.announcement.secName = "Other issuer", v => v.announcement.announcementId = "1225586488", v => v.announcement.announcementTitle += "另一个公告", v => v.announcement.adjunctUrl = "finalpage/2026-08-20/1225586488.PDF", v => v.announcement.announcementTime = Date.parse("2026-08-21T00:00:00+08:00"), v => v.fileUrl = "https://other.example/document.PDF", v => v.announcement.adjunctType = "HTML"]) { const v = metadata(); mutate(v); assert.equal(cninfoPdfPublication(pdf, receipt(v), url), null); }
   for (const mutate of [r => r.requestMethod = "GET", r => r.status = 502, r => r.contentType = "text/html", r => r.finalUrl += "&unbound=1"]) { const r = receipt(); mutate(r); assert.equal(cninfoPdfPublication(pdf, r, url), null); }

@@ -16,6 +16,7 @@ import { auditRecapRateFactors } from "./recap-rate-factors.mjs";
 import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
 import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.mjs";
+import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -52,6 +53,13 @@ export function openedSourceFromSnapshot(snapshot) {
   const receipts = snapshot.metadataReceipts;
   if (!Array.isArray(receipts) || receipts.length > 1) throw new Error("原文快照的时间元数据记录无效");
   let authorityDocument;
+  if (mofDocumentIdentity(snapshot.finalUrl)) {
+    const record = /(?:html|xhtml)/iu.test(snapshot.contentType) ? mofDocumentRecord(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
+    if (!record || receipts.length) throw new Error("财政部公告未由冻结原文绑定身份、正文及发布时间");
+    authorityDocument = { ...record, articleProvenance: sourceArticleProvenance(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) };
+    text = record.text;
+    publishedAtCandidates = record.publishedAtCandidates;
+  }
   const nfraIdentity = nfraDocumentIdentity(snapshot.finalUrl);
   if (nfraIdentity) publishedAtCandidates = [];
   for (const receipt of receipts) {
@@ -152,6 +160,7 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const original = originals.get(source.originalUrl ?? source.url);
     if (!original || original.finalUrl !== source.url || original.status !== (source.status ?? original.status) || verifiedExternalSourceType(original.finalUrl) !== source.sourceType) throw new Error("证据来源与冻结原文地址、状态或身份不一致");
     assertAccessibleOriginalArticle(original);
+    if (mofDocumentIdentity(source.url) ? source.authorityDocumentVersion !== MOF_DOCUMENT_VERSION : source.authorityDocumentVersion) throw new Error("财政部公告身份核验版本未由冻结原文重建");
     if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);

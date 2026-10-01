@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { verifiedExternalSourceLabel, verifiedExternalSourceType, verifiedFirstPartyIssuerIdentity } from "./source-registry.mjs";
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
+import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
 export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v2";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
@@ -68,6 +69,10 @@ function agency(value) {
 // version availability or reporting origin. Photo credits, recommended
 // articles, website footers and a generic dateModified are excluded.
 export function sourceArticleProvenance(decodedHtml, source) {
+  if (mofDocumentIdentity(source)) {
+    const record = mofDocumentRecord(decodedHtml, source);
+    return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:mof.gov.cn", identified: Boolean(record), basis: record ? "bound_authority_document" : "origin_unresolved" }, publication: record ? { status: "verified", initialPublishedAt: record.publishedAtCandidates[0], currentVersionAt: record.publishedAtCandidates[0], timeBasis: "first_publication" } : { status: "unverified_update" } };
+  }
   const chinaPmi = chinaPmiDocument(decodedHtml, source);
   if (chinaPmi) return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:stats.gov.cn", identified: true, basis: "bound_authority_document" }, publication: { status: "verified", initialPublishedAt: chinaPmi.publishedAt, currentVersionAt: chinaPmi.publishedAt, timeBasis: "first_publication" } };
   const sourceType = verifiedExternalSourceType(source), issuer = verifiedFirstPartyIssuerIdentity(source);

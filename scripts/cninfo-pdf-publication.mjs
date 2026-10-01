@@ -32,7 +32,9 @@ export function cninfoPdfPublication(body, receipt, source) {
   try { fileUrl = new URL(value.fileUrl); } catch { return null; }
   if (!["http:", "https:"].includes(fileUrl.protocol) || fileUrl.hostname !== "static.cninfo.com.cn" || fileUrl.pathname !== `/${a.adjunctUrl}` || fileUrl.username || fileUrl.password || fileUrl.port || fileUrl.search || fileUrl.hash) return null;
   const title = String(a.announcementTitle ?? "");
-  if (![identity.name + identity.title, identity.name + "：" + identity.title].some(expected => key(title) === key(expected))) return null;
+  // Native quarterly records may omit the issuer prefix. The sole PDF issuer,
+  // record code/name, announcement ID and exact file path remain mandatory.
+  if (![identity.title, identity.name + identity.title, identity.name + "：" + identity.title].some(expected => key(title) === key(expected))) return null;
   const date = new Date(a.announcementTime);
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2199) return null;
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map(part => [part.type, part.value]));

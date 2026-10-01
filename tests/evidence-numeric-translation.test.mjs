@@ -129,11 +129,21 @@ test("a magnitude bound cannot override the immediately preceding movement verb"
   assert.throws(()=>assertFactsNumbersInExcerpt({facts:"股价上涨不超过3.2%。",supportingExcerpt:"股价下跌不超过3.2%。"}),/数字/);
 });
 
+test("a directly quoted share threshold permits its full comparator without inventing a change", () => {
+  const supportingExcerpt = "新分子业务持续贡献增长，2026年第一季度收入占比超30%，新客户快速增长。另一项业务收入占比低于15%。";
+  const facts = "2026年第一季度新分子业务收入占比超过30%，另一项业务收入占比低于15%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt }));
+  for (const changed of [facts.replace("超过30", "低于30"), facts.replace("30%", "31%"), facts.replace("30%", "30个百分点"), facts.replace("低于15", "超过15")]) assert.throws(() => assertFactsNumbersInExcerpt({ facts: changed, supportingExcerpt }), /数字/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "股价下跌超过5%，超过3600只个股下跌。", supportingExcerpt: "股价跌超5%，超3600只个股下跌。" }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "股价上涨超过5%。", supportingExcerpt: "股价跌超5%。" }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "价格超过30元。", supportingExcerpt: "超导材料价格报30元。" }), /数字/);
+});
+
 test("legacy numeric caches cannot retain a newly recognized reversed Chinese close", async () => {
   const f = recapFixture("CN"), anomaly = f.plan.anomalies[0];
   const source = { originalUrl: "https://www.reuters.com/markets/china/example-close", title: "China market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "沪指收涨0.31%，市场成交维持平稳，行业表现出现分化，投资者继续关注经济数据和政策变化。", facts: "沪指收跌0.31%，市场成交维持平稳，行业表现出现分化。", causalConnection: false, comparisons: [] };
   const candidateHash = stableHash(source);
-  for (const marker of [undefined, "verified-number-direction-v0", "verified-number-direction-v1"]) {
+  for (const marker of [undefined, "verified-number-direction-v0", "verified-number-direction-v1", "verified-number-direction-v2"]) {
     let reads = 0;
     const cache = new Map([[candidateHash, { ...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: marker }]]);
     const result = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { verifiedCache: cache, reader: async () => { reads++; return { finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt] }; } });
