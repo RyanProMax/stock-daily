@@ -5,10 +5,10 @@ import { recapFixture } from "./complete-recap-fixture.mjs";
 import { fixturePdf } from "./pdf-fixture.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "../scripts/recap-company-background-data.mjs";
 import { CNINFO_REGISTRY_URL, CNINFO_HISTORY_URL, cninfoHistoryBody, cninfoLatestPeriodic, validateCninfoHistoryBody } from "../scripts/cninfo-history-request.mjs";
-import { companyExposureExcerpts } from "../scripts/company-exposure-excerpts.mjs";
+import { companyExposureExcerpts, hasChineseCompanyEconomicExposure } from "../scripts/company-exposure-excerpts.mjs";
 import { readExternalSource } from "../scripts/daily-source-audit.mjs";
 import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
-import { verifyResearchSources } from "../scripts/daily-workflow-core.mjs";
+import { verifyResearchSources, verifiedBackgroundExposureSubjects } from "../scripts/daily-workflow-core.mjs";
 
 const digest = body => createHash("sha256").update(body).digest("hex");
 const date = "2026-07-01";
@@ -24,7 +24,7 @@ function fixture() {
     const summary = { ...a, announcementId: String(Number(e.id) + 100), announcementTitle: "2026年半年度报告摘要", adjunctUrl: `finalpage/${date}/${Number(e.id) + 100}.PDF` };
     f.histories.set(e.symbol, { announcements: [summary, a], hasMore: false, totalAnnouncement: 2, totalRecordNum: 2 });
     const source = "https://static.cninfo.com.cn/" + a.adjunctUrl;
-    f.pdfs.set(source, fixturePdf([[`证券代码：${e.code} 证券简称：${e.name}`, `${e.name}股份有限公司`, a.announcementTitle, "本公司董事会及全体董事保证本报告内容不存在虚假记载、误导性陈述。"], ["本公司的客户需求及经营成本受到宏观经济和供应链变化的影响，融资条件可能影响客户的投资计划与订单兑现。", "但是，本公司主要债务采用固定利率，市场利率变化对这部分债务的利息支出没有直接影响，订单的实际变化仍具有不确定性。"]]));
+    f.pdfs.set(source, fixturePdf([[`证券代码：${e.code} 证券简称：${e.name}`, `${e.name}股份有限公司`, a.announcementTitle, "本公司董事会及全体董事保证本报告内容的真实、准确、完整，不存在虚假记载、误导性陈述。"], ["本公司的客户需求及经营成本受到宏观经济和供应链变化的影响，融资条件可能影响客户的投资计划与订单兑现。", "但是，本公司主要债务采用固定利率，市场利率变化对这部分债务的利息支出没有直接影响，订单的实际变化仍具有不确定性。"]]));
     f.metadata.set(e.id, { announcement: a, fileUrl: source });
   }
   f.reader = (url, options) => readExternalSource(url, { ...options, resolver: async () => [{ address: "8.8.8.8", family: 4 }], requester: async (value, destination, request) => {
@@ -64,6 +64,20 @@ test("current registry renaming retains each historical record and PDF's own iss
   const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
   assert.equal(book.filings.length, 4); assert.deepEqual(book.gaps, []);
   assert.ok(book.sources[0].title.startsWith(f.entities[0].name + "："));
+});
+
+test("issuer-bound Chinese company sentences are independently checked without borrowing ownership from a footer", async () => {
+  const f = fixture(), e = f.entities[0], url = "https://static.cninfo.com.cn/finalpage/" + date + "/" + e.id + ".PDF";
+  const quote = "公司的客户需求和经营成本受到宏观经济与供应链变化的影响，客户的融资条件可能影响其投资计划及订单兑现，实际变化仍具有不确定性。";
+  f.pdfs.set(url, fixturePdf([[`证券代码：${e.code} 证券简称：${e.name}`, `${e.name}股份有限公司`, "2026年半年度报告", "本公司董事会保证报告内容的真实、准确、完整。"], quote.match(/[^，]+，|[^，]+$/gu)]));
+  const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
+  assert.equal(book.sources.length, 4, JSON.stringify({ gaps: book.gaps, failures: book.failures }));
+  const ledger = await verifyResearchSources([{ sources: book.sources, alternatives: [] }], f.envelope, { reader: companyBackgroundSourceReader(book) });
+  assert.equal(ledger.sources.length, 4, JSON.stringify(ledger.rejected));
+  const original = await companyBackgroundSourceReader(book)(url), candidate = book.sources.find(s => s.originalUrl === url);
+  const bad = "本公司将金融资产划分为以摊余成本计量的金融资产，初始确认金额按实际利率法计算，融资成分按会计准则处理。";
+  const forged = { ...candidate, supportingExcerpt: bad };
+  assert.throws(() => verifiedBackgroundExposureSubjects(forged, original, f.envelope), /自身经济因素及影响/);
 });
 
 test("native full legal-name title prefixes bind to the same name printed in the PDF, and corrected-period labels remain eligible", async () => {
@@ -134,4 +148,23 @@ test("Chinese extraction preserves qualifications and refuses accounting, generi
   assert.deepEqual(companyExposureExcerpts(text, { language: "zh", issuerName: "样例公司" }), [text]);
   for (const changed of [text.replaceAll("本公司", "其他企业"), "本公司董事会保证报告不存在虚假记载，对风险说明承担责任。", "本公司按会计准则对金融资产和融资租赁的公允价值计量，使用假设利率估计财务报表附注中的相关会计项目。", text + " 但是" + "风险".repeat(350) + "。"])
     assert.deepEqual(companyExposureExcerpts(changed, { language: "zh", issuerName: "样例公司" }), []);
+});
+
+test("native running footers, accounting choices and unrelated ownership cannot establish an economic exposure", () => {
+  const issuerName = "样例公司股份有限公司";
+  for (const quote of [
+    "本公司根据合同现金流量特征，将金融资产划分为以摊余成本计量的金融资产，融资成分按实际利率法处理。",
+    "样例公司股份有限公司2026 年半年度报告全文 73 客户企业面临需求下滑及经营成本上升风险，可能降低资本支出。",
+    "客户公司的产品需求和综合毛利率受原材料成本、市场竞争及供应链波动影响，实际盈利还取决于产品组合和客户采购计划。",
+    "本公司已完成工商注册手续。其他企业的客户需求和经营成本受宏观变化影响，融资条件可能使客户推迟资本支出。",
+    "本公司计划不派发现金红利。本报告的前瞻性陈述不构成公司对投资者的实质承诺，敬请注意投资风险。",
+    "本公司在评估信用风险是否增加时，考虑债务人的经营成果和监管环境变化以及相关抵押物价值，此类因素用于确定预期的还款概率。",
+    "成本法转权益法：本公司因处置部分权益性投资丧失对投资单位的控制，剩余股权具有重大影响的，按照权益法核算。",
+  ]) {
+    assert.equal(hasChineseCompanyEconomicExposure(quote, { issuerName }), false);
+    assert.deepEqual(companyExposureExcerpts(quote, { language: "zh", issuerName }), []);
+  }
+  const text = "公司的产品需求和综合毛利率受原材料成本、市场竞争及供应链波动影响，实际盈利还取决于产品组合和客户采购计划，目前业务效果仍具有一定不确定性。";
+  assert.equal(hasChineseCompanyEconomicExposure(text, { issuerName }), true);
+  assert.deepEqual(companyExposureExcerpts(text, { language: "zh", issuerName }), [text]);
 });

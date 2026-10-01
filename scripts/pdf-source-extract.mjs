@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDocument, OPS, version } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { verifiedPdfListMarker } from "./pdf-source-glyphs.mjs";
+import { verifiedPdfListMarker, verifiedPdfFormMarker, verifiedPdfFontHintWarning } from "./pdf-source-glyphs.mjs";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT = 1_000_000;
@@ -32,7 +32,7 @@ try {
   for (let number = 1; number <= document.numPages; number++) {
     const page = await document.getPage(number);
     const operators = await page.getOperatorList();
-    if (operators.fnArray.some(operator => imageOperators.has(operator))) throw new Error(`Page ${number} contains raster content outside the verifiable text layer`);
+    const rasterOperationCount = operators.fnArray.filter(operator => imageOperators.has(operator)).length;
     const content = await page.getTextContent({ disableNormalization: true });
     const items = content.items.filter(item => typeof item.str === "string");
     const listMarkers = [];
@@ -45,8 +45,9 @@ try {
           following.push(next.str);
           if (next.hasEOL) break;
         }
-        if (!verifiedPdfListMarker(item, font, line, following.join(""))) throw new Error(`Page ${number} has an unverifiable private-use character`);
-        listMarkers.push({ itemIndex: index, originalCharacter: item.str, fontName: font.name });
+        const list = verifiedPdfListMarker(item, font, line, following.join("")), form = verifiedPdfFormMarker(item, font, line, following.join(""));
+        if (!list && !form) throw new Error(`Page ${number} has an unverifiable private-use character`);
+        listMarkers.push({ itemIndex: index, originalCharacter: item.str, fontName: font.name, kind: list ? "list" : "form_choice" });
       }
       line = item.hasEOL ? "" : line + item.str;
     }
@@ -54,9 +55,9 @@ try {
     if (!text || /[\u0000\uFFFD]/u.test(text)) throw new Error(`Page ${number} has no verifiable complete text layer`);
     textLength += text.length;
     if (textLength > MAX_TEXT) throw new Error("PDF text limit exceeded");
-    pages.push({ number, text, textItemCount: items.length, ...(listMarkers.length ? { listMarkers } : {}) });
+    pages.push({ number, text, textItemCount: items.length, rasterOperationCount, ...(listMarkers.length ? { listMarkers } : {}) });
     page.cleanup();
   }
-  if (warnings.length) throw new Error("PDF parsing reported a warning or recovery");
-  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v2`, pageCount: document.numPages, pages, text: pages.map(page => page.text).join("\n\n") }));
+  if (warnings.some(warning => !verifiedPdfFontHintWarning(warning)) || warnings.length > 256) throw new Error("PDF parsing reported a warning or recovery outside verified font hints");
+  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v3`, pageCount: document.numPages, pages, fontHintWarnings: warnings, text: pages.map(page => page.text).join("\n\n") }));
 } finally { await task.destroy(); }

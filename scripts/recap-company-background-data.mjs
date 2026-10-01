@@ -7,7 +7,7 @@ import { secFilingIssuerIdentity, secCompanySubmissionsUrl, secCompanySubmission
 import { companyExposureExcerpts } from "./company-exposure-excerpts.mjs";
 import { collectCnCompanyBackgroundData, validateCnCompanyBackgroundData } from "./cn-company-background-data.mjs";
 
-export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v3";
+export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v4";
 const REGISTRY = "https://www.sec.gov/files/company_tickers.json";
 const digest = body => createHash("sha256").update(body).digest("hex");
 const ANNUAL = new Set(["10-K", "20-F", "40-F"]);

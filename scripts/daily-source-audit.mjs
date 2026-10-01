@@ -1238,7 +1238,7 @@ export async function readExternalSource(
         publishedAtCandidates,
         publishedDateCandidates: pdfDocument?.publishedDateCandidates ?? authorityDocument?.publishedDateCandidates ?? sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
         articleProvenance: authorityDocument?.articleProvenance ?? (/(?:html|xhtml)/iu.test(contentType) ? sourceArticleProvenance(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null),
-        ...(includeRaw ? { rawBody: response.body, metadataReceipts } : {}),
+        ...(includeRaw || pdfDocument ? { rawBody: response.body, metadataReceipts } : {}),
         ...(pdfDocument ? { pdfDocument } : {}),
       };
     }

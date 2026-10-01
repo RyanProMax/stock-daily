@@ -3,6 +3,7 @@ import { CNINFO_REGISTRY_URL, CNINFO_HISTORY_URL, cninfoRegistryIdentity, cninfo
 import { companyExposureExcerpts } from "./company-exposure-excerpts.mjs";
 import { stableHash } from "./daily-workflow-core.mjs";
 import { openedSourceFromSnapshot, snapshotFromOpenedSource } from "./evidence-source-snapshots.mjs";
+import { pdfTextExcerptChecker } from "./pdf-text-evidence.mjs";
 
 const digest = body => createHash("sha256").update(body).digest("hex");
 const targets = plan => [...new Map(plan.anomalies.filter(item => item.kind === "ai_layer").flatMap(anomaly => anomaly.observation.constituents.map(item => [item.symbol, { symbol: item.symbol, anomaly }]))).values()];
@@ -36,7 +37,8 @@ function derive(book, envelope, plan, cache = new Map()) {
       const publication = opened.pdfDocument, record = opened.metadataReceipts?.[0];
       const metadata = record && JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.rawBody));
       if (opened.status !== 200 || !/^application\/pdf(?:;|$)/iu.test(opened.contentType) || publication?.issuer?.symbol !== filing.symbol || publication.announcementId !== selected.announcementId || publication.title !== selected.title || publication.issuer.name !== selected.name || metadata?.announcement?.orgId !== entity.orgId || publication.publishedAtCandidates.length || stableHash(publication.publishedDateCandidates) !== stableHash([selected.publishedAt])) throw new Error("定期报告的原始发行主体、机构、日期、标题或文件身份不一致");
-      original = { opened, quotes: companyExposureExcerpts(opened.text, { language: "zh", issuerName: publication.issuer.name }) };
+      const checkExcerpt = pdfTextExcerptChecker(opened);
+      original = { opened, quotes: companyExposureExcerpts(opened.text, { language: "zh", issuerName: publication.issuer.issuerName, acceptExcerpt: quote => { try { checkExcerpt(quote); return true; } catch { return false; } } }) };
       cache.set(hash, original);
     }
     filings.set(filing.symbol, original);

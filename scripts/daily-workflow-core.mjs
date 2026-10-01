@@ -17,11 +17,13 @@ import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition, isChinaPmiArticle } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
+import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v54";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v55";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
-export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v4";
-export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v5";
+export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v3";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1458,11 +1460,12 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
     const constituents = (metric.constituents ?? []).filter(item => metric.symbol === target || item.symbol === target);
     const issuer = secFilingIssuerIdentity(opened);
     const pdfIssuer = /^application\/pdf(?:;|$)/iu.test(opened.contentType ?? "") ? opened.pdfDocument?.issuer : null;
+    if (pdfIssuer && !hasChineseCompanyEconomicExposure(source.supportingExcerpt, { issuerName: pdfIssuer.issuerName })) throw new Error("公司背景引文缺少同句明确的自身经济因素及影响；页眉、会计分类或通用声明不能充当经营敞口");
     const label = verifiedFirstPartyIssuerLabel(opened.finalUrl);
     const own = label && normalizedEvidenceText(label);
     subjects = constituents.filter(item => pdfIssuer ? pdfIssuer.symbol === item.symbol : issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
     if (!issuer && !pdfIssuer && !label && !authority) throw new Error("公司背景原文未证明发行主体，不能将被提及的客户或竞争对手当作披露主体");
-    if ((issuer || pdfIssuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
+    if (!pdfIssuer && (issuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
   } else {
     const fund = expectedScope === "sector" && secArchiveIdentity(opened.finalUrl)?.cik === "1064641" && normalizedEvidenceText(opened.text).includes(normalizedEvidenceText(transmissionConfig.issuer)) && source.supportingExcerpt.includes(`${transmissionConfig.sectors[metric.symbol]} Sector Risk:`);
     if (!authority && !fund) throw new Error("发行人或单家公司披露不能自动扩大为整个行业或 AI 环节的背景机制");
@@ -1473,7 +1476,7 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
     subjects = bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, metric.symbol) ? [metric.symbol] : [];
   }
   if (!subjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
-  if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|borrowing|credit markets?|capital markets?|customer spending|economic conditions?|macroeconomic|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+  if (!/需求|供给|供应|成本|利率|融资|监管|汇率|宏观|竞争|风险|\b(?:demand|supply|costs?|rates?|financing|borrowing|credit markets?|capital markets?|customer spending|economic conditions?|macroeconomic|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
   return subjects;
 }
 
@@ -1506,7 +1509,7 @@ export async function verifyResearchSources(
         const cached = verifiedCache.get(candidateHash);
         const candidateUrl = new URL(candidate.originalUrl);
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
-        const cachedPdfIssuerValid = (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
+        const cachedPdfIssuerValid = (!(pdfUrl || /^application\/pdf(?:;|$)/iu.test(cached?.contentType ?? "")) || cached?.pdfTextEvidence?.version === PDF_TEXT_EVIDENCE_VERSION) && (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
         const cachedPmiValid = !isChinaPmiArticle(candidate.originalUrl) || (cached?.surveyChecked === true && cached.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION);
         const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION;
         if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
@@ -1514,7 +1517,7 @@ export async function verifyResearchSources(
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const mofRecord = mofDocumentIdentity(opened.finalUrl) && Buffer.isBuffer(opened.rawBody) ? mofDocumentRecord(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
         if (mofDocumentIdentity(opened.finalUrl) && (!mofRecord || stableHash(opened.text) !== stableHash(mofRecord.text))) throw new Error("财政部证据缺少已绑定的原始正文记录");
@@ -1561,6 +1564,7 @@ export async function verifyResearchSources(
         ) {
           throw new Error("支持段落无法在来源正文中定位");
         }
+        const pdfTextEvidence = verifiedPdfTextExcerpt(candidate, opened);
         let forecastDefinition;
         const surveyRecord = isChinaPmiArticle(opened.finalUrl) && Buffer.isBuffer(opened.rawBody) ? chinaPmiDocument(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
         const surveyDefinition = chinaPmiSurveyDefinition(surveyRecord);
@@ -1628,6 +1632,7 @@ export async function verifyResearchSources(
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
+            ...(pdfTextEvidence ? { pdfTextEvidence } : {}),
             ...((companySubjects.length || backgroundSubjects?.length) && opened.pdfDocument?.issuer ? { pdfIssuerEvidenceVersion: PDF_ISSUER_EVIDENCE_VERSION } : {}),
             ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
             ...(surveyDefinition ? { surveyDefinition, surveyChecked: true, useLimitation: surveyDefinition.limitation } : {}),

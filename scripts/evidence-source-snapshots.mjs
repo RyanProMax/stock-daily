@@ -17,6 +17,7 @@ import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing
 import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
+import { verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -165,6 +166,7 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);
     if (quote.length < 20 || stableHash(quote) !== source.excerptHash || !supportingExcerptMatches(body, quote, source.supportingExcerpt)) throw new Error("证据引文未由冻结原文证明");
+    if (stableHash(source.pdfTextEvidence ?? null) !== stableHash(verifiedPdfTextExcerpt(source, original))) throw new Error("PDF 引文页次、相邻限定内容及未核验图片范围未由冻结原文重建");
     const publication = original.articleProvenance?.publication;
     if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
     if (source.provenanceChecked || source.reportingOrigin) {
