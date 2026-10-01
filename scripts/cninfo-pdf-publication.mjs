@@ -12,7 +12,7 @@ export function cninfoPdfIdentity(body, source) {
   const names = [...header.matchAll(/(?:证券|股票)简称\s*[:：]\s*([^\s：:]{2,20})/gu)];
   if (codes.length !== 1 || names.length !== 1) return null;
   const code = codes[0][1], flag = /^(?:000|001|002|003|300|301)/u.test(code) ? "true" : /^(?:600|601|603|605|688|689)/u.test(code) ? "false" : null;
-  const lines = firstPage.split("\n"), issuerIndex = lines.findIndex(line => /^[^：:]{3,70}股份有限公司$/u.test(line));
+  const lines = firstPage.split("\n"), issuerIndex = lines.findIndex(line => /^[^：:]{3,70}(?:股份)?有限公司$/u.test(line));
   if (!flag || issuerIndex < 0 || issuerIndex > 3) return null;
   const declaration = lines.findIndex((line, index) => index > issuerIndex && line.startsWith("本公司董事会"));
   if (declaration < 0 || declaration > issuerIndex + 8) return null;
@@ -32,7 +32,7 @@ export function cninfoPdfPublication(body, receipt, source) {
   try { fileUrl = new URL(value.fileUrl); } catch { return null; }
   if (!["http:", "https:"].includes(fileUrl.protocol) || fileUrl.hostname !== "static.cninfo.com.cn" || fileUrl.pathname !== `/${a.adjunctUrl}` || fileUrl.username || fileUrl.password || fileUrl.port || fileUrl.search || fileUrl.hash) return null;
   const title = String(a.announcementTitle ?? "");
-  if (key(title) !== key(identity.name + identity.title)) return null;
+  if (![identity.name + identity.title, identity.name + "：" + identity.title].some(expected => key(title) === key(expected))) return null;
   const date = new Date(a.announcementTime);
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2199) return null;
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map(part => [part.type, part.value]));

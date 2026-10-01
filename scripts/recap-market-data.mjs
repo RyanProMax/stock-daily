@@ -11,6 +11,39 @@ const median = values => {
 const percent = value => Number(value.toFixed(6));
 const dateInMarket = (time, market) => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: market === "CN" ? "Asia/Shanghai" : "America/New_York" }).format(new Date(time));
 
+function providerAdjustmentReview(result, url, request, envelope, rows) {
+  const dates = (result.timestamp ?? []).map(time => dateInMarket(time * 1000, envelope.market));
+  const previous = rows.at(-2), latest = rows.at(-1);
+  const adjusted = result.indicators?.adjclose?.[0]?.adjclose;
+  const before = adjusted?.[dates.indexOf(previous.date)], after = adjusted?.[dates.indexOf(latest.date)];
+  const comparable = typeof before === "number" && Number.isFinite(before) && before > 0 && typeof after === "number" && Number.isFinite(after) && after > 0;
+  const factorChanged = comparable && Math.abs((after / latest.close) / (before / previous.close) - 1) > 0.00001;
+  const events = [];
+  for (const [type, records] of Object.entries(result.events ?? {})) {
+    if (!["dividends", "splits"].includes(type)) continue;
+    if (!records || Array.isArray(records) || typeof records !== "object" || Object.keys(records).length > 128) throw new Error(request.symbol + " 公司行动线索结构无效");
+    for (const [key, event] of Object.entries(records)) {
+      if (!event || !Number.isSafeInteger(event.date) || String(event.date) !== key || event.date < 946684800 || event.date > 7258118400) throw new Error(request.symbol + " 公司行动线索日期无效");
+      const date = dateInMarket(event.date * 1000, envelope.market);
+      if (date !== envelope.marketAsOf) continue;
+      if (type === "dividends") {
+        if (typeof event.amount !== "number" || !Number.isFinite(event.amount) || event.amount <= 0 || !/^[A-Z]{3}$/u.test(result.meta.currency ?? "")) throw new Error(request.symbol + " 分红线索金额或币种无效");
+        events.push({ type: "cash_dividend", effectiveDate: date, amount: event.amount, currency: result.meta.currency });
+      } else {
+        if (![event.numerator, event.denominator].every(n => Number.isSafeInteger(n) && n > 0) || event.splitRatio !== `${event.numerator}:${event.denominator}`) throw new Error(request.symbol + " 拆股线索比例无效");
+        events.push({ type: "stock_split", effectiveDate: date, numerator: event.numerator, denominator: event.denominator });
+      }
+    }
+  }
+  return {
+    status: factorChanged || events.length ? "requires_primary_verification" : comparable ? "no_provider_adjustment_detected" : "unavailable",
+    adjustmentFactorChanged: comparable ? factorChanged : null,
+    eventRequest: ["div", "splits"].every(value => (url.searchParams.get("events") ?? "").split(",").includes(value)),
+    leads: events, factualAuthority: false,
+    limitation: "Provider adjustments and action dates are discovery leads. Verify the issuer's exact announcement, share class, currency, amount and effective date before explaining the gap or close. Their absence does not prove that no action occurred. Never replace announcement time with the effective date, infer a total investor return, or extend one company's action to a sector.",
+  };
+}
+
 export function tradingRequests(envelope) {
   const benchmark = envelope.markets.find(item => item.symbol === (envelope.market === "CN" ? "SSE" : "SPX"));
   if (!benchmark) throw new Error("复盘缺少基准行情");
@@ -26,11 +59,12 @@ export function tradingRequests(envelope) {
 export function parseTradingSnapshot(snapshot, request, envelope) {
   const url = new URL(snapshot.url);
   if (url.protocol !== "https:" || !Number.isFinite(Date.parse(snapshot.fetchedAt)) || Date.parse(snapshot.fetchedAt) < Date.parse(envelope.session.windowEnd) || snapshot.payloadHash !== stableHash(snapshot.payload)) throw new Error(request.symbol + " 行情原文与来源不匹配或尚未收盘");
-  let inputRows, source, sourceLabel, currency = null;
+  let inputRows, source, sourceLabel, currency = null, yahooResult = null;
   if (["query1.finance.yahoo.com", "query2.finance.yahoo.com"].includes(url.hostname) && decodeURIComponent(url.pathname) === "/v8/finance/chart/" + request.quoteSymbol && url.searchParams.get("interval") === "1d") {
     const result = snapshot.payload?.chart?.result?.[0];
     if (result?.meta?.symbol !== request.quoteSymbol) throw new Error(request.symbol + " 返回标的不一致");
     const quote = result.indicators?.quote?.[0];
+    yahooResult = result;
     inputRows = (result.timestamp ?? []).map((timestamp, index) => ({
       date: dateInMarket(timestamp * 1000, envelope.market),
       open: quote?.open?.[index], high: quote?.high?.[index], low: quote?.low?.[index], close: quote?.close?.[index], volume: quote?.volume?.[index],
@@ -72,6 +106,8 @@ export function parseTradingSnapshot(snapshot, request, envelope) {
     symbol: request.symbol, asOf: latest.date,
     source, sourceLabel, currency,
     sourceHash: snapshot.payloadHash,
+    returnBasis: "Provider quote.close ratio: current close divided by previous-session close minus one. This is distinct from the provider's adjusted-close series and does not establish the exchange's ex-rights reference price, total investor return or economic cause.",
+    ...(yahooResult ? { adjustmentReview: providerAdjustmentReview(yahooResult, url, request, envelope, rows) } : {}),
     verifiedAt: snapshot.fetchedAt,
     previousClose: previous.close, open: latest.open, high: latest.high, low: latest.low, close: latest.close,
     closingReturn: percent(closingReturn), intradayRange: percent(intradayRange),
@@ -123,7 +159,7 @@ export async function collectRecapTradingData(envelope, { fetchJson = fetchPaylo
       let failure;
       const urls = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"].map(host => {
         const url = new URL("https://" + host + "/v8/finance/chart/" + encodeURIComponent(request.quoteSymbol));
-        url.search = new URLSearchParams({ period1: String(Math.floor((end - 65 * DAY) / 1000)), period2: String(Math.floor(end / 1000)), interval: "1d" });
+        url.search = new URLSearchParams({ period1: String(Math.floor((end - 65 * DAY) / 1000)), period2: String(Math.floor(end / 1000)), interval: "1d", events: "div,splits" });
         return url;
       });
       if (envelope.market === "CN" && /^\d{6}$/u.test(request.symbol)) {

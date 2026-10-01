@@ -68,7 +68,7 @@ export function recapObservations(envelope, tradingData = null) {
       representatives,
       trading: trading.get(target.symbol) ?? null,
       representativeTrading: representatives.map(item => trading.get(item.symbol)).filter(Boolean),
-      limitations: ["Closing returns establish neither net fund flow nor weighted sector contribution.", "Representative dispersion is not whole-sector breadth and does not identify a news catalyst.", "Intraday range and volume comparisons are established only for individual instruments with validated trading observations; synthetic AI basket range is unobserved."],
+      limitations: ["Closing returns establish neither net fund flow nor weighted sector contribution.", "Representative dispersion is not whole-sector breadth and does not identify a news catalyst.", "Intraday range and volume comparisons are established only for individual instruments with validated trading observations; synthetic AI basket range is unobserved.", "Provider adjustment flags and corporate-action leads require first-party verification; a dividend or share change can affect price comparisons without a corresponding business shock."],
     };
     if (target.benchmarkKind === "equal_weight_basket") {
       // Constituents are stored to two decimal places. Their average may
@@ -97,8 +97,9 @@ export function completeRecapPlan(envelope, tradingData = null) {
       const id = `recap-${stableHash(metric.symbol).slice(0, 12)}`;
       const name = envelope.market === "CN" ? metric.name : metric.nameEn ?? metric.name;
       const market = envelope.market === "CN" ? "A股" : "US";
+      const adjustmentTargets = new Set(observations.get(metric.symbol).representativeTrading.filter(item => item.adjustmentReview?.status === "requires_primary_verification").map(item => item.symbol));
       const movers = [...(metric.constituents ?? [])]
-        .sort((a, b) => Math.abs(returnValue(b.change, b.symbol)) - Math.abs(returnValue(a.change, a.symbol)) || a.symbol.localeCompare(b.symbol))
+        .sort((a, b) => Number(adjustmentTargets.has(b.symbol)) - Number(adjustmentTargets.has(a.symbol)) || Math.abs(returnValue(b.change, b.symbol)) - Math.abs(returnValue(a.change, a.symbol)) || a.symbol.localeCompare(b.symbol))
         .slice(0, 2);
       const companyNames = movers.map(item => envelope.market === "CN" ? item.name : item.nameEn ?? item.name).join(" ");
       const targetNames = `${name}${companyNames ? ` ${companyNames}` : ""}`;
@@ -114,7 +115,7 @@ export function completeRecapPlan(envelope, tradingData = null) {
           { id: `${id}-macro`, category: "macro_policy", claim: "A verified macro or policy shock affected this target through financing, demand or valuation." },
           { id: `${id}-offset`, category: "alternative", claim: "Opposing forces, constituent dispersion or documented positioning limited or amplified the net move." },
         ],
-        factQueries: [`${envelope.marketAsOf} ${market} ${targetNames} ${envelope.market === "CN" ? "收盘 新闻 公告" : "stocks news market close"}`],
+        factQueries: [`${envelope.marketAsOf} ${market} ${targetNames} ${envelope.market === "CN" ? "收盘 新闻 公告" : "stocks news market close"}${adjustmentTargets.size ? (envelope.market === "CN" ? " 分红 除权除息" : " dividend split ex-date") : ""}`],
         causalQueries: [`${envelope.marketAsOf} ${market} ${targetNames} ${envelope.market === "CN" ? "涨跌 原因 分化" : "stocks rose fell why sector"}`],
       };
     }),

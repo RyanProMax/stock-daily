@@ -14,6 +14,7 @@ import { isCalendarDate } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { auditRecapRateFactors } from "./recap-rate-factors.mjs";
 import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
+import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -163,6 +164,9 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     if (publication?.status === "verified" && (source.initialPublishedAt !== publication.initialPublishedAt || source.timeBasis !== publication.timeBasis)) throw new Error("首次发布与当前版本时间必须分别保留");
     const clock = isCalendarDate(source.publishedAt) ? source.sourceType === "first_party" && original.publishedDateCandidates.includes(source.publishedAt) : Number.isFinite(Date.parse(source.publishedAt)) && /(?:Z|[+-]\d{2}:\d{2})$/u.test(source.publishedAt ?? "") && clocks.some(value => !isCalendarDate(value) && Date.parse(value) === Date.parse(source.publishedAt));
     if (!clock) throw new Error("证据发布时间未由冻结原文或对应时间元数据证明");
+    if (source.kind === "corporate_action") {
+      if (!envelope || source.corporateActionChecked !== true || stableHash(source.corporateAction) !== stableHash(verifiedCurrentCorporateAction(source, original, envelope))) throw new Error("公司行动日期、金额和发行主体未由冻结一手原文重建");
+    } else if (source.corporateAction || source.corporateActionChecked) throw new Error("其他来源不能伪造公司行动核验记录");
     if (isGdpNowCommentary(source.originalUrl ?? source.url) || isGdpNowCommentary(source.url)) {
       const record = gdpNowCommentaryRecord(original.rawBody, source.url);
       if (!record || source.forecastChecked !== true || stableHash(source.forecastDefinition) !== stableHash(gdpNowForecastDefinition(record)) || source.role !== "facts" || !["official", "event"].includes(source.kind) || source.causalConnection || !supportingExcerptMatches(normalizedEvidenceText(record.paragraph), quote, source.supportingExcerpt)) throw new Error("GDPNow 模型定义、最新条目和引文未由冻结原文重建");

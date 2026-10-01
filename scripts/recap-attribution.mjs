@@ -3,6 +3,7 @@ import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
+import { isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 
 export const ATTRIBUTION_VERSION = "verified-recap-attribution-v2";
 const DIRECTIONS = ["positive", "negative", "flat"];
@@ -27,6 +28,7 @@ function verified(source) {
 function freshRoot(source, envelope, macroData = null) {
   if (source?.kind === "macro_observation") return verifiedRateFactor(source, macroData, envelope);
   if (!verified(source) || source.role !== "facts" || source.sourceType !== "first_party" || source.kind === "background") return false;
+  if (source.kind === "corporate_action") return isVerifiedCurrentCorporateAction(source, envelope);
   if (isCalendarDate(source.publishedAt)) return source.kind === "official" && officialReleaseDateInWindow(source.publishedAt, envelope);
   const time = Date.parse(source.publishedAt);
   return /(?:Z|[+-]\d{2}:\d{2})$/u.test(source.publishedAt ?? "") && Number.isFinite(time) && time >= Date.parse(envelope.session.windowStart) - 72 * 3_600_000 && time <= Date.parse(envelope.session.windowEnd);
@@ -73,6 +75,14 @@ function independent(root, report) {
 
 function chronology(root, report, envelope, confirmation = report) {
   if (root.kind === "macro_observation") return Boolean(reportedRateFactorMatch(root, report, envelope));
+  if (root.kind === "corporate_action") {
+    // An earlier verified calendar day establishes availability before this
+    // session without inventing an hour. The reaction must be on the actual
+    // effective day; an earlier prediction cannot confirm implementation.
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(report.publishedAt)).map(item => [item.type, item.value]));
+    if (!isVerifiedCurrentCorporateAction(root, envelope) || `${parts.year}-${parts.month}-${parts.day}` !== root.corporateAction.effectiveDate) return false;
+    if (backgroundEvidenceInWindow(root.publishedAt, envelope)) return true;
+  }
   if (isCalendarDate(root.publishedAt)) {
     // Keep unknown official publication hours unknown. A separate, verified
     // pre-close factual report can establish that this value was public.
@@ -93,7 +103,7 @@ export function recapAttributionCandidates(envelope, targets, ledger, { macroDat
     const mechanisms = ledger.sources.filter(source => background(source, envelope, target));
     const targetReports = reports.filter(source => directlyCovers(source, target.symbol));
     const targetRoots = roots.filter(source => directlyCovers(source, target.symbol));
-    const pairs = roots.flatMap(root => reports.filter(report => independent(root, report)).flatMap(report => {
+    const pairs = roots.flatMap(root => reports.filter(report => independent(root, report) && (root.kind !== "corporate_action" || constituentClaims(report, root.corporateAction.symbol))).flatMap(report => {
       if (chronology(root, report, envelope)) return [{ root: root.id, reaction: report.id, timingEvidenceIds: [] }];
       const eligible = confirmations.filter(confirmation => chronology(root, report, envelope, confirmation));
       return eligible.length ? [{ root: root.id, reaction: report.id, timingEvidenceIds: eligible.map(source => source.id) }] : [];
@@ -167,6 +177,7 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       if (!freshRoot(root, envelope, macroData)) throw new Error(`${target.symbol} 官方事件 ${root.id} 未核验、过时或缺少原始观测数据`);
       if (!reaction(report, envelope)) throw new Error(`${target.symbol} 反应引用 ${report.id} 的 role=${report.role} 不满足已核验的 causal 角色、原文因果或会话时间；请使用该目标 candidatePairs 中的 reaction 引用，否则保留 unresolved`);
       if (!independent(root, report) || !chronology(root, report, envelope, confirmation)) throw new Error(`${target.symbol} 官方事件、独立反应或时间先后不成立`);
+      if (root.kind === "corporate_action" && (subjects.length !== 1 || subjects[0] !== root.corporateAction.symbol || !constituentClaims(report, root.corporateAction.symbol))) throw new Error(`${target.symbol} 公司现金安排只能支持本公司的独立价格反应，不能扩大为行业或其他成分`);
       const observedFactor = root.kind === "macro_observation";
       if (observedFactor) {
         if (basis !== "inferred" || chain.timingEvidenceId !== null || !reportedRateFactorMatch(root, report, envelope)) throw new Error(`${target.symbol} 观测不能伪装为当日有发布时间的事件或确定归因`);

@@ -14,10 +14,11 @@ import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identi
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
+import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v49";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v51";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v2";
-export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v1";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v2";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
@@ -72,6 +73,16 @@ function text(value, label, min = 1, max = 2_000) {
   if (length < min || length > max) {
     throw new Error(`${label} 长度必须为 ${min}–${max}`);
   }
+  return result;
+}
+
+function evidenceExcerpt(value, label, min, max) {
+  if (typeof value !== "string") throw new Error(`${label} 缺失`);
+  // Line boundaries delimit copied PDF titles, rows and separated passages.
+  // Flattening them before source matching invents a single contiguous quote.
+  const result = value.normalize("NFC").replace(/\p{Cf}/gu, "").replace(/\r\n?|\u2028|\u2029/gu, "\n").replace(/[^\S\n]+/gu, " ").replace(/ *\n */gu, "\n").trim();
+  const length = [...result].length;
+  if (length < min || length > max) throw new Error(`${label} 长度必须为 ${min}–${max}`);
   return result;
 }
 
@@ -903,14 +914,14 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
         originalUrl: url,
         sourceLabel: text(source.sourceLabel, `${role}.sourceLabel`, 2, 80),
         title: text(source.title, `${role}.title`, 4, 220),
-        publishedAt: isCalendarDate(source.publishedAt) && role === "facts" && ["official", "background"].includes(source.kind) && verifiedExternalSourceType(url) === "first_party"
+        publishedAt: isCalendarDate(source.publishedAt) && role === "facts" && ["official", "background", "corporate_action"].includes(source.kind) && verifiedExternalSourceType(url) === "first_party"
           ? source.publishedAt : dateTime(source.publishedAt, `${role}.publishedAt`),
         kind: enumValue(
           source.kind,
-          ["official", "event", "market_wrap", ...(anomaly.researchPurpose === "comprehensive_recap" ? ["background"] : [])],
+          ["official", "event", "market_wrap", ...(anomaly.researchPurpose === "comprehensive_recap" ? ["background", "corporate_action"] : [])],
           `${role}.kind`,
         ),
-        supportingExcerpt: text(
+        supportingExcerpt: evidenceExcerpt(
           source.supportingExcerpt,
           `${role}.supportingExcerpt`,
           24,
@@ -942,6 +953,7 @@ export function validateResearchOutput(value, role, anomaly, envelope, { targete
         anomalyId: anomaly.id,
       };
       if (candidate.kind === "background" && (role !== "facts" || verifiedExternalSourceType(url) !== "first_party" || comparisons.length)) throw new Error("背景机制只能来自一手披露，不能产出本期财务对比或价格因果结论");
+      if (candidate.kind === "corporate_action" && (role !== "facts" || candidate.scope !== "company" || verifiedExternalSourceType(url) !== "first_party" || comparisons.length)) throw new Error("公司行动只能保留对应公司的一手实施公告安排");
       if (
         (role === "causal" && !candidate.causalConnection) ||
         (role === "facts" && candidate.causalConnection)
@@ -1059,10 +1071,10 @@ function sourceTimeInEvidenceWindow(source, envelope, value) {
   );
 }
 
-function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], sourceType) {
+function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], sourceType, corporateAction = null) {
   if (isCalendarDate(source.publishedAt)) {
-    if (source.role !== "facts" || !["official", "background"].includes(source.kind) || sourceType !== "first_party" || !dateCandidates.includes(source.publishedAt)) throw new Error(`${source.originalUrl} 日期级正式发布与一手原文不一致`);
-    if (!(source.kind === "background" ? backgroundEvidenceInWindow(source.publishedAt, envelope) : officialReleaseDateInWindow(source.publishedAt, envelope))) throw new Error(`${source.originalUrl} 正式发布日期不在交易窗口内或背景已过期`);
+    if (source.role !== "facts" || !["official", "background", "corporate_action"].includes(source.kind) || sourceType !== "first_party" || !dateCandidates.includes(source.publishedAt)) throw new Error(`${source.originalUrl} 日期级正式发布与一手原文不一致`);
+    if (!(source.kind === "corporate_action" ? corporateAction : source.kind === "background" ? backgroundEvidenceInWindow(source.publishedAt, envelope) : officialReleaseDateInWindow(source.publishedAt, envelope))) throw new Error(`${source.originalUrl} 正式发布日期不在交易窗口内或背景已过期`);
     return source.publishedAt;
   }
   if (candidates.length === 0) {
@@ -1490,7 +1502,7 @@ export async function verifyResearchSources(
         const candidateUrl = new URL(candidate.originalUrl);
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
         const cachedPdfIssuerValid = (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
-        if (cachedPdfIssuerValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cachedPdfIssuerValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1499,6 +1511,7 @@ export async function verifyResearchSources(
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         assertCurrentPdfIssuer(candidate, opened);
+        const corporateAction = verifiedCurrentCorporateAction(candidate, opened, envelope);
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publication = opened.articleProvenance?.publication;
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
@@ -1508,6 +1521,7 @@ export async function verifyResearchSources(
           publication?.status === "verified" ? [publication.currentVersionAt] : opened.publishedAtCandidates ?? [],
           opened.publishedDateCandidates ?? [],
           sourceType,
+          corporateAction,
         );
         const closingChecks = checkSessionIntegrity ? assertSessionClosingClaims(opened.text, envelope, publishedAt) : [];
         let normalizedCandidate = {
@@ -1602,6 +1616,7 @@ export async function verifyResearchSources(
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
             ...((companySubjects.length || backgroundSubjects?.length) && opened.pdfDocument?.issuer ? { pdfIssuerEvidenceVersion: PDF_ISSUER_EVIDENCE_VERSION } : {}),
             ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
+            ...(corporateAction ? { corporateAction, corporateActionChecked: true, useLimitation: corporateAction.limitation } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
             candidateHash,

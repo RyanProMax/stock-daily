@@ -1,6 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDocument, OPS, version } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { verifiedPdfListMarker } from "./pdf-source-glyphs.mjs";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT = 1_000_000;
@@ -34,13 +35,28 @@ try {
     if (operators.fnArray.some(operator => imageOperators.has(operator))) throw new Error(`Page ${number} contains raster content outside the verifiable text layer`);
     const content = await page.getTextContent({ disableNormalization: true });
     const items = content.items.filter(item => typeof item.str === "string");
+    const listMarkers = [];
+    let line = "";
+    for (const [index, item] of items.entries()) {
+      if (/[\uE000-\uF8FF]/u.test(item.str)) {
+        const font = page.commonObjs.get(item.fontName);
+        const following = [];
+        for (const next of items.slice(index + 1)) {
+          following.push(next.str);
+          if (next.hasEOL) break;
+        }
+        if (!verifiedPdfListMarker(item, font, line, following.join(""))) throw new Error(`Page ${number} has an unverifiable private-use character`);
+        listMarkers.push({ itemIndex: index, originalCharacter: item.str, fontName: font.name });
+      }
+      line = item.hasEOL ? "" : line + item.str;
+    }
     const text = items.map(item => item.str + (item.hasEOL ? "\n" : " ")).join("").normalize("NFC").replace(/[\t\f\v ]+/gu, " ").replace(/\s*\n\s*/gu, "\n").trim();
-    if (!text || /[\u0000\uFFFD\uE000-\uF8FF]/u.test(text)) throw new Error(`Page ${number} has no verifiable complete text layer`);
+    if (!text || /[\u0000\uFFFD]/u.test(text)) throw new Error(`Page ${number} has no verifiable complete text layer`);
     textLength += text.length;
     if (textLength > MAX_TEXT) throw new Error("PDF text limit exceeded");
-    pages.push({ number, text, textItemCount: items.length });
+    pages.push({ number, text, textItemCount: items.length, ...(listMarkers.length ? { listMarkers } : {}) });
     page.cleanup();
   }
   if (warnings.length) throw new Error("PDF parsing reported a warning or recovery");
-  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v1`, pageCount: document.numPages, pages, text: pages.map(page => page.text).join("\n\n") }));
+  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v2`, pageCount: document.numPages, pages, text: pages.map(page => page.text).join("\n\n") }));
 } finally { await task.destroy(); }

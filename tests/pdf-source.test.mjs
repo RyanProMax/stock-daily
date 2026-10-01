@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { pdfSourceRecord } from "../scripts/pdf-source.mjs";
+import { verifiedPdfListMarker } from "../scripts/pdf-source-glyphs.mjs";
 import { cninfoPdfIdentity, cninfoPdfPublication } from "../scripts/cninfo-pdf-publication.mjs";
 import { readExternalSource, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "../scripts/daily-source-audit.mjs";
 import { openedSourceFromSnapshot, snapshotFromOpenedSource, auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
-import { verifyResearchSources, stableHash } from "../scripts/daily-workflow-core.mjs";
+import { verifyResearchSources, stableHash, validateResearchOutput } from "../scripts/daily-workflow-core.mjs";
 import { recapFixture } from "./complete-recap-fixture.mjs";
+import { cninfoCashDividendSchedule, verifiedCurrentCorporateAction } from "../scripts/recap-corporate-actions.mjs";
+import { ATTRIBUTION_VERSION, recapAttributionCandidates, validateRecapAttribution } from "../scripts/recap-attribution.mjs";
+import { recapTargets } from "../scripts/complete-recap.mjs";
 
 const url = "https://static.cninfo.com.cn/finalpage/2026-08-20/1225586487.PDF";
 const lines = ["证券代码：600123 证券简称：样例医药 公告编号：临2026-154", "样例医药股份有限公司", "关于签署授权许可协议的公告", "本公司董事会及全体董事保证本公告内容不存在虚假记载、误导性陈述。", "样例医药股份有限公司的潜在许可交易最高可达26亿美元，包括3亿美元首付款及符合条件的里程碑付款。", "该协议需获得监管批准并满足其他交割条件，海外批准及里程碑付款具有不确定性。"];
@@ -41,6 +45,23 @@ async function opened(value = metadata(), options = {}) {
   return readExternalSource(url, { includeRaw: true, resolver: async () => [{ address: "8.8.8.8", family: 4 }], requester: async (request, _destination, requestOptions) => { if (request === url) { assert.equal(requestOptions.method, undefined); return { status: 200, contentType: "application/pdf", body: pdf }; } assert.equal(requestOptions.method, "POST"); assert.equal(request, receipt().finalUrl); return { status: 200, contentType: "application/json", body: receipt(value).rawBody }; }, ...options });
 }
 
+async function dividendFixture() {
+  const actionUrl = url.replace("2026-08-20", "2026-08-01"), f = recapFixture("CN");
+  const company = f.envelope.sectorPerformance.find(s => s.symbol === "932082").constituents[0];
+  company.symbol = "600123.SS"; company.name = "样例医药";
+  const table = ["股份类别 股权登记日 最后交易日 除权（息）日 现金红利发放日", "Ａ股 2026/8/20 － 2026/8/21 2026/8/21"];
+  const first = [lines[0], "样例医药有限公司", "2026年中期利润分派 A 股实施公告", lines[3], "重要内容提示：", "A 股中期每股现金红利人民币2.51元（含税）", ...table];
+  const body = fixturePdf([first, ["本次 A 股利润分配以公司 A 股股数1000股为基数，每股派发现金红利人民币2.51元（含税）。", ...table, "根据不同持股期限，股东最终实际所得和税款处理可能不同。"]]);
+  const value = metadata(); value.announcement.announcementTitle = "样例医药：2026年中期利润分派A股实施公告"; value.announcement.announcementTime = Date.parse("2026-08-01T00:00:00+08:00"); value.announcement.adjunctUrl = "finalpage/2026-08-01/1225586487.PDF"; value.fileUrl = "http://static.cninfo.com.cn/" + value.announcement.adjunctUrl;
+  const identity = cninfoPdfIdentity(body, actionUrl);
+  const original = await readExternalSource(actionUrl, { includeRaw: true, resolver: async () => [{ address: "8.8.8.8", family: 4 }], requester: async (request, _destination, options) => {
+    if (request === actionUrl) return { status: 200, contentType: "application/pdf", body };
+    assert.equal(request, identity.recordUrl); assert.equal(options.method, "POST"); return { status: 200, contentType: "application/json", body: Buffer.from(JSON.stringify(value)) };
+  } });
+  const source = { anomalyId: f.plan.anomalies.find(a => a.target === "932082").id, role: "facts", originalUrl: actionUrl, sourceLabel: "巨潮资讯网", title: value.announcement.announcementTitle, publishedAt: "2026-08-01", kind: "corporate_action", supportingExcerpt: first.join("\n"), facts: "公告安排 A 股中期每股现金红利人民币2.51元（含税），相关股权登记日、除息日和现金发放日由对应A股日期表载明。", scope: "company", targets: [company.symbol], hypothesisIds: [f.plan.anomalies.find(a => a.target === "932082").hypotheses[0].id], causalConnection: false, comparisons: [] };
+  return { f, original, source };
+}
+
 test("complete Unicode PDF pages and qualifications are derived again from original bytes", () => {
   const r = pdfSourceRecord(pdf);
   assert.equal(r.pageCount, 2); assert.equal(r.bodyHash, createHash("sha256").update(pdf).digest("hex"));
@@ -52,7 +73,38 @@ test("complete Unicode PDF pages and qualifications are derived again from origi
 });
 
 test("truncated, corrupted, empty or image-only PDF pages cannot masquerade as a complete text read", () => {
-  for (const body of [Buffer.from("fake PDF"), pdf.subarray(0, -10), Buffer.from(pdf.toString().replace("startxref\n", "startxref\n999999\n")), fixturePdf([lines, []]), fixturePdf([lines], [0])]) assert.throws(() => pdfSourceRecord(body));
+  for (const body of [Buffer.from("fake PDF"), pdf.subarray(0, -10), Buffer.from(pdf.toString().replace("startxref\n", "startxref\n999999\n")), fixturePdf([lines, []]), fixturePdf([lines], [0]), fixturePdf([lines.concat("\uF06C 每股分配比例")])]) assert.throws(() => pdfSourceRecord(body));
+});
+
+test("only an isolated embedded Wingdings list marker may retain its original private-use character", () => {
+  const item = { str: "\uF06C" }, font = { name: "QSZMTY+Wingdings-Regular", missingFile: false, isType3Font: false };
+  assert.equal(verifiedPdfListMarker(item, font, "", " 每股分配比例"), true);
+  for (const [glyph, face, prefix, following] of [
+    [{ str: "\uF06C正文" }, font, "", "每股分配比例"],
+    [{ str: "\uF06D" }, font, "", "每股分配比例"],
+    [item, { ...font, name: "QSZMTY+SimSun" }, "", "每股分配比例"],
+    [item, { ...font, missingFile: true }, "", "每股分配比例"],
+    [item, { ...font, isType3Font: true }, "", "每股分配比例"],
+    [item, font, "下降", "每股分配比例"],
+    [item, font, "", "\uF06C 每股分配比例"],
+    [item, font, "", " "],
+  ]) assert.equal(verifiedPdfListMarker(glyph, face, prefix, following), false);
+});
+
+test("a limited-company issuer still needs the sole native code, name and exact official announcement title", () => {
+  const body = fixturePdf([lines.map(line => line.replaceAll("股份有限公司", "有限公司"))]);
+  const r = receipt();
+  const p = cninfoPdfPublication(body, r, url);
+  assert.equal(p?.issuer.issuerName, "样例医药有限公司");
+  assert.equal(p.issuer.symbol, "600123.SS");
+  const separator = metadata(); separator.announcement.announcementTitle = "样例医药：" + cninfoPdfIdentity(body, url).title;
+  assert.equal(cninfoPdfPublication(body, receipt(separator), url)?.issuer.symbol, "600123.SS");
+  separator.announcement.announcementTitle = separator.announcement.announcementTitle.replace("：", "：：");
+  assert.equal(cninfoPdfPublication(body, receipt(separator), url), null);
+  const conflicting = metadata(); conflicting.announcement.secName = "其他公司";
+  assert.equal(cninfoPdfPublication(body, receipt(conflicting), url), null);
+  const duplicate = fixturePdf([[lines[0] + " 证券代码：600999", ...lines.slice(1).map(line => line.replaceAll("股份有限公司", "有限公司"))]]);
+  assert.equal(cninfoPdfIdentity(duplicate, url), null);
 });
 
 test("an original CNINFO record binds securities identity and retains only calendar publication precision", async () => {
@@ -113,4 +165,79 @@ test("company evidence derives the issuer ticker and cannot be expanded to a men
   assert.throws(()=>auditLedgerSourceSnapshots(rewrittenLedger,{version:SOURCE_SNAPSHOT_VERSION,snapshots:[snapshotFromOpenedSource(url,original)]},{envelope:f.envelope}),/不能改写为整个板块/);
   const hour = {...source,publishedAt:"2026-08-20T10:34:26Z"};
   assert.equal((await verifyResearchSources([{sources:[hour],alternatives:[]}], f.envelope, {reader: async () => original})).sources.length, 0);
+});
+
+test("an earlier cash schedule is admitted only for its independently derived current effective date", async () => {
+  const { f, original, source } = await dividendFixture();
+  const action = cninfoCashDividendSchedule(original.text);
+  assert.equal(action.perShareCash, 2.51); assert.equal(action.effectiveDate, f.envelope.marketAsOf);
+  const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: async () => original, checkSessionIntegrity: true });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
+  const accepted = ledger.sources[0];
+  assert.equal(accepted.publishedAt, "2026-08-01"); assert.equal(accepted.timePrecision, "date");
+  assert.equal(accepted.corporateAction.status, "announced_schedule");
+  assert.deepEqual(accepted.companySubjects, ["600123.SS"]);
+  const book = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [snapshotFromOpenedSource(source.originalUrl, original)] };
+  auditLedgerSourceSnapshots(ledger, book, { envelope: f.envelope });
+  const ordinary = await verifyResearchSources([{ sources: [{ ...source, kind: "official" }], alternatives: [] }], f.envelope, { reader: async () => original });
+  assert.equal(ordinary.sources.length, 0); assert.match(JSON.stringify(ordinary.rejected), /日期不在交易窗口/);
+  const fakeDate = await verifyResearchSources([{ sources: [{ ...source, publishedAt: "2026-08-21" }], alternatives: [] }], f.envelope, { reader: async () => original });
+  assert.equal(fakeDate.sources.length, 0);
+  for (const mutate of [s => s.corporateAction.perShareCash = 9, s => s.corporateAction.effectiveDate = "2026-08-20", s => s.corporateAction.status = "realized", s => { delete s.corporateActionChecked; }, s => { s.kind = "official"; }]) {
+    const changed = structuredClone(ledger); mutate(changed.sources[0]);
+    assert.throws(() => auditLedgerSourceSnapshots(changed, book, { envelope: f.envelope }), /公司行动/);
+  }
+});
+
+test("worker normalization retains the boundaries of exact separated PDF title and table fragments", async () => {
+  const { f, original, source } = await dividendFixture();
+  const anomaly = f.plan.anomalies.find(a => a.id === source.anomalyId);
+  const excerpt = source.supportingExcerpt.split("\n").filter(line => !line.startsWith("本公司董事会") && !line.startsWith("重要内容提示")).join("\r\n");
+  const result = { contractVersion: "stock-daily-evidence-worker-v1", role: "facts", market: "CN", anomalyId: anomaly.id, outcome: "found", queries: [anomaly.factQueries[0], `2026-08-21 A股 ${anomaly.title} 样例医药 中期现金分派 实施公告`], sources: [{ ...source, url: source.originalUrl, supportingExcerpt: excerpt }], alternatives: [] };
+  const normalized = validateResearchOutput(result, "facts", anomaly, f.envelope);
+  assert.equal(normalized.sources.length, 1, JSON.stringify(normalized.rejectedSources));
+  assert.ok(normalized.sources[0].supportingExcerpt.includes("\n"));
+  assert.ok(!normalized.sources[0].supportingExcerpt.includes("\r"));
+  const accepted = await verifyResearchSources([normalized], f.envelope, { reader: async () => original });
+  assert.equal(accepted.sources.length, 1, JSON.stringify(accepted.rejected));
+  const reordered = structuredClone(normalized);
+  reordered.sources[0].supportingExcerpt = reordered.sources[0].supportingExcerpt.split("\n").reverse().join("\n");
+  assert.equal((await verifyResearchSources([reordered], f.envelope, { reader: async () => original })).sources.length, 0);
+  const changed = structuredClone(normalized);
+  changed.sources[0].supportingExcerpt = changed.sources[0].supportingExcerpt.replace("2.51", "2.59");
+  assert.equal((await verifyResearchSources([changed], f.envelope, { reader: async () => original })).sources.length, 0);
+});
+
+test("conflicting cash terms, missing/reversed dates and H-share-only quotes cannot establish an A-share schedule", async () => {
+  const { f, original, source } = await dividendFixture();
+  for (const body of [original.text.replace(/每股派发现金红利人民币\s*2\.51/u, "每股派发现金红利人民币2.59"), original.text.replace(/2026\/8\/21/u, "2026/8/22"), original.text.replaceAll("2026/8/20", "2026/8/22"), original.text.replaceAll("2026/8/21", "2026/2/30"), original.text.replaceAll("Ａ股", "H股"), original.text.replace(/人民币\s*2\.51/u, "港元2.51")]) assert.equal(cninfoCashDividendSchedule(body), null);
+  for (const changed of [{ ...source, scope: "sector", targets: ["932082"] }, { ...source, targets: ["600999.SS"] }, { ...source, comparisons: [{}] }, { ...source, role: "causal", causalConnection: true }, { ...source, supportingExcerpt: "样例医药有限公司港股股东可选择每股2.9003港元（含税），有关红利安排根据适用条件实施。" }]) assert.throws(() => verifiedCurrentCorporateAction(changed, original, f.envelope));
+  assert.throws(() => verifiedCurrentCorporateAction(source, original, { ...f.envelope, marketAsOf: "2026-08-24" }), /本期生效日/);
+  const noIdentity = structuredClone(original); delete noIdentity.pdfDocument.issuer;
+  assert.throws(() => verifiedCurrentCorporateAction(source, noIdentity, f.envelope), /发行人/);
+});
+
+test("a current company schedule never supplies a sector cause or a prior-day prediction as the price reaction", async () => {
+  const { f, original, source } = await dividendFixture();
+  const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: async () => original });
+  const root = ledger.sources[0];
+  const report = { ...root, id: "independent-price-reaction", kind: "market_wrap", sourceType: "publisher", url: "https://www.stcn.com/article/detail/1234567.html", publishedAt: "2026-08-21T08:00:00Z", role: "causal", causalConnection: true, supportingExcerpt: "样例医药今日A股每股现金红利人民币2.51元的除息安排导致开盘价格产生缺口，此后价格出现反弹。" };
+  delete report.corporateAction; delete report.corporateActionChecked;
+  ledger.sources.push(report);
+  const target = recapTargets(f.envelope).find(t => t.symbol === "932082");
+  const candidate = recapAttributionCandidates(f.envelope, [target], ledger)[0];
+  assert.equal(candidate.reportedEligible, false); assert.equal(candidate.inferredIngredientsPresent, false);
+  assert.equal(candidate.constituents.find(c => c.symbol === "600123.SS").reportedPairs.length, 1);
+  const targets = recapTargets(f.envelope);
+  const assessment = { contractVersion: ATTRIBUTION_VERSION, market: "CN", marketAsOf: f.envelope.marketAsOf, entries: targets.map(t => ({ target: t.symbol, observedReturn: t.change, basis: "unresolved", chains: [], counterEvidenceIds: [], counterAssessment: "完整行业敞口和权重并未由公司现金分派公告确认；一家公司可能存在的价格机制不能代替整个行业的归因。" })) };
+  const entry = assessment.entries.find(e => e.target === "932082");
+  entry.basis = "inferred"; entry.chains = [{ rootEvidenceId: root.id, reactionEvidenceId: report.id, timingEvidenceId: null, subjectTargets: [], basis: "inferred", eventAnchors: ["每股现金红利人民币", "2.51元"], expectedDirection: "positive", mechanismEvidenceIds: [], transmission: "公司分派现金的安排只涉及本公司的股东和价格口径。该现金安排不能建立整个行业所有成分的经营、融资或估值变化。", limitations: "缺少完整行业成分敞口和对应权重，公告安排也没有确认现金已经到账。" }];
+  assert.throws(() => validateRecapAttribution(assessment, f.envelope, targets, ledger), /不能扩大为行业/);
+  report.scope = "sector"; report.targets = ["932082"];
+  assert.equal(recapAttributionCandidates(f.envelope, [target], ledger)[0].candidatePairs.length, 0);
+  report.scope = "company"; report.targets = ["600123.SS"];
+  report.publishedAt = "2026-08-20T08:00:00Z";
+  assert.equal(recapAttributionCandidates(f.envelope, [target], ledger)[0].candidatePairs.length, 0);
+  report.publishedAt = "2026-08-21T08:00:00Z"; root.corporateActionChecked = false;
+  assert.equal(recapAttributionCandidates(f.envelope, [target], ledger)[0].rootEvidenceIds.includes(root.id), false);
 });

@@ -4,6 +4,7 @@ import { stableHash } from "../scripts/daily-workflow-core.mjs";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { validateCompleteRecap } from "../scripts/complete-recap.mjs";
 import { collectRecapTradingData, parseTradingSnapshot, tradingRequests, validateRecapTradingData } from "../scripts/recap-market-data.mjs";
+import { completeRecapPlan } from "../scripts/complete-recap.mjs";
 
 function payload(symbol, close = 101, change = 1) {
   const dates = [];
@@ -55,6 +56,86 @@ test("future bars cannot enter the session or its volume baseline", () => {
   assert.equal(parseTradingSnapshot(f.snapshot, f.request, f.envelope).close, 101);
 });
 
+test("an adjusted-series discontinuity triggers issuer verification without replacing the quoted return", () => {
+  const f = fixture(), r = f.snapshot.payload.chart.result[0], closes = r.indicators.quote[0].close;
+  r.indicators.adjclose = [{ adjclose: closes.map((close, index) => index === closes.length - 1 ? close : close - 2.51) }];
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  const bar = parseTradingSnapshot(f.snapshot, f.request, f.envelope);
+  assert.equal(bar.closingReturn, 1); assert.equal(bar.openingGap, 0.25);
+  assert.equal(bar.adjustmentReview.status, "requires_primary_verification");
+  assert.equal(bar.adjustmentReview.factualAuthority, false);
+  assert.deepEqual(bar.adjustmentReview.leads, []);
+  assert.match(bar.returnBasis, /distinct from the provider's adjusted-close series/);
+  r.indicators.adjclose[0].adjclose = closes.map(close => close * 0.9);
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  assert.equal(parseTradingSnapshot(f.snapshot, f.request, f.envelope).adjustmentReview.status, "no_provider_adjustment_detected");
+  delete r.indicators.adjclose;
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  assert.equal(parseTradingSnapshot(f.snapshot, f.request, f.envelope).adjustmentReview.status, "unavailable");
+});
+
+test("cash dividend and split records retain effective dates and provider-only status, excluding future actions", () => {
+  const f = fixture(), r = f.snapshot.payload.chart.result[0], time = r.timestamp.at(-1), future = time + 3 * 86400;
+  f.snapshot.url += "&events=div%2Csplits";
+  r.meta.currency = "USD";
+  r.events = { dividends: { [time]: { date: time, amount: 2.51 }, [future]: { date: future, amount: 9.99 } }, splits: { [time]: { date: time, numerator: 2, denominator: 1, splitRatio: "2:1" } } };
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  const review = parseTradingSnapshot(f.snapshot, f.request, f.envelope).adjustmentReview;
+  assert.equal(review.status, "requires_primary_verification");
+  assert.equal(review.eventRequest, true); assert.equal(review.factualAuthority, false);
+  assert.deepEqual(review.leads, [
+    { type: "cash_dividend", effectiveDate: f.envelope.marketAsOf, amount: 2.51, currency: "USD" },
+    { type: "stock_split", effectiveDate: f.envelope.marketAsOf, numerator: 2, denominator: 1 },
+  ]);
+  assert.match(review.limitation, /Never replace announcement time with the effective date/);
+});
+
+test("malformed corporate-action dates, currency, amounts and split ratios cannot enter the observation", () => {
+  for (const mutate of [
+    r => r.events.dividends = [],
+    r => r.events.dividends[Object.keys(r.events.dividends)[0]].date += 1,
+    r => r.events.dividends[Object.keys(r.events.dividends)[0]].amount = -2.51,
+    r => r.meta.currency = "unknown",
+    r => r.events.splits[Object.keys(r.events.splits)[0]].splitRatio = "1:2",
+    r => r.events.splits[Object.keys(r.events.splits)[0]].denominator = 0,
+  ]) {
+    const f = fixture(), r = f.snapshot.payload.chart.result[0], time = r.timestamp.at(-1);
+    r.meta.currency = "USD"; r.events = { dividends: { [time]: { date: time, amount: 2.51 } }, splits: { [time]: { date: time, numerator: 2, denominator: 1, splitRatio: "2:1" } } };
+    mutate(r); f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+    assert.throws(() => parseTradingSnapshot(f.snapshot, f.request, f.envelope), /公司行动|分红|拆股/);
+  }
+});
+
+test("later adjusted bars cannot create a historical current-session adjustment flag", () => {
+  const f = fixture(), r = f.snapshot.payload.chart.result[0];
+  r.indicators.adjclose = [{ adjclose: [...r.indicators.quote[0].close] }];
+  r.timestamp.push(Date.parse("2026-08-24T13:30:00Z") / 1000);
+  for (const values of Object.values(r.indicators.quote[0])) values.push(100);
+  r.indicators.adjclose[0].adjclose.push(40);
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  const bar = parseTradingSnapshot(f.snapshot, f.request, f.envelope);
+  assert.equal(bar.adjustmentReview.status, "no_provider_adjustment_detected");
+  assert.equal(bar.closingReturn, 1);
+});
+
+test("a flat constituent with an adjustment flag remains in the factual search seed", async () => {
+  const f = recapFixture(), target = f.envelope.aiChainPerformance[0], company = target.constituents[3];
+  company.change = "0.00%";
+  const mean = target.constituents.reduce((sum, item) => sum + Number(item.change.slice(0, -1)), 0) / 4;
+  target.change = mean.toFixed(2) + "%";
+  const requests = tradingRequests(f.envelope);
+  const book = await collectRecapTradingData(f.envelope, { now: () => new Date("2026-08-21T22:00:00Z"), fetchJson: async url => {
+    const symbol = decodeURIComponent(new URL(url).pathname.split("/").at(-1)), request = requests.find(item => item.quoteSymbol === symbol);
+    const value = payload(symbol, request.expectedClose ?? 101, request.expectedReturn), result = value.chart.result[0];
+    if (request.symbol === company.symbol) result.indicators.adjclose = [{ adjclose: result.indicators.quote[0].close.map((close, index) => index === 23 ? close : close - 2.51) }];
+    return value;
+  } });
+  const anomaly = completeRecapPlan(f.envelope, book).anomalies.find(a => a.target === target.symbol);
+  assert.ok(anomaly.factQueries[0].includes(company.nameEn ?? company.name));
+  assert.match(anomaly.factQueries[0], /dividend split ex-date/);
+  assert.equal(anomaly.quantitativeObservations.representativeTrading.find(item => item.symbol === company.symbol).adjustmentReview.factualAuthority, false);
+});
+
 test("missing volume or fewer than twenty prior sessions never implies thin trading", () => {
   const f = fixture(), result = f.snapshot.payload.chart.result[0];
   result.indicators.quote[0].volume[23] = null;
@@ -89,6 +170,7 @@ test("collection freezes every unique requested quote; derived mutations and mis
   const f = recapFixture(), requests = tradingRequests(f.envelope);
   assert.equal(new Set(requests.map(item => item.symbol)).size, requests.length);
   const book = await collectRecapTradingData(f.envelope, { now: () => new Date("2026-08-21T22:00:00Z"), fetchJson: async url => {
+    assert.equal(new URL(url).searchParams.get("events"), "div,splits");
     const symbol = decodeURIComponent(new URL(url).pathname.split("/").at(-1));
     const request = requests.find(item => item.quoteSymbol === symbol);
     return payload(symbol, request.expectedClose ?? 101, request.expectedReturn);
@@ -96,6 +178,9 @@ test("collection freezes every unique requested quote; derived mutations and mis
   assert.equal(book.entries.length, requests.length);
   assert.equal(book.gaps.length, 0);
   assert.equal(validateRecapTradingData(book, f.envelope), book);
+  const actionTamper = structuredClone(book);
+  actionTamper.entries[0].adjustmentReview.status = "primary_verified";
+  assert.throws(() => validateRecapTradingData(actionTamper, f.envelope), /派生值/);
   book.entries[0].volumeVsPrior20Median = 10;
   assert.throws(() => validateRecapTradingData(book, f.envelope), /派生值/);
   const absent = await collectRecapTradingData(f.envelope, { fetchJson: async () => { throw new Error("unavailable"); } });

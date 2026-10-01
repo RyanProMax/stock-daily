@@ -38,6 +38,8 @@ Determine whether a reliable same-session source explicitly connects the candida
 
 # Constraints
 
+- Check any `adjustmentReview` in the supplied target/constituent trading observations. Provider adjustment flags and action leads require the independent issuer fact before causal use. A quote-close decline or opening gap can include an ex-dividend/reference-price effect; never attribute it wholly to selling pressure, deteriorating operations or a new announcement merely because the effective date matches this session. Keep quote-close ratios, exchange reference-price changes and total investor return distinct. An unverified action keeps that explanation unresolved.
+
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.
 - This limit counts individual query strings, not tool calls. A call containing four queries spends four slots and is invalid even when followed by only one more call. Put exactly one query in each search operation; do not batch extra publisher-specific queries. Copy every executed query in order. After two queries, open/click/find within their results or return limited/none; no further search is allowed.
 - Every returned source must set `causalConnection` to true.
