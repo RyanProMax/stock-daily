@@ -7,7 +7,7 @@ import {
 } from "./source-registry.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v32";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v34";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -669,7 +669,7 @@ function unitBoundComparisonValues(value, unit) {
   }
 }
 
-function hasUnitBoundComparisonValue(value, unit, expected) {
+export function hasUnitBoundComparisonValue(value, unit, expected) {
   return unitBoundComparisonValues(value, unit).some(
     (candidate) => Math.abs(candidate - expected) < 1e-9,
   );
@@ -1070,16 +1070,16 @@ function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], s
 }
 
 const FACT_NUMBER_MENTION =
-  /(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|%|％|百分点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
+  /(?<outerSign>[+-]?)(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|ppts?\b|pp\b|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|US dollars?\b|USD\b|%|％|个百分点|百分点|个基点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
   /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|drops?|dropped|dropping|slid|slides?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
   const scale = suffix.toLocaleLowerCase().replace(/^-/, "");
-  if (/percentage points?|百分点/iu.test(scale)) return "percentage_points";
+  if (/percentage points?|^ppts?$|^pp$|百分点/iu.test(scale)) return "percentage_points";
   if (/-?basis[ -]points?|bps?|基点/iu.test(scale)) return "basis_points";
   if (/^(?:%|％|percent)$/iu.test(scale)) return "percent";
   if (/亿美元/u.test(scale)) return "hundred_million_usd";
@@ -1087,7 +1087,7 @@ function numberMentionUnit(prefix = "", suffix = "") {
   if (/亿元|亿人民币/u.test(scale)) return "hundred_million_cny";
   if (/百万元/u.test(scale)) return "million_cny";
   if (/万元/u.test(scale)) return "ten_thousand_cny";
-  const isUsd = /^(?:us\$|\$|usd|us dollars?)$/iu.test(currency) || /美元/u.test(scale);
+  const isUsd = /^(?:us\$|\$|usd|us dollars?)$/iu.test(currency) || /美元|\b(?:US dollars?|USD)\b/iu.test(scale);
   const isCny = /^(?:¥|cny|rmb|人民币)$/iu.test(currency) || /人民币|元/u.test(scale);
   if (/^(?:b|billion(?:\s+(?:us\s+)?dollars?)?)$/iu.test(scale)) {
     return isUsd ? "billion_usd" : "billion";
@@ -1109,6 +1109,16 @@ function nearestDirection(value, start, end, rawNumber) {
   if (/^[年月日]/u.test(value.slice(end))) return null;
   if (rawNumber.startsWith("+")) return "positive";
   if (rawNumber.startsWith("-")) return "negative";
+  // In a quoted (signed bp change, yield level) pair, the sign belongs to
+  // that maturity's level. A later "new high" must not reverse it.
+  const pairStart = value.lastIndexOf("(", start);
+  if (pairStart >= 0 && value.indexOf(")", pairStart) >= end) {
+    const pair = value.slice(pairStart + 1, start);
+    const delta = /^\s*([+-])\d+(?:\.\d+)?\s*(?:bps?|basis points?)\s*,\s*$/iu.exec(pair);
+    if (delta) return delta[1] === "-" ? "negative" : "positive";
+  }
+  const attached = /^\s*(higher|lower|up|down)\b/iu.exec(value.slice(end));
+  if (attached) return /^(?:lower|down)$/iu.test(attached[1]) ? "negative" : "positive";
   const boundaries = [...value.matchAll(/[。.!！?？；;，,\n]/gu)]
     .filter(match => !(/[.,]/u.test(match[0]) && /\d/u.test(value[(match.index ?? 0) - 1] ?? "") && /\d/u.test(value[(match.index ?? 0) + 1] ?? "")))
     .map(match => match.index ?? 0);
@@ -1129,6 +1139,7 @@ function nearestDirection(value, start, end, rawNumber) {
   ]) {
     pattern.lastIndex = 0;
     for (const match of clause.matchAll(pattern)) {
+      if (match[0].toLowerCase() === "up" && /\b(?:gave|give|given)\s+$/iu.test(clause.slice(0, match.index))) continue;
       if (/^(?:超过|高于|低于)$/u.test(match[0]) && /^\s*(?:只|家|项|人)/u.test(value.slice(end)) && (match.index ?? 0) < numberOffset) continue;
       candidates.push({
         direction,
@@ -1141,20 +1152,73 @@ function nearestDirection(value, start, end, rawNumber) {
   return candidates[0]?.direction ?? null;
 }
 
+const CALENDAR_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const ENGLISH_ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+
+function canonicalMention(mention) {
+  const scales = { billion_usd: ["usd", 1e9], million_usd: ["usd", 1e6], thousand_usd: ["usd", 1e3], hundred_million_usd: ["usd", 1e8], ten_thousand_usd: ["usd", 1e4], hundred_million_cny: ["cny", 1e8], million_cny: ["cny", 1e6], ten_thousand_cny: ["cny", 1e4] };
+  const scale = scales[mention.unit];
+  if (scale) return { ...mention, unit: scale[0], number: Number((mention.number * scale[1]).toPrecision(15)) };
+  // Basis points and percentage points are changes, not yield levels. An
+  // unsigned magnitude after "fell" equals a negative signed change; this
+  // rule must never turn a positive dollar/EPS level into a negative one.
+  if (["basis_points", "percentage_points"].includes(mention.unit)) {
+    const amount = Math.abs(mention.number) * (mention.unit === "percentage_points" ? 100 : 1);
+    return { ...mention, unit: "rate_difference", number: Number((amount * (mention.direction === "negative" ? -1 : 1)).toPrecision(15)) };
+  }
+  return mention;
+}
+
 function numericMentions(value) {
-  const copy = String(value);
+  // Convert only explicitly bound mixed fractional durations, never bare
+  // fractions in ratios, dates, currencies or quoted financial amounts.
+  const copy = String(value).replace(/−/gu, "-").replace(/\b(\d+)-(\d+)\/(\d+)(?=-?years?\b)/giu, (raw, whole, numerator, denominator) => Number(denominator) > 0 && Number(numerator) < Number(denominator) ? String(Number(whole) + Number(numerator) / Number(denominator)) : raw);
+  const dates = [...copy.matchAll(/\b\d{4}-\d{2}-\d{2}\b/gu)].filter(match => isCalendarDate(match[0]));
   FACT_NUMBER_MENTION.lastIndex = 0;
-  return [...copy.matchAll(FACT_NUMBER_MENTION)].map((match) => ({
-    number: Number(match.groups.number.replaceAll(",", "")),
-    display: match[0].trim(),
-    unit: numberMentionUnit(match.groups.prefix, match.groups.suffix),
-    direction: nearestDirection(
-      copy,
-      match.index ?? 0,
-      (match.index ?? 0) + match[0].length,
-      match.groups.number,
-    ),
-  }));
+  const mentions = [...copy.matchAll(FACT_NUMBER_MENTION)].filter(match => !dates.some(date => match.index >= date.index && match.index < date.index + date[0].length)).map(match => {
+    const start = match.index ?? 0, end = start + match[0].length;
+    const before = copy.slice(Math.max(0, start - 45), start), after = copy.slice(end);
+    if (match.groups.outerSign && /^[+-]/u.test(match.groups.number)) throw new Error("事实数值带有重复符号");
+    // An explicit repeated-currency range separator is not a negative upper
+    // bound. A standalone -$0.25 remains a loss; other hyphens stay signed.
+    const currencyRange = match.groups.outerSign === "-" && match.groups.prefix && new RegExp(`(?:${escapeRegularExpression(match.groups.prefix)})\\s*\\d[\\d,]*(?:\\.\\d+)?\\s*$`, "iu").test(before);
+    const signedNumber = (currencyRange ? "" : match.groups.outerSign) + match.groups.number;
+    const number = Number(signedNumber.replaceAll(",", ""));
+    let unit = numberMentionUnit(match.groups.prefix, match.groups.suffix);
+    let direction = nearestDirection(copy, start, end, signedNumber);
+    if (unit === "number") {
+      if (/^月(?!份?的?期)/u.test(after)) unit = "calendar_month";
+      else if (number >= 1900 && number <= 2199 && (/^(?:财)?年/u.test(after) || /(?:\b(?:since|in|FY|fiscal year)\s*|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}[, ]*)?)$/iu.test(before))) unit = "calendar_year";
+      else if (/^日/u.test(after) || /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*$/u.test(before)) unit = "calendar_day";
+      else if (/^季度/u.test(after) && /第$/u.test(before) || /\bQ$/u.test(before)) unit = "quarter_number";
+      else if (/第$/u.test(before) || /^(?:st|nd|rd|th)\b/u.test(after)) unit = "ordinal_number";
+      else if (/^(?:-?years?\b|年(?:期|以来|低|高|纪录|新|半))/iu.test(after)) unit = "duration_years";
+      if (["calendar_month", "calendar_year", "calendar_day", "quarter_number", "ordinal_number", "duration_years"].includes(unit)) direction = null;
+    }
+    return canonicalMention({ number, display: match[0].trim(), unit, direction });
+  });
+  for (const date of dates) {
+    const [year, month, day] = date[0].split("-").map(Number);
+    for (const [number, unit] of [[year, "calendar_year"], [month, "calendar_month"], [day, "calendar_day"]]) mentions.push({ number, unit, direction: null, display: date[0] });
+  }
+  for (let i = 0; i < CALENDAR_MONTHS.length; i++) {
+    const name = CALENDAR_MONTHS[i];
+    // Capitalized May is also a modal at the start of a sentence. Only its
+    // calendar uses can substantiate a translated month.
+    const pattern = new RegExp(`\\b${name}\\b`, "gu");
+    for (const match of copy.matchAll(pattern)) {
+      if (name === "May" && !/\b(?:in|for|since|during|through|from|of|this|last|next|to)\s+$/iu.test(copy.slice(Math.max(0, match.index - 12), match.index)) && !/^\s+(?:\d|was\b|is\b|had\b|ended\b|reading\b|data\b|survey\b)/u.test(copy.slice(match.index + 3))) continue;
+      mentions.push({ number: i + 1, unit: "calendar_month", direction: null, display: name });
+    }
+  }
+  for (let i = 0; i < ENGLISH_ORDINALS.length; i++) {
+    for (const match of copy.matchAll(new RegExp(`\\b${ENGLISH_ORDINALS[i]}\\b`, "giu"))) {
+      const before = copy.slice(Math.max(0, match.index - 12), match.index), after = copy.slice(match.index + match[0].length);
+      if (/one[- ]$/iu.test(before) || !/^[ -]+(?:straight|consecutive|successive|months?|quarters?|years?|times?|place|largest|smallest|highest|lowest|rank|days?|weeks?|rounds?|release|company)\b/iu.test(after)) continue;
+      mentions.push({ number: i + 1, unit: /^[ -]+quarters?\b/iu.test(after) ? "quarter_number" : "ordinal_number", direction: null, display: match[0] });
+    }
+  }
+  return mentions;
 }
 
 export function assertFactsNumbersInExcerpt(source) {
@@ -1207,7 +1271,7 @@ export function assertMaterialEarningsContext(source, body) {
   }
 }
 
-function supportingExcerptMatches(normalizedBody, normalizedExcerpt, excerpt) {
+export function supportingExcerptMatches(normalizedBody, normalizedExcerpt, excerpt) {
   const sourceComparable = normalizedBody.replaceAll("维权", "");
   const excerptComparable = normalizedExcerpt.replaceAll("维权", "");
   if (sourceComparable.includes(excerptComparable)) return true;
@@ -1269,7 +1333,7 @@ function deterministicTargetAliases(envelope, target) {
   const marketAliases =
     metric.symbol === "DGS10"
       ? ["10-year Treasury", "10-year Treasury yield"]
-      : [];
+      : metric.symbol === "SPX" ? ["S&P 500", "Standard & Poor’s 500", "Standard & Poor's 500", "Standard and Poor's 500"] : [];
   const isAiLayer = envelope.aiChainPerformance.includes(metric);
   const aliases = [
     ...new Set([

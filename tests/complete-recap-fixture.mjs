@@ -1,5 +1,6 @@
 import { fixtureInput } from "./daily-v10-fixture.mjs";
-import { marketEnvelope } from "../scripts/daily-workflow-core.mjs";
+import { marketEnvelope, stableHash } from "../scripts/daily-workflow-core.mjs";
+import { normalizedEvidenceText } from "../scripts/daily-source-audit.mjs";
 import { RECAP_VERSION, completeRecapPlan } from "../scripts/complete-recap.mjs";
 import { tradingRequests } from "../scripts/recap-market-data.mjs";
 import { ATTRIBUTION_VERSION } from "../scripts/recap-attribution.mjs";
@@ -16,10 +17,11 @@ export function recapFixture(market = "US") {
     source.timingChecked = true;
     source.kind = source.role === "facts" ? "official" : "market_wrap";
     source.supportingExcerpt += " Acme Robotics confirmed its factory order recovery in the September demand update.";
+    source.excerptHash = stableHash(normalizedEvidenceText(source.supportingExcerpt));
   }
   const attribution = { contractVersion: ATTRIBUTION_VERSION, market, marketAsOf: envelope.marketAsOf, entries: plan.anomalies.map((anomaly, index) => ({
     target: anomaly.target, basis: "reported", observedReturn: anomaly.observation.change,
-    chains: [{ rootEvidenceId: `${index}-facts`, reactionEvidenceId: `${index}-causal`, mechanismEvidenceIds: [], eventAnchors: ["Acme Robotics", "factory order recovery"], expectedDirection: Number(anomaly.observation.change.slice(0, -1)) > 0 ? "positive" : Number(anomaly.observation.change.slice(0, -1)) < 0 ? "negative" : "flat", transmission: "The disclosed change affects this target through demand, expected earnings and the independently reported response, with financing costs offsetting the improvement.", limitations: "Observed association is not a quantitatively identified causal contribution; other events remain possible." }],
+    chains: [{ rootEvidenceId: `${index}-facts`, reactionEvidenceId: `${index}-causal`, timingEvidenceId: null, mechanismEvidenceIds: [], eventAnchors: ["Acme Robotics", "factory order recovery"], expectedDirection: Number(anomaly.observation.change.slice(0, -1)) > 0 ? "positive" : Number(anomaly.observation.change.slice(0, -1)) < 0 ? "negative" : "flat", transmission: "The disclosed change affects this target through demand, expected earnings and the independently reported response, with financing costs offsetting the improvement.", limitations: "Observed association is not a quantitatively identified causal contribution; other events remain possible." }],
     counterEvidenceIds: [`${index}-causal`], counterAssessment: "The reported financing cost offset is a competing force; the observed close cannot identify an exact causal contribution.",
   })) };
   const raw = { contractVersion: RECAP_VERSION, market, marketAsOf: envelope.marketAsOf, entries: plan.anomalies.map((anomaly, index) => ({

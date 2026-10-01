@@ -21,10 +21,11 @@
             "type": "array", "maxItems": 3,
             "items": {
               "type": "object", "additionalProperties": false,
-              "required": ["rootEvidenceId", "reactionEvidenceId", "mechanismEvidenceIds", "eventAnchors", "expectedDirection", "transmission", "limitations"],
+              "required": ["rootEvidenceId", "reactionEvidenceId", "timingEvidenceId", "mechanismEvidenceIds", "eventAnchors", "expectedDirection", "transmission", "limitations"],
               "properties": {
                 "rootEvidenceId": {"type": "string", "minLength": 1, "maxLength": 80},
                 "reactionEvidenceId": {"type": "string", "minLength": 1, "maxLength": 80},
+                "timingEvidenceId": {"type": ["string", "null"], "minLength": 1, "maxLength": 80},
                 "mechanismEvidenceIds": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
                 "eventAnchors": {"type": "array", "minItems": 2, "maxItems": 5, "items": {"type": "string", "minLength": 2, "maxLength": 100}},
                 "expectedDirection": {"type": "string", "enum": ["positive", "negative", "flat"]},

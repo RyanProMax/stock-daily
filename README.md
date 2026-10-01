@@ -75,6 +75,8 @@ npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
 
 手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式且通过全部板块复盘验收的成稿可写入，影子报告和旧版简略报告会被拒绝。普通检查会单独返回完整复盘是否通过及其目标数量，不能把旧版结构有效当作完整复盘验收。旧流程验证见 [历史验收记录](specs/verified-recap-workflow/acceptance.md)，完整板块复盘实跑与页面验收见 [完整复盘验收记录](specs/complete-sector-recap/acceptance.md)。
 
+完整复盘会把所用页面的原始字节、引文、采集时间和发布时间元数据冻结在 `recap-source-snapshots.json`。同一轮与续跑沿用这份原文；发布前重新解析并核对引文、数字及时间。SEC 申报头、美联储 RSS 等附加时间来源也保留对应原文。日期级官方发布不会被补造为精确时刻；收盘后的反应报道需另有收盘前、确认同一事件和值的精确时间原文。
+
 手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
 指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`
 或 `--update-kind evening`。

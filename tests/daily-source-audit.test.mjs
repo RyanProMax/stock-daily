@@ -220,6 +220,15 @@ test("source opener validates and pins every HTTPS redirect destination", async 
   );
 });
 
+test("date-only publication metadata never becomes a midnight timestamp through its final calendar component", () => {
+  for (const date of ["2026-09-29", "2026-09-29Z", "September 29, 2026"]) {
+    const html = Buffer.from(`<meta property="article:published_time" content="${date}"><p>Original official release with no stated publication hour.</p>`);
+    assert.deepEqual(sourcePublishedAtCandidates(html, "text/html", "https://www.conference-board.org/release/example"), []);
+  }
+  const actual = Buffer.from('<meta property="article:published_time" content="2026-09-29T00:00:00Z"><p>The original explicitly states midnight.</p>');
+  assert.deepEqual(sourcePublishedAtCandidates(actual, "text/html", "https://www.conference-board.org/release/example"), ["2026-09-29T00:00:00.000Z"]);
+});
+
 test("default opener pins public DNS and the verified source address", async () => {
   const calls = [];
   const result = await openExternalSource(

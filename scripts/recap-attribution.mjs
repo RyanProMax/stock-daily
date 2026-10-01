@@ -1,4 +1,4 @@
-import { hasCausalPassage, readerText } from "./daily-workflow-core.mjs";
+import { assertFactsNumbersInExcerpt, hasCausalPassage, readerText } from "./daily-workflow-core.mjs";
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
@@ -6,6 +6,8 @@ import { verifiedExternalSourceType } from "./source-registry.mjs";
 export const ATTRIBUTION_VERSION = "verified-recap-attribution-v1";
 const DIRECTIONS = ["positive", "negative", "flat"];
 const GENERIC_TERMS = /^(?:market|markets|stock|stocks|shares|prices?|demand|supply|costs?|growth|rates?|interest rates|earnings|news|report|rose|fell|美国|中国|市场|股票|需求|供给|成本|利率|上涨|下跌)$/iu;
+const CALENDAR_TERM = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday)$/iu;
+const NUMERIC_ANCHOR = /^[+-]?(?:US\$|\$|USD\s*|¥)?[+-]?\d[\d,.]*(?:\s*(?:%|ppts?|pp|percentage points?|basis points?|bps?|points?|美元|个百分点|百分点|基点|USD))?$/iu;
 
 function verified(source) {
   return source && source.excerptHash && source.verifiedAt && source.timingChecked === true && ["first_party", "publisher"].includes(source.sourceType) && verifiedExternalSourceType(source.url) === source.sourceType;
@@ -38,13 +40,15 @@ function independent(root, report) {
   return root.url !== report.url && a !== b && normalizedEvidenceText(root.supportingExcerpt) !== normalizedEvidenceText(report.supportingExcerpt);
 }
 
-function chronology(root, report, envelope) {
+function chronology(root, report, envelope, confirmation = report) {
   if (isCalendarDate(root.publishedAt)) {
-    // A later wrap cannot supply the missing intraday availability of a
-    // same-day date-only official page. Require a contemporary timed account.
+    // Keep unknown official publication hours unknown. A separate, verified
+    // pre-close factual report can establish that this value was public.
     const zone = envelope.market === "CN" ? "Asia/Shanghai" : "America/New_York";
-    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(report.publishedAt)).map(item => [item.type, item.value]));
-    return `${parts.year}-${parts.month}-${parts.day}` >= root.publishedAt && Date.parse(report.publishedAt) <= Date.parse(envelope.session.windowEnd);
+    const time = Date.parse(confirmation?.publishedAt);
+    if (!verified(confirmation) || confirmation.kind === "background" || !["facts", "causal"].includes(confirmation.role) || isCalendarDate(confirmation.publishedAt) || !Number.isFinite(time) || time < Date.parse(envelope.session.windowStart) || time > Date.parse(envelope.session.windowEnd) || time > Date.parse(report.publishedAt)) return false;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(time)).map(item => [item.type, item.value]));
+    return `${parts.year}-${parts.month}-${parts.day}` >= root.publishedAt;
   }
   return Date.parse(root.publishedAt) <= Date.parse(report.publishedAt);
 }
@@ -52,12 +56,17 @@ function chronology(root, report, envelope) {
 export function recapAttributionCandidates(envelope, targets, ledger) {
   const roots = ledger.sources.filter(source => freshRoot(source, envelope));
   const reports = ledger.sources.filter(source => reaction(source, envelope));
+  const confirmations = ledger.sources.filter(source => verified(source) && source.kind !== "background" && !isCalendarDate(source.publishedAt));
   return targets.map(target => {
     const mechanisms = ledger.sources.filter(source => background(source, envelope, target));
     const targetReports = reports.filter(source => source.targets.includes(target.symbol));
     const targetRoots = roots.filter(source => source.targets.includes(target.symbol));
-    const direct = targetRoots.some(root => targetReports.some(report => independent(root, report) && chronology(root, report, envelope)));
-    const pairs = roots.flatMap(root => reports.filter(report => independent(root, report) && chronology(root, report, envelope)).map(report => ({ root: root.id, reaction: report.id })));
+    const pairs = roots.flatMap(root => reports.filter(report => independent(root, report)).flatMap(report => {
+      if (chronology(root, report, envelope)) return [{ root: root.id, reaction: report.id, timingEvidenceIds: [] }];
+      const eligible = confirmations.filter(confirmation => chronology(root, report, envelope, confirmation));
+      return eligible.length ? [{ root: root.id, reaction: report.id, timingEvidenceIds: eligible.map(source => source.id) }] : [];
+    }));
+    const direct = pairs.some(pair => targetRoots.some(root => root.id === pair.root) && targetReports.some(report => report.id === pair.reaction));
     return { target: target.symbol, reportedEligible: direct, inferredIngredientsPresent: mechanismsCover(mechanisms, target) && pairs.length > 0, rootEvidenceIds: roots.map(source => source.id), reactionEvidenceIds: reports.map(source => source.id), mechanismEvidenceIds: mechanisms.map(source => source.id), candidatePairs: pairs };
   });
 }
@@ -71,17 +80,25 @@ function anchors(values, root, report) {
   // This check prevents an unrelated official announcement from satisfying a
   // market-wrap reaction. Semantic identity still requires independent review.
   if (!Array.isArray(values) || values.length < 2 || values.length > 5 || new Set(values.map(normalizedEvidenceText)).size !== values.length) throw new Error("官方事件与市场反应缺少具体共同锚点");
+  const names = values.filter(term => typeof term === "string" && !NUMERIC_ANCHOR.test(term) && /\p{L}/u.test(term) && !GENERIC_TERMS.test(term.trim()) && !CALENDAR_TERM.test(term.trim()));
+  if (!names.length || (names.length === 1 && !values.some(term => NUMERIC_ANCHOR.test(term)))) throw new Error("事件锚点必须包含具体事件或指标名称与数值，不能只有数字和月份");
   for (const term of values) {
     const normalized = normalizedEvidenceText(term);
-    if (typeof term !== "string" || normalized.length < 2 || term.length > 100 || GENERIC_TERMS.test(term.trim()) || !/\p{L}/u.test(term) || !normalizedEvidenceText(root.supportingExcerpt).includes(normalized) || !normalizedEvidenceText(report.supportingExcerpt).includes(normalized)) throw new Error("官方事件与市场反应的共同锚点不具体或未见于两段原文");
+    if (typeof term !== "string" || normalized.length < 2 || term.length > 100 || GENERIC_TERMS.test(term.trim())) throw new Error("官方事件与市场反应的共同锚点不具体或未见于两段原文");
+    if (NUMERIC_ANCHOR.test(term)) {
+      try {
+        assertFactsNumbersInExcerpt({ facts: term, supportingExcerpt: root.supportingExcerpt });
+        assertFactsNumbersInExcerpt({ facts: term, supportingExcerpt: report.supportingExcerpt });
+      } catch (error) { throw new Error(`事件数值锚点与两段原文的值、单位或方向不符：${error.message}`); }
+    } else if (!normalizedEvidenceText(root.supportingExcerpt).includes(normalized) || !normalizedEvidenceText(report.supportingExcerpt).includes(normalized)) throw new Error("官方事件与市场反应的共同锚点未见于两段原文");
   }
   // A same-day date-only page can be revised after close. Its factual value
   // must also occur in the timed report before it can anchor an inference.
-  if (isCalendarDate(root.publishedAt) && !values.some(term => /\d/u.test(term) && /\p{L}/u.test(term))) throw new Error("日期精度的官方事实缺少当时报道确认的具体数值与事件锚点");
+  if (isCalendarDate(root.publishedAt) && !values.some(term => /\d/u.test(term))) throw new Error("日期精度的官方事实缺少当时报道确认的具体数值与事件锚点");
 }
 
 export function attributionEvidenceIds(entry) {
-  return [...new Set(entry.chains.flatMap(chain => [chain.rootEvidenceId, chain.reactionEvidenceId, ...chain.mechanismEvidenceIds]))];
+  return [...new Set(entry.chains.flatMap(chain => [chain.rootEvidenceId, chain.reactionEvidenceId, ...(chain.timingEvidenceId ? [chain.timingEvidenceId] : []), ...chain.mechanismEvidenceIds]))];
 }
 
 export function validateRecapAttribution(value, envelope, targets, ledger, { requireComplete = false } = {}) {
@@ -100,9 +117,15 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
     }
     if (!entry.chains.length) throw new Error(`${target.symbol} 缺少事件传导链`);
     for (const chain of entry.chains) {
+      if (chain.timingEvidenceId !== null && typeof chain.timingEvidenceId !== "string") throw new Error(`${target.symbol} 当时事实确认的引用字段无效`);
       const [root, report] = selected([chain.rootEvidenceId, chain.reactionEvidenceId], map, "事件与市场反应", 2, 2);
-      if (!freshRoot(root, envelope) || !reaction(report, envelope) || !independent(root, report) || !chronology(root, report, envelope)) throw new Error(`${target.symbol} 官方事件、独立反应或时间先后不成立`);
+      const confirmation = chain.timingEvidenceId == null ? report : selected([chain.timingEvidenceId], map, "当时的事实确认")[0];
+      if (!freshRoot(root, envelope) || !reaction(report, envelope) || !independent(root, report) || !chronology(root, report, envelope, confirmation)) throw new Error(`${target.symbol} 官方事件、独立反应或时间先后不成立`);
       anchors(chain.eventAnchors, root, report);
+      if (chain.timingEvidenceId) {
+        if (!isCalendarDate(root.publishedAt)) throw new Error(`${target.symbol} 精确发布时间来源无需附加未知时刻确认`);
+        anchors(chain.eventAnchors, root, confirmation);
+      }
       if (!DIRECTIONS.includes(chain.expectedDirection)) throw new Error(`${target.symbol} 传导方向无效`);
       readerText(chain.transmission, "传导机制", 50, 1_200);
       readerText(chain.limitations, "传导局限", 30, 900);

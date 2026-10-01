@@ -22,6 +22,7 @@ import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { validateRecapMacroData } from "./recap-macro-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { validateRecapTransmissionData } from "./recap-transmission-data.mjs";
+import { auditLedgerSourceSnapshots } from "./evidence-source-snapshots.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -523,6 +524,9 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
     if (!input) throw new Error("完整复盘核验缺少确定性行情输入");
     const root = resolve(dirname(resolve(manifestPath)), "artifacts");
     const [ledger, social, draft, review, tradingData, macroData, attribution, transmission] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json", "recap-attribution.json", "recap-transmission-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
+    const sourceSnapshots = JSON.parse(await readFile(resolve(root, "recap-source-snapshots.json"), "utf8"));
+    if (stableHash(sourceSnapshots) !== manifest.sourceSnapshotsHash) throw new Error("完整复盘原文快照哈希不一致");
+    auditLedgerSourceSnapshots(ledger, sourceSnapshots);
     if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash || stableHash(macroData) !== manifest.macroHash) throw new Error("完整复盘证据、日线、宏观数据、原文或独立审稿哈希不一致");
     validateRecapTradingData(tradingData, researchMarketEnvelope(input, manifest.market));
     validateRecapMacroData(macroData, researchMarketEnvelope(input, manifest.market));
@@ -543,6 +547,7 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
     if (stableHash(recap) !== manifest.recapApproval?.recapHash || stableHash(report.recaps?.[manifest.market]) !== stableHash(recap)) throw new Error("发布复盘与已批准完整复盘不一致");
   }
   const ledger = JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/evidence-ledger.json"), "utf8"));
+  if (manifest.coverageRequired) auditLedgerSourceSnapshots(ledger, JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/recap-source-snapshots.json"), "utf8")));
   if (!Object.values(manifest.stages ?? {}).some((stage) =>
     stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger)
   )) throw new Error("发布证据账本与已验证阶段哈希不一致");

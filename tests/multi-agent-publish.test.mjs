@@ -165,8 +165,19 @@ test("latest workflow alias retains evidence and can be checked independently", 
 async function completePublicationFixture() {
   const fixture = await publicationFixture();
   const f = recapFixture();
+  const { snapshotFromOpenedSource, SOURCE_SNAPSHOT_VERSION } = await import("../scripts/evidence-source-snapshots.mjs");
+  const { normalizedEvidenceText, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } = await import("../scripts/daily-source-audit.mjs");
+  const { verifiedExternalSourceType } = await import("../scripts/source-registry.mjs");
+  const headlines = JSON.parse(await readFile(resolve(fixture.manifestPath, "../artifacts/evidence-ledger.json"), "utf8"));
+  for (const source of headlines.sources) Object.assign(source, { sourceType: verifiedExternalSourceType(source.url), status: 200, publishedAt: "2026-08-21T20:30:00Z", excerptHash: stableHash(normalizedEvidenceText(source.supportingExcerpt)) });
+  const snapshots = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [...f.ledger.sources, ...headlines.sources].map(source => {
+    const escape = value => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+    const rawBody = Buffer.from(`<html><head><meta property="article:published_time" content="${source.publishedAt}"></head><body>${escape(source.supportingExcerpt)}<footer>Additional original context for this isolated test publication source.</footer></body></html>`);
+    return snapshotFromOpenedSource(source.url, { finalUrl: source.url, status: 200, contentType: "text/html", rawBody, text: sourceBodyText(rawBody), publishedAtCandidates: sourcePublishedAtCandidates(rawBody, "text/html", source.url), publishedDateCandidates: sourcePublishedDateCandidates(rawBody, "text/html", source.url) });
+  }) };
   const recap = validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { requireComplete: true, attribution: f.attribution });
   const manifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"));
+  manifest.stages["evidence-verification"].outputHash = stableHash(headlines);
   const report = JSON.parse(await readFile(fixture.reportPath, "utf8"));
   const review = { market: "US", entries: recap.entries.map((entry) => ({ target: entry.target, verdict: "pass", scores: { factualAccuracy: 5, causality: 4, magnitude: 4, sourceIndependence: 5, readerUtility: 4 } })) };
   report.recaps = { US: recap };
@@ -179,6 +190,7 @@ async function completePublicationFixture() {
   manifest.socialHash = stableHash(f.social);
   manifest.recapAttributionHash = stableHash(f.attribution);
   manifest.transmissionHash = stableHash(f.transmissionData);
+  manifest.sourceSnapshotsHash = stableHash(snapshots);
   manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(f.raw), reviewHash: stableHash(review), attributionStage: "recap-attributor-attempt-1", writerStage: "recap-writer-attempt-1", reviewerStage: "recap-reviewer-attempt-1", status: "complete" };
   manifest.stages["recap-verification"] = { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(f.ledger) };
   for (const [i, role, value, field] of [[0, "recap_writer", f.raw, "writerStage"], [1, "recap_reviewer", review, "reviewerStage"], [2, "recap_attributor", f.attribution, "attributionStage"]]) {
@@ -188,6 +200,8 @@ async function completePublicationFixture() {
     manifest.stages[key] = run;
   }
   const root = resolve(fixture.manifestPath, "../artifacts");
+  await writeFile(resolve(root, "evidence-ledger.json"), JSON.stringify(headlines) + "\n");
+  await writeFile(resolve(root, "recap-source-snapshots.json"), JSON.stringify(snapshots) + "\n");
   for (const [name, value] of Object.entries({ "recap-ledger.json": f.ledger, "recap-attribution.json": f.attribution, "recap-transmission-data.json": f.transmissionData, "social-ledger.json": f.social, "recap-trading-data.json": f.tradingData, "recap-macro-data.json": f.macroData, "recap-draft.json": f.raw, "recap-review.json": review })) await writeFile(resolve(root, name), JSON.stringify(value) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.attributionStage}.json`), JSON.stringify(f.attribution) + "\n");
   await writeFile(resolve(root, `${manifest.recapApproval.writerStage}.json`), JSON.stringify(f.raw) + "\n");
@@ -223,13 +237,14 @@ test("the comprehensive latest alias retains exact independent writer and review
 });
 
 test("recap evidence, low review scores and rewritten reader claims stop before network writes", async () => {
-  for (const mutation of ["ledger", "review", "report", "trading", "macro", "attribution", "transmission"]) {
+  for (const mutation of ["ledger", "review", "report", "trading", "macro", "attribution", "transmission", "source-snapshots"]) {
     const f = await completePublicationFixture();
     if (mutation === "ledger") await writeFile(resolve(f.root, "recap-ledger.json"), '{"sources":[]}');
     if (mutation === "trading") await writeFile(resolve(f.root, "recap-trading-data.json"), '{"entries":[]}');
     if (mutation === "macro") await writeFile(resolve(f.root, "recap-macro-data.json"), '{"context":{"rates":{"tenYear":999}}}');
     if (mutation === "attribution") await writeFile(resolve(f.root, "recap-attribution.json"), '{"entries":[]}');
     if (mutation === "transmission") await writeFile(resolve(f.root, "recap-transmission-data.json"), '{"sources":[]}');
+    if (mutation === "source-snapshots") await writeFile(resolve(f.root, "recap-source-snapshots.json"), '{"snapshots":[]}');
     if (mutation === "review") {
       f.review.entries[0].scores.magnitude = 3;
       f.manifest.recapApproval.reviewHash = stableHash(f.review);

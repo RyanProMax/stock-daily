@@ -842,6 +842,9 @@ export function sourcePublishedAtCandidates(
   }
   const parseCandidate = (value) => {
     const decodedValue = decodeHtmlEntities(value.trim());
+    // A date's final -29 is not a timezone offset. Never manufacture a
+    // midnight clock from a calendar date, even with publication metadata.
+    if (!/(?:T|\s)\d{1,2}:\d{2}/u.test(decodedValue)) return Number.NaN;
     const offsetFreeChinaTime = chinaLocalTime
       ? /^(20\d{2})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/u.exec(
           decodedValue,
@@ -929,7 +932,7 @@ export function normalizedEvidenceText(value) {
     .replace(/[^\p{L}\p{N}.+%\-]+/gu, "");
 }
 
-function secSubmissionMetadataUrl(value) {
+export function secSubmissionMetadataUrl(value) {
   let url;
   try {
     url = new URL(value);
@@ -1036,6 +1039,7 @@ export async function readExternalSource(
         contentType,
         resolved.url.toString(),
       );
+      const metadataReceipts = [];
       if (publishedAtCandidates.length === 0 && fedSpeechArticleDate(response.body, resolved.url.toString())) {
         try {
           // The page supplies only a date. Use this exact speech's official
@@ -1044,6 +1048,7 @@ export async function readExternalSource(
           const metadata = await requestContent(feed.url.toString(), feed.destination, { maxBytes, signal });
           if (metadata.status >= 200 && metadata.status < 300) {
             publishedAtCandidates = fedSpeechPublishedAtCandidates(response.body, metadata.body, resolved.url.toString());
+            if (includeRaw) metadataReceipts.push({ finalUrl: feed.url.toString(), status: metadata.status, contentType: metadata.contentType || "application/xml", rawBody: metadata.body });
           }
         } catch (error) {
           if (signal?.aborted) throw signal.reason ?? error;
@@ -1072,6 +1077,7 @@ export async function readExternalSource(
               submission.contentType || "text/plain",
               submissionDestination.url.toString(),
             );
+            if (includeRaw) metadataReceipts.push({ finalUrl: submissionDestination.url.toString(), status: submission.status, contentType: submission.contentType || "text/plain", rawBody: submission.body });
           }
         } catch (error) {
           if (signal?.aborted) throw signal.reason ?? error;
@@ -1086,7 +1092,7 @@ export async function readExternalSource(
         text,
         publishedAtCandidates,
         publishedDateCandidates: sourcePublishedDateCandidates(response.body, contentType, resolved.url.toString()),
-        ...(includeRaw ? { rawBody: response.body } : {}),
+        ...(includeRaw ? { rawBody: response.body, metadataReceipts } : {}),
       };
     }
     if (response.status >= 300 && response.status < 400 && response.location) {

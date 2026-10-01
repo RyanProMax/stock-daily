@@ -75,6 +75,46 @@ test("date-only roots require the exact timed event value before close, never a 
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /锚点/);
 });
 
+function confirmedDateFixture() {
+  const f = inferredFixture();
+  f.root.publishedAt = "2026-08-21";
+  f.root.supportingExcerpt += " Consumer Confidence Expectations Index was 68.4 points.";
+  f.report.supportingExcerpt += " Consumer Confidence Expectations Index was 68.4 points.";
+  const confirmation = { ...f.report, id: "early-confirmation", role: "facts", causalConnection: false, kind: "event", targets: ["XLY"], publishedAt: "2026-08-21T14:30:00Z", url: "https://www.reuters.com/markets/confidence-release", supportingExcerpt: "Consumer Confidence Expectations Index was 68.4 points in the newly released survey." };
+  f.ledger.sources.push(confirmation);
+  for (const entry of [f.entry, f.attribution.entries[0]]) Object.assign(entry.chains[0], { timingEvidenceId: confirmation.id, eventAnchors: ["Consumer Confidence Expectations Index", "68.4"] });
+  f.rawEntry.evidenceIds.push(confirmation.id);
+  f.raw.entries[0].evidenceIds.push(confirmation.id);
+  return { ...f, confirmation };
+}
+
+test("an exact pre-close factual original can confirm a date-only root for a later reaction wrap", () => {
+  const f = confirmedDateFixture();
+  const options = { attribution: f.attribution, requireComplete: true };
+  assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger, { requireComplete: true }));
+  assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, options).status, "complete");
+  assert.equal(f.root.publishedAt, "2026-08-21");
+  const candidate = recapAttributionCandidates(f.envelope, recapTargets(f.envelope), f.ledger).find(item => item.target === "XLU");
+  assert.ok(candidate.candidatePairs.some(pair => pair.root === f.root.id && pair.reaction === f.report.id && pair.timingEvidenceIds.includes(f.confirmation.id)));
+  f.rawEntry.evidenceIds.pop();
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, options), /完整的已审查/);
+});
+
+test("wrong values, dates, background and expert opinions cannot fill a date-only timing gap", () => {
+  for (const mutate of [
+    f => f.confirmation.publishedAt = "2026-08-21T20:01:00Z",
+    f => f.confirmation.publishedAt = "2026-08-20T19:00:00Z",
+    f => f.confirmation.publishedAt = "2026-08-21",
+    f => f.confirmation.supportingExcerpt = f.confirmation.supportingExcerpt.replace("68.4", "81.9"),
+    f => f.confirmation.kind = "background",
+    f => { f.confirmation.sourceType = "expert"; f.confirmation.url = "https://x.com/Analyst/status/123"; },
+    f => f.entry.chains[0].timingEvidenceId = "unread-source",
+    f => f.entry.chains[0].eventAnchors = ["September", "68.4"],
+    f => f.entry.chains[0].eventAnchors = ["68.4", "81.9"],
+    f => f.entry.chains[0].eventAnchors = ["Consumer Confidence Expectations Index", "$68.4"],
+  ]) { const f = confirmedDateFixture(); mutate(f); assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger)); }
+});
+
 test("one issuer exposure cannot establish an entire AI basket's transmission", () => {
   const f = inferredFixture(), target = recapTargets(f.envelope).find(item => item.kind === "ai_layer");
   f.entry.basis = "unresolved"; f.entry.chains = [];

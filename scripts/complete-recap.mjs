@@ -208,7 +208,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const measurementIds = raw.magnitudeObservationIds ?? [];
     if (!Array.isArray(measurementIds)) throw new Error(`${target.symbol} 幅度观测引用无效`);
     const anomaly = completeRecapPlan(envelope).anomalies.find((item) => item.target === target.symbol);
-    const linkedIds = inferred ? new Set([...attributionEvidenceIds(chain), ...chain.counterEvidenceIds]) : new Set();
+    const linkedIds = inferred ? new Set([...attributionEvidenceIds(chain), ...chain.counterEvidenceIds]) : new Set((chain?.chains ?? []).map(item => item.timingEvidenceId).filter(Boolean));
     if (cause.some(source => !linkedIds.has(source.id) && (source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) || size.some(source => source.anomalyId !== anomaly.id || !source.targets.includes(target.symbol))) throw new Error(`${target.symbol} 引用了其他目标的证据`);
     if (chain && raw.status !== "unresolved" && (chain.basis === "unresolved" || attributionEvidenceIds(chain).some(id => !raw.evidenceIds.includes(id)))) throw new Error(`${target.symbol} 成稿未保留完整的已审查传导证据`);
     const causal = cause.filter((source) => source.anomalyId === anomaly.id && source.role === "causal" && source.targets.includes(target.symbol) && source.causalConnection && hasCausalPassage(source.supportingExcerpt));

@@ -61,7 +61,7 @@ export function transmissionSourceReader(value, fallback = readExternalSource) {
     if (!snapshot) return fallback(url, options);
     if (parsed.has(url)) return parsed.get(url);
     const body = Buffer.from(snapshot.rawHtml);
-    const opened = { finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text: sourceBodyText(body, snapshot.contentType), publishedAtCandidates: sourcePublishedAtCandidates(body, snapshot.contentType, snapshot.finalUrl), publishedDateCandidates: sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl) };
+    const opened = { source: url, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, rawBody: body, metadataReceipts: [], text: sourceBodyText(body, snapshot.contentType), publishedAtCandidates: sourcePublishedAtCandidates(body, snapshot.contentType, snapshot.finalUrl), publishedDateCandidates: sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl) };
     parsed.set(url, opened);
     return opened;
   };

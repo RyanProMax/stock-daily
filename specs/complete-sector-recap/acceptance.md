@@ -2,6 +2,20 @@
 
 **Implementation checks pass. Real comprehensive report acceptance remains unsuccessful. No shadow report or layout fixture was published.**
 
+## Frozen-source and numeric revalidation
+
+The original v4 research outputs and search-event hashes were checked again without rewriting its manifest, outputs or 82-search provenance. A separate current revalidation reread the publisher originals, preserved the existing background bytes and accepted 32 records, with 22 rejected and complete causal coverage still 0/20. These are scoped source records, not 32 independent confirmations or causal passages. The original failed run was not retroactively approved. Revalidation is recorded in work/complete-recap-2026-09-30-v4-revalidation.json.
+
+Faithful English calendar/ordinal and explicit duration translations, monetary scales, signed basis points, individual yield pairs, “dipped” and closing-loss wording now retain the original dimensions and directions. Uncited values, wrong periods/units/signs and positive copies of negative EPS remain rejected. Long-form Standard & Poor's names identify the benchmark only. A new adversarial test exposed calendar dates ending in “-29” being mistaken for timezone offsets; dates without an explicit clock now remain date-only, while an explicitly stated midnight remains a clock.
+
+Comprehensive runs freeze every successfully opened original page as raw bytes, byte/text hashes, retrieval time and parsed publication metadata in recap-source-snapshots.json. Repeated requests and resumed batches reuse one original; HTTP refusals are not evidence. Exact SEC submission headers and Federal Reserve RSS items used for time verification are frozen separately with the corresponding article. Publication re-parses these originals and checks both the recap and headline ledgers, including excerpt hashes, numerical/unit support, publication precision and material EPS qualifications. Alias persistence includes the snapshot artifact; raw HTML remains local, outside reader copy.
+
+A separate actual snapshot capture preserved nine originals and passed an offline audit of all 32 accepted records, with no network access during that audit. Its original bytes reside in work/complete-recap-2026-09-30-v4-source-snapshots.json. This establishes reproducible excerpt/time verification, not a historical publication vintage or approved causation. Separate original-page probes also located a precisely timed release-distribution page and the accessible AP story on Los Angeles Times; they have not been promoted into the failed run's evidence or report approval.
+
+Date-only official roots can now cite an additional verified pre-close factual original for timing when the actual reaction article is a later wrap. The confirmation must match the same named event, value, unit and period and precede both close and reaction. It proves the value was reported by that time, not the unknown official publication hour. Wrong/late dates, background, expert opinions, unrelated numbers and omitted confirmation citations fail validation. Independent semantic review remains necessary.
+
+Verification passed 357 Node tests, 12 Python tests, TypeScript and production build. Repository safety and whitespace checks passed. This revision changed backend verification, prompts and documentation only; it introduced no reader UI change. Real comprehensive report approval, production publication and exact readback remain outstanding; the schedule is not completed by these preflights.
+
 ## Qualified attribution and a fresh September 29 shadow
 
 The separate attribution assessment is implemented before writing, with independent final semantic review and publication revalidation. It preserves official root, independent reaction and structural exposure IDs; checks exact event anchors, chronology, all four AI subjects and economic direction; caps inferred copy at medium confidence and requires explicit inference labels in both languages. Missing chains and measurements alone cannot complete attribution. The chain artifact/process output and frozen original background body are retained and audited at publication.

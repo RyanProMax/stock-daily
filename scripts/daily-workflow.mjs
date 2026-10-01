@@ -61,6 +61,7 @@ import { collectRecapTradingData, validateRecapTradingData } from "./recap-marke
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
+import { createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -2048,7 +2049,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v13",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v15",
       researchOutputs,
     });
     const key = `evidence-verification-${inputHash.slice(0, 8)}`;
@@ -2132,6 +2133,10 @@ export class MarketWorkflow {
       verifiedSourceCount: ledger.sources.length,
       rejectedSourceCount: ledger.rejected.length,
     };
+    if (this.recapSnapshotReader) {
+      this.manifest.sourceSnapshotsHash = stableHash(this.recapSnapshotReader.book);
+      this.manifest.stages[key].sourceSnapshotsHash = this.manifest.sourceSnapshotsHash;
+    }
     await this.saveManifest();
     progress(
       `${this.market} evidence verification completed: ${ledger.sources.length} verified, ${ledger.rejected.length} rejected`,
@@ -2899,7 +2904,8 @@ export class MarketWorkflow {
       this.manifest.transmissionHash = stableHash(transmission);
       await this.saveManifest();
     }
-    this.recapSourceReader = transmissionSourceReader(transmission);
+    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), transmissionSourceReader(transmission));
+    this.recapSourceReader = this.recapSnapshotReader.reader;
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
     let nextAccess = initialAccess;
@@ -3552,7 +3558,7 @@ export async function persistWorkflowArtifacts(result, projectDir = PROJECT_DIR)
     );
   }
   const manifest = await readJson(result.manifestPath);
-  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-attribution.json", "recap-transmission-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
+  if (manifest.coverageRequired) for (const name of ["recap-ledger.json", "recap-source-snapshots.json", "recap-attribution.json", "recap-transmission-data.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-data.json", "recap-draft.json", "recap-review.json", `${manifest.recapApproval.attributionStage}.json`, `${manifest.recapApproval.writerStage}.json`, `${manifest.recapApproval.reviewerStage}.json`]) {
     await copyFile(resolve(dirname(result.manifestPath), "artifacts", name), resolve(artifactsDir, name));
   }
   await writeFile(
