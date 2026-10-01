@@ -38,3 +38,5 @@
 - [x] Resolve exact Federal Reserve speech publication times through article-bound official RSS items; retain date-only pages as unverified when matching metadata is unavailable.
 - [x] Restore completed supplemental research from its original invocation and immutable artifacts without spending new queries, and reject price-only causal candidates before adjudication.
 - [x] Make human label confirmation and exact article references mandatory for formal benchmark success.
+- [x] Derive Chinese AI company identities and latest full periodic-disclosure records from frozen native registry responses and bounded read-only form queries; bind any admitted PDF to its issuer, institution, title and date.
+- [ ] Verify native Chinese periodic-report business exposures beyond the current unsupported PDF layouts; latest real collection admits no original company filing and does not establish full recap coverage.

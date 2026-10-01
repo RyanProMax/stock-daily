@@ -9,7 +9,8 @@ const RATE_QUALIFICATION = /\bno\b[^.]{0,100}\b(?:sensitivity|risk)|\bnot\b[^.]{
 // Normalize only whitespace; words, numbers and page footers remain original.
 // Segment the whole text before selecting quotes so printed line wraps cannot
 // create an apparent sentence with its subject or qualifications removed.
-export function companyExposureExcerpts(text) {
+export function companyExposureExcerpts(text, { language = "en", issuerName } = {}) {
+  if (language === "zh") return chineseCompanyExposureExcerpts(text, issuerName);
   const original = text.replace(/\s+/gu, " ").trim();
   const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(original)].map(item => ({ quote: item.segment.trim(), position: item.index }));
   const candidates = [];
@@ -41,6 +42,42 @@ export function companyExposureExcerpts(text) {
   const selected = [];
   for (const candidate of candidates.sort((a, b) => b.priority - a.priority || a.position - b.position || b.quote.length - a.quote.length)) {
     if (selected.some(item => item.quote.includes(candidate.quote) || candidate.quote.includes(item.quote) || (candidate.position < item.position + item.quote.length && item.position < candidate.position + candidate.quote.length))) continue;
+    selected.push(candidate);
+    if (selected.length === 3) break;
+  }
+  return selected.sort((a, b) => a.position - b.position).map(item => item.quote);
+}
+
+function chineseCompanyExposureExcerpts(text, issuerName) {
+  const original = text.replace(/\s+/gu, " ").trim();
+  const sentences = [...new Intl.Segmenter("zh", { granularity: "sentence" }).segment(original)].map(item => ({ quote: item.segment.trim(), position: item.index }));
+  const factor = /需求|供给|供应|成本|利率|融资|监管|风险/u;
+  const qualification = /^(?:但|然而|不过|尽管|虽然|同时|相反|此外|其中|因此|上述|该风险|(?:本公司|公司)[^。]{0,70}(?:不|尚未|可能|对冲|固定利率))/u;
+  const boilerplate = /董事会[^。]{0,80}(?:保证|承担)|不存在虚假记载|公司负责人[^。]{0,80}保证|会计政策变更|公允价值计量|会计估计|会计准则|财务报表附注/u;
+  const own = quote => /本公司|我们|我司/u.test(quote) || (typeof issuerName === "string" && issuerName.length >= 2 && quote.includes(issuerName));
+  const candidates = [];
+  for (let index = 0; index < sentences.length; index += 1) {
+    if (!factor.test(sentences[index].quote) || boilerplate.test(sentences[index].quote)) continue;
+    let { quote, position } = sentences[index];
+    const previous = sentences[index - 1];
+    if (previous && !boilerplate.test(previous.quote) && previous.quote.length + quote.length + 1 <= 700) {
+      quote = `${previous.quote} ${quote}`; position = previous.position;
+    }
+    let clipped = false;
+    for (let next = index + 1; next < sentences.length && qualification.test(sentences[next].quote); next += 1) {
+      if (quote.length + sentences[next].quote.length + 1 > 700) { clipped = true; break; }
+      quote += ` ${sentences[next].quote}`;
+    }
+    // A heading, a table row, general risk boilerplate or a competitor mention
+    // supplies no issuer-owned transmission. Keep whole original sentences and
+    // every adjacent explicit qualification, including denials of sensitivity.
+    if (clipped || quote.length < 60 || quote.length > 700 || !/[。！？]$/u.test(quote) || !own(quote) || boilerplate.test(quote)) continue;
+    const priority = /利率|融资/u.test(quote) ? 3 : /风险|可能|不确定|下降|上涨/u.test(quote) ? 2 : 1;
+    candidates.push({ quote, position, priority });
+  }
+  const selected = [];
+  for (const candidate of candidates.sort((a, b) => b.priority - a.priority || a.position - b.position)) {
+    if (selected.some(item => candidate.position < item.position + item.quote.length && item.position < candidate.position + candidate.quote.length)) continue;
     selected.push(candidate);
     if (selected.length === 3) break;
   }

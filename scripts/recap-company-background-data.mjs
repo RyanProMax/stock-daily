@@ -5,8 +5,9 @@ import { backgroundEvidenceInWindow } from "./evidence-timing.mjs";
 import { snapshotFromOpenedSource, openedSourceFromSnapshot } from "./evidence-source-snapshots.mjs";
 import { secFilingIssuerIdentity, secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
 import { companyExposureExcerpts } from "./company-exposure-excerpts.mjs";
+import { collectCnCompanyBackgroundData, validateCnCompanyBackgroundData } from "./cn-company-background-data.mjs";
 
-export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v2";
+export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v3";
 const REGISTRY = "https://www.sec.gov/files/company_tickers.json";
 const digest = body => createHash("sha256").update(body).digest("hex");
 const ANNUAL = new Set(["10-K", "20-F", "40-F"]);
@@ -94,7 +95,8 @@ export function validateRecapCompanyBackgroundData(book, envelope, plan) {
   if (bytes > 96 * 1024 * 1024) throw new Error("公司敞口原文字节超过上限");
   const expected = targets(plan).map(item => item.symbol);
   if ([...book.profiles, ...book.filings].some(item => !expected.includes(item.symbol))) throw new Error("公司敞口包含计划外公司");
-  if (book.failures !== undefined && (!Array.isArray(book.failures) || book.failures.some(item => !expected.includes(item.symbol) || typeof item.reason !== "string" || !item.reason || typeof item.url !== "string" || !/^https:\/\/(?:www|data)\.sec\.gov\//u.test(item.url) || !Number.isFinite(Date.parse(item.observedAt))))) throw new Error("公司敞口访问失败记录无效");
+  if (book.failures !== undefined && (!Array.isArray(book.failures) || book.failures.length > 128 || book.failures.some(item => !expected.includes(item.symbol) || typeof item.reason !== "string" || !item.reason || typeof item.url !== "string" || (envelope.market === "US" && !/^https:\/\/(?:www|data)\.sec\.gov\//u.test(item.url)) || !Number.isFinite(Date.parse(item.observedAt))))) throw new Error("公司敞口访问失败记录无效");
+  if (envelope.market === "CN") return validateCnCompanyBackgroundData(book, envelope, plan);
   if (envelope.market !== "US") {
     if (book.registry || book.profiles.length || book.filings.length || book.sources.length || book.gaps.length || book.failures?.length) throw new Error("中国市场不能套用美国公司的敞口记录");
     return book;
@@ -120,6 +122,7 @@ export function companyBackgroundSourceReader(book, fallback = readExternalSourc
 
 export async function collectRecapCompanyBackgroundData(envelope, plan, { reader = readExternalSource, now = () => new Date(), signal, onCheckpoint, resumeBook = null } = {}) {
   const book = resumeBook ? validateRecapCompanyBackgroundData(structuredClone(resumeBook), envelope, plan) : { version: COMPANY_BACKGROUND_VERSION, market: envelope.market, marketAsOf: envelope.marketAsOf, registry: null, profiles: [], filings: [], sources: [], gaps: [] };
+  if (envelope.market === "CN") return collectCnCompanyBackgroundData(book, envelope, plan, { reader, now, signal, onCheckpoint });
   if (envelope.market !== "US") return book;
   const requested = targets(plan);
   book.failures ??= [];

@@ -1,3 +1,4 @@
+import { fixturePdf } from "./pdf-fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
@@ -14,30 +15,7 @@ import { recapTargets } from "../scripts/complete-recap.mjs";
 
 const url = "https://static.cninfo.com.cn/finalpage/2026-08-20/1225586487.PDF";
 const lines = ["证券代码：600123 证券简称：样例医药 公告编号：临2026-154", "样例医药股份有限公司", "关于签署授权许可协议的公告", "本公司董事会及全体董事保证本公告内容不存在虚假记载、误导性陈述。", "样例医药股份有限公司的潜在许可交易最高可达26亿美元，包括3亿美元首付款及符合条件的里程碑付款。", "该协议需获得监管批准并满足其他交割条件，海外批准及里程碑付款具有不确定性。"];
-function fixturePdf(pages = [lines], imagePages = []) {
-  const unicode = text => [...text].map(char => char.charCodeAt(0).toString(16).padStart(4, "0")).join("");
-  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 5 0 R >>", "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /FontDescriptor 6 0 R /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> >>"];
-  const stream = text => `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`;
-  const chars = [...new Set(pages.flat().join(""))];
-  const cmap = [];
-  for (let i = 0; i < chars.length; i += 100) { const group = chars.slice(i, i + 100); cmap.push(`${group.length} beginbfchar\n` + group.map(char => `<${unicode(char)}> <${unicode(char)}>`).join("\n") + "\nendbfchar"); }
-  objects.push(stream("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Fixture def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n" + cmap.join("\n") + "\nendcmap\nCMapName currentdict /CMap defineresource pop\nend end"));
-  objects.push("<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [0 -200 1000 900] /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>");
-  const kids = [];
-  for (const [index, page] of pages.entries()) {
-    const imageId = imagePages.includes(index) ? objects.length + 1 : null;
-    if (imageId) objects.push("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 3 >>\nstream\n00>\nendstream");
-    const id = objects.length + 1; kids.push(`${id} 0 R`);
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> ${imageId ? `/XObject << /Im0 ${imageId} 0 R >>` : ""} >> /Contents ${id + 1} 0 R >>`);
-    objects.push(stream("BT /F1 10 Tf 40 760 Td\n" + page.map(text => `<${unicode(text)}> Tj 0 -18 Td`).join("\n") + "\nET" + (imageId ? "\nq 100 0 0 100 100 100 cm /Im0 Do Q" : "")));
-  }
-  objects[1] = `<< /Type /Pages /Count ${pages.length} /Kids [${kids.join(" ")}] >>`;
-  let body = "%PDF-1.7\n", offsets = [0];
-  for (let i = 0; i < objects.length; i++) { offsets.push(Buffer.byteLength(body)); body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`; }
-  const xref = Buffer.byteLength(body);
-  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-}
+
 const pdf = fixturePdf([lines, ["授权区域为约定的海外市场。本公司可能无法实现相关里程碑，收入规模和确认时间仍有不确定性。"]]);
 function metadata() { return { announcement: { secCode: "600123", secName: "样例医药", orgId: "example123", announcementId: "1225586487", announcementTitle: "样例医药关于签署授权许可协议的公告", announcementTime: Date.parse("2026-08-20T00:00:00+08:00"), storageTime: Date.parse("2026-08-20T18:34:26+08:00"), adjunctUrl: "finalpage/2026-08-20/1225586487.PDF", adjunctType: "PDF" }, fileUrl: "http://static.cninfo.com.cn/finalpage/2026-08-20/1225586487.PDF" }; }
 function receipt(value = metadata()) { return { finalUrl: cninfoPdfIdentity(pdf, url).recordUrl, requestMethod: "POST", status: 200, contentType: "application/json", rawBody: Buffer.from(JSON.stringify(value)) }; }

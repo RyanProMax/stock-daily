@@ -34,7 +34,7 @@ export function cninfoPdfPublication(body, receipt, source) {
   const title = String(a.announcementTitle ?? "");
   // Native quarterly records may omit the issuer prefix. The sole PDF issuer,
   // record code/name, announcement ID and exact file path remain mandatory.
-  if (![identity.title, identity.name + identity.title, identity.name + "：" + identity.title].some(expected => key(title) === key(expected))) return null;
+  if (![identity.title, ...[identity.name, identity.issuerName].flatMap(name => [name + identity.title, name + "：" + identity.title])].some(expected => key(title) === key(expected))) return null;
   const date = new Date(a.announcementTime);
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2199) return null;
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map(part => [part.type, part.value]));

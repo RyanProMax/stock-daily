@@ -12,6 +12,7 @@ import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
 import { pdfSourceRecord } from "./pdf-source.mjs";
 import { cninfoPdfIdentity, cninfoPdfPublication } from "./cninfo-pdf-publication.mjs";
+import { CNINFO_HISTORY_URL, validateCninfoHistoryBody } from "./cninfo-history-request.mjs";
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
@@ -347,7 +348,7 @@ async function requestHeadersWithNode(value, destination) {
 async function requestContentWithNode(
   value,
   destination,
-  { maxBytes = MAX_SOURCE_BYTES, signal, method = "GET" } = {},
+  { maxBytes = MAX_SOURCE_BYTES, signal, method = "GET", requestBody } = {},
 ) {
   const url = new URL(value);
   const hostname = normalizeHostname(url.hostname);
@@ -362,6 +363,7 @@ async function requestContentWithNode(
         headers: {
           Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
           "Accept-Encoding": "identity",
+          ...(requestBody ? { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Content-Length": Buffer.byteLength(requestBody) } : {}),
           "User-Agent":
             "Mozilla/5.0 (compatible; StockDailyEvidenceVerifier/1.0)",
         },
@@ -401,7 +403,7 @@ async function requestContentWithNode(
       request.destroy(new Error("Source body request timed out"));
     });
     request.once("error", rejectRequest);
-    request.end();
+    request.end(requestBody);
   });
 }
 
@@ -414,6 +416,7 @@ async function requestContentWithCurl(
     maxBytes = MAX_SOURCE_BYTES,
     signal,
     method = "GET",
+    requestBody,
   } = {},
 ) {
   const url = new URL(value);
@@ -440,6 +443,7 @@ async function requestContentWithCurl(
       "--proto-redir",
       "=https",
       ...(method === "POST" ? ["--request", "POST"] : []),
+      ...(requestBody ? ["--header", "Content-Type: application/x-www-form-urlencoded; charset=UTF-8", "--data-raw", requestBody] : []),
       "--connect-to",
       `${hostname}:443:${connectAddress}:443`,
       "--proxy-header",
@@ -1039,8 +1043,11 @@ export async function readExternalSource(
     structured = false,
     includeRaw = false,
     lookupPublicationMetadata = true,
+    cninfoHistory,
   } = {},
 ) {
+  if (cninfoHistory !== undefined && (source !== CNINFO_HISTORY_URL || !structured)) throw new Error("定期披露表单仅适用于巨潮原始只读地址");
+  if (cninfoHistory !== undefined) validateCninfoHistoryBody(cninfoHistory);
   const resolveDestination =
     resolver ??
     ((hostname) => resolveWithDoh(hostname, { runner, curlPath, signal }));
@@ -1072,7 +1079,7 @@ export async function readExternalSource(
     const destinations = resolved.destinations.slice(0, 3);
     for (let attempt = 0; attempt < destinations.length; attempt += 1) {
       try {
-        response = await requestContent(resolved.url.toString(), destinations[attempt], { maxBytes, signal });
+        response = await requestContent(resolved.url.toString(), destinations[attempt], { maxBytes, signal, ...(cninfoHistory !== undefined ? { method: "POST", requestBody: cninfoHistory } : {}) });
         break;
       } catch (error) {
         signal?.throwIfAborted();
@@ -1103,7 +1110,7 @@ export async function readExternalSource(
         if (!["application/json", "application/xml", "text/xml", "text/plain"].includes(mediaType)) {
           throw new Error(`结构化一手数据返回无效正文类型：${contentType}`);
         }
-        return { source, status: response.status, finalUrl: resolved.url.toString(), contentType, rawBody: response.body };
+        return { source, status: response.status, finalUrl: resolved.url.toString(), contentType, rawBody: response.body, ...(cninfoHistory !== undefined ? { requestMethod: "POST", requestBody: cninfoHistory } : {}) };
       }
       if (!/(?:html|xhtml|plain|json)/iu.test(contentType) && !/^application\/pdf(?:;|$)/iu.test(contentType)) {
         throw new Error(`外部证据正文类型不受支持：${contentType}`);
@@ -1236,6 +1243,7 @@ export async function readExternalSource(
       };
     }
     if (response.status >= 300 && response.status < 400 && response.location) {
+      if (cninfoHistory !== undefined) throw new Error("巨潮只读披露查询不得跳转或转发表单");
       if (redirectCount === maxRedirects) {
         throw new Error(`外部证据重定向次数过多：${source}`);
       }

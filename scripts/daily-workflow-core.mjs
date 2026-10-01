@@ -18,9 +18,9 @@ import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from
 import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition, isChinaPmiArticle } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v53";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v54";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
-export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v3";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v4";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
