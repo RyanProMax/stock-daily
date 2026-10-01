@@ -6,6 +6,8 @@ import { fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText
 import { assertComparisonNotesInExcerpt, assertFactsNumbersInExcerpt, assertMaterialEarningsContext, hasCausalPassage, hasUnitBoundComparisonValue, stableHash, supportingExcerptMatches } from "./daily-workflow-core.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { isCalendarDate } from "./evidence-timing.mjs";
+import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
+import { auditRecapRateFactors } from "./recap-rate-factors.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -109,12 +111,19 @@ export async function createSnapshotSourceReader(path, fallback = readExternalSo
   };
 }
 
-export function auditLedgerSourceSnapshots(ledger, book) {
+export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macroData = null } = {}) {
   validateSourceSnapshots(book);
+  if (ledger.sources.some(source => source.kind === "macro_observation")) {
+    if (!envelope || !macroData) throw new Error("数据观测缺少原始财政部数据账本");
+    auditRecapRateFactors(ledger, macroData, envelope);
+  }
   const originals = new Map(book.snapshots.map(snapshot => [snapshot.source, openedSourceFromSnapshot(snapshot)]));
   for (const source of ledger.sources) {
+    if (source.kind === "macro_observation") continue;
     const original = originals.get(source.originalUrl ?? source.url);
     if (!original || original.finalUrl !== source.url || original.status !== (source.status ?? original.status) || verifiedExternalSourceType(original.finalUrl) !== source.sourceType) throw new Error("证据来源与冻结原文地址、状态或身份不一致");
+    assertAccessibleOriginalArticle(original);
+    if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);
     if (quote.length < 20 || stableHash(quote) !== source.excerptHash || !supportingExcerptMatches(body, quote, source.supportingExcerpt)) throw new Error("证据引文未由冻结原文证明");

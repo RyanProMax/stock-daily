@@ -136,3 +136,13 @@ test("background-only and unresolved targets remain incomplete even when measure
   assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger));
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger, { requireComplete: true }), /未完成/);
 });
+
+test("private audit reasons can explain an evidence gap, while a facts record still cannot masquerade as a causal reaction", () => {
+  const f = inferredFixture();
+  f.entry.counterAssessment = "The evidence only establishes structural exposure; it does not establish that this was the dominant driver of today's close. Competing events still require original verification.";
+  assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger));
+  f.rawEntry.whyEn = "Inference: The evidence only establishes structural exposure; the reader is asked to inspect the internal review pipeline before accepting this conclusion.";
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }), /内部流程|审核措辞/);
+  f.entry.chains[0].reactionEvidenceId = "1-facts";
+  assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /role=facts.*causal/);
+});

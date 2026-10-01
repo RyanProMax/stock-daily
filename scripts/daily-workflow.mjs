@@ -62,6 +62,7 @@ import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-dat
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
+import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -828,7 +829,7 @@ export function recapResearchSourceAccess(initial, ledger) {
   const urls = new Set(initial.urls ?? []);
   const refused = new Map();
   for (const item of ledger.rejected ?? []) {
-    if (!/HTTP (?:401|403|404|429)|正文过短/u.test(item.reason ?? "")) continue;
+    if (!/HTTP (?:401|403|404|429)|正文过短|正文需订阅|当日收盘报道.{0,40}矛盾/u.test(item.reason ?? "")) continue;
     let url;
     try { url = new URL(item.url); } catch { continue; }
     if (url.protocol !== "https:" || url.username || url.password) continue;
@@ -862,7 +863,7 @@ export async function researchSourceAvailability(workRoot, { market, marketAsOf,
       for (const rejected of ledger.rejected ?? []) {
         // Missing publication metadata can be a parser limitation repaired
         // between attempts; it does not mean the publisher refused access.
-        if (!/HTTP (?:401|403|404|429)|正文过短/u.test(rejected.reason ?? "")) continue;
+        if (!/HTTP (?:401|403|404|429)|正文过短|正文需订阅|当日收盘报道.{0,40}矛盾/u.test(rejected.reason ?? "")) continue;
         const url = new URL(rejected.url);
         if (url.protocol !== "https:" || url.username || url.password) continue;
         urls.add(url.toString());
@@ -2049,7 +2050,9 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v15",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v16",
+      checkSessionIntegrity: this.completeRecap,
+      macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
     });
     const key = `evidence-verification-${inputHash.slice(0, 8)}`;
@@ -2113,6 +2116,7 @@ export class MarketWorkflow {
         this.sourceVerifier(researchOutputs, this.envelope, {
           signal: controller.signal,
           verifiedCache: this.verifiedEvidenceCache,
+          checkSessionIntegrity: this.completeRecap,
           ...(this.recapSourceReader ? { reader: this.recapSourceReader } : {}),
         }),
         hardStop,
@@ -2121,6 +2125,7 @@ export class MarketWorkflow {
     } finally {
       clearTimeout(timeoutId);
     }
+    if (this.recapResearchActive && this.macroData) ledger = mergeRecapRateFactors(ledger, this.macroData, this.envelope);
     await Promise.all([
       atomicJson(path, ledger),
       atomicJson(canonicalPath, ledger),
@@ -2845,6 +2850,7 @@ export class MarketWorkflow {
   }
 
   async runCompleteRecap() {
+    this.recapResearchActive = true;
     const socialPath = resolve(this.runDir, "artifacts/social-ledger.json");
     let social;
     if (await exists(socialPath)) {
@@ -2945,22 +2951,22 @@ export class MarketWorkflow {
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
     await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), ledger);
     this.manifest.recapLedgerHash = stableHash(ledger);
-    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData });
+    const coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
     if (!coverage.eligibleCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
     const financialComparisons = ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length);
     const payload = { envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons, ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps };
-    const attributor = await this.runValidatedAgentStage({ baseKey: "recap-attributor", role: "recap_attributor", payload: { ...payload, coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, payload.targets, ledger) });
+    const attributor = await this.runValidatedAgentStage({ baseKey: "recap-attributor", role: "recap_attributor", payload: { ...payload, coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, payload.targets, ledger, { macroData }) });
     const attribution = attributor.output;
     await atomicJson(resolve(this.runDir, "artifacts/recap-attribution.json"), attribution);
     this.manifest.recapAttributionHash = stableHash(attribution);
     payload.attribution = attribution;
     await this.saveManifest();
     if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
-    validateRecapAttribution(attribution, this.envelope, payload.targets, ledger, { requireComplete: true });
-    const recapOptions = { tradingData, attribution };
+    validateRecapAttribution(attribution, this.envelope, payload.targets, ledger, { requireComplete: true, macroData });
+    const recapOptions = { tradingData, attribution, macroData };
     const writer = await this.runValidatedAgentStage({ baseKey: "recap-writer", role: "recap_writer", payload, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-attribution.json", "social-ledger.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => { validateCompleteRecap(output, this.envelope, ledger, social, recapOptions); return output; } });
     await atomicJson(resolve(this.runDir, "artifacts/recap-draft.json"), writer.output);
     const recap = validateCompleteRecap(writer.output, this.envelope, ledger, social, recapOptions);
@@ -2971,6 +2977,7 @@ export class MarketWorkflow {
     this.manifest.recapApproval = { recapHash: stableHash(recap), draftHash: stableHash(writer.output), reviewHash: stableHash(review), attributionStage: attributor.key, writerStage: writer.key, reviewerStage: reviewer.key, status: recap.status };
     await this.saveManifest();
     validateCompleteRecap(writer.output, this.envelope, ledger, social, { ...recapOptions, requireComplete: true });
+    this.recapResearchActive = false;
     return recap;
   }
 }

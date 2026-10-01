@@ -526,14 +526,14 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
     const [ledger, social, draft, review, tradingData, macroData, attribution, transmission] = await Promise.all(["recap-ledger.json", "social-ledger.json", "recap-draft.json", "recap-review.json", "recap-trading-data.json", "recap-macro-data.json", "recap-attribution.json", "recap-transmission-data.json"].map(async (name) => JSON.parse(await readFile(resolve(root, name), "utf8"))));
     const sourceSnapshots = JSON.parse(await readFile(resolve(root, "recap-source-snapshots.json"), "utf8"));
     if (stableHash(sourceSnapshots) !== manifest.sourceSnapshotsHash) throw new Error("完整复盘原文快照哈希不一致");
-    auditLedgerSourceSnapshots(ledger, sourceSnapshots);
+    auditLedgerSourceSnapshots(ledger, sourceSnapshots, { envelope: researchMarketEnvelope(input, manifest.market), macroData });
     if (stableHash(ledger) !== manifest.recapLedgerHash || stableHash(social) !== manifest.socialHash || stableHash(draft) !== manifest.recapApproval?.draftHash || stableHash(review) !== manifest.recapApproval?.reviewHash || stableHash(tradingData) !== manifest.tradingHash || stableHash(macroData) !== manifest.macroHash) throw new Error("完整复盘证据、日线、宏观数据、原文或独立审稿哈希不一致");
     validateRecapTradingData(tradingData, researchMarketEnvelope(input, manifest.market));
     validateRecapMacroData(macroData, researchMarketEnvelope(input, manifest.market));
     if (stableHash(transmission) !== manifest.transmissionHash) throw new Error("完整复盘行业背景原文哈希不一致");
     validateRecapTransmissionData(transmission, researchMarketEnvelope(input, manifest.market), completeRecapPlan(researchMarketEnvelope(input, manifest.market), tradingData));
     if (stableHash(attribution) !== manifest.recapAttributionHash) throw new Error("完整复盘事件传导审查哈希不一致");
-    validateRecapAttribution(attribution, researchMarketEnvelope(input, manifest.market), recapTargets(researchMarketEnvelope(input, manifest.market)), ledger, { requireComplete: true });
+    validateRecapAttribution(attribution, researchMarketEnvelope(input, manifest.market), recapTargets(researchMarketEnvelope(input, manifest.market)), ledger, { requireComplete: true, macroData });
     if (!Object.values(manifest.stages ?? {}).some((stage) => stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger))) throw new Error("完整复盘证据尚未通过原文验证");
     for (const [role, field, expected] of [["recap_attributor", "attributionStage", attribution], ["recap_writer", "writerStage", draft], ["recap_reviewer", "reviewerStage", review]]) {
       const key = manifest.recapApproval?.[field];
@@ -542,12 +542,12 @@ export async function auditWorkflowCausalEvidence({ manifest, report, manifestPa
       const text = await readFile(resolve(root, `${key}.json`), "utf8");
       if (stableHash(text) !== stage.outputHash || stableHash(JSON.parse(text)) !== stableHash(expected)) throw new Error("完整复盘成稿或审稿与独立进程产物不一致");
     }
-    const recap = validateCompleteRecap(draft, researchMarketEnvelope(input, manifest.market), ledger, social, { requireComplete: true, tradingData, attribution });
+    const recap = validateCompleteRecap(draft, researchMarketEnvelope(input, manifest.market), ledger, social, { requireComplete: true, tradingData, attribution, macroData });
     validateRecapReview(review, recap);
     if (stableHash(recap) !== manifest.recapApproval?.recapHash || stableHash(report.recaps?.[manifest.market]) !== stableHash(recap)) throw new Error("发布复盘与已批准完整复盘不一致");
   }
   const ledger = JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/evidence-ledger.json"), "utf8"));
-  if (manifest.coverageRequired) auditLedgerSourceSnapshots(ledger, JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/recap-source-snapshots.json"), "utf8")));
+  if (manifest.coverageRequired) auditLedgerSourceSnapshots(ledger, JSON.parse(await readFile(resolve(dirname(resolve(manifestPath)), "artifacts/recap-source-snapshots.json"), "utf8")), { envelope: researchMarketEnvelope(input, manifest.market) });
   if (!Object.values(manifest.stages ?? {}).some((stage) =>
     stage.role === "deterministic_source_verification" && stage.status === "completed" && stage.outputHash === stableHash(ledger)
   )) throw new Error("发布证据账本与已验证阶段哈希不一致");

@@ -1,7 +1,8 @@
-import { assertFactsNumbersInExcerpt, hasCausalPassage, readerText } from "./daily-workflow-core.mjs";
+import { assertFactsNumbersInExcerpt, hasCausalPassage } from "./daily-workflow-core.mjs";
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
+import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
 
 export const ATTRIBUTION_VERSION = "verified-recap-attribution-v1";
 const DIRECTIONS = ["positive", "negative", "flat"];
@@ -9,11 +10,22 @@ const GENERIC_TERMS = /^(?:market|markets|stock|stocks|shares|prices?|demand|sup
 const CALENDAR_TERM = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday)$/iu;
 const NUMERIC_ANCHOR = /^[+-]?(?:US\$|\$|USD\s*|¥)?[+-]?\d[\d,.]*(?:\s*(?:%|ppts?|pp|percentage points?|basis points?|bps?|points?|美元|个百分点|百分点|基点|USD))?$/iu;
 
+function assessmentText(value, label, min, max) {
+  // These are private audit assessments, never copied into the public recap.
+  // Applying reader prose restrictions here suppresses valid rejection reasons
+  // such as "the evidence only establishes exposure", causing needless retries.
+  if (typeof value !== "string") throw new Error(`${label} 缺失`);
+  const text = value.normalize("NFC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
+  if (text.includes("\uFFFD") || [...text].length < min || [...text].length > max) throw new Error(`${label} 长度或编码无效`);
+  return text;
+}
+
 function verified(source) {
   return source && source.excerptHash && source.verifiedAt && source.timingChecked === true && ["first_party", "publisher"].includes(source.sourceType) && verifiedExternalSourceType(source.url) === source.sourceType;
 }
 
-function freshRoot(source, envelope) {
+function freshRoot(source, envelope, macroData = null) {
+  if (source?.kind === "macro_observation") return verifiedRateFactor(source, macroData, envelope);
   if (!verified(source) || source.role !== "facts" || source.sourceType !== "first_party" || source.kind === "background") return false;
   if (isCalendarDate(source.publishedAt)) return source.kind === "official" && officialReleaseDateInWindow(source.publishedAt, envelope);
   const time = Date.parse(source.publishedAt);
@@ -41,6 +53,7 @@ function independent(root, report) {
 }
 
 function chronology(root, report, envelope, confirmation = report) {
+  if (root.kind === "macro_observation") return Boolean(reportedRateFactorMatch(root, report, envelope));
   if (isCalendarDate(root.publishedAt)) {
     // Keep unknown official publication hours unknown. A separate, verified
     // pre-close factual report can establish that this value was public.
@@ -53,8 +66,8 @@ function chronology(root, report, envelope, confirmation = report) {
   return Date.parse(root.publishedAt) <= Date.parse(report.publishedAt);
 }
 
-export function recapAttributionCandidates(envelope, targets, ledger) {
-  const roots = ledger.sources.filter(source => freshRoot(source, envelope));
+export function recapAttributionCandidates(envelope, targets, ledger, { macroData = null } = {}) {
+  const roots = ledger.sources.filter(source => freshRoot(source, envelope, macroData));
   const reports = ledger.sources.filter(source => reaction(source, envelope));
   const confirmations = ledger.sources.filter(source => verified(source) && source.kind !== "background" && !isCalendarDate(source.publishedAt));
   return targets.map(target => {
@@ -67,7 +80,8 @@ export function recapAttributionCandidates(envelope, targets, ledger) {
       return eligible.length ? [{ root: root.id, reaction: report.id, timingEvidenceIds: eligible.map(source => source.id) }] : [];
     }));
     const direct = pairs.some(pair => targetRoots.some(root => root.id === pair.root) && targetReports.some(report => report.id === pair.reaction));
-    return { target: target.symbol, reportedEligible: direct, inferredIngredientsPresent: mechanismsCover(mechanisms, target) && pairs.length > 0, rootEvidenceIds: roots.map(source => source.id), reactionEvidenceIds: reports.map(source => source.id), mechanismEvidenceIds: mechanisms.map(source => source.id), candidatePairs: pairs };
+    const directlyReportedFactor = target.kind === "market" && pairs.some(pair => roots.some(root => root.id === pair.root && root.kind === "macro_observation") && targetReports.some(report => report.id === pair.reaction));
+    return { target: target.symbol, reportedEligible: direct, inferredIngredientsPresent: (mechanismsCover(mechanisms, target) && pairs.length > 0) || directlyReportedFactor, rootEvidenceIds: roots.map(source => source.id), reactionEvidenceIds: reports.map(source => source.id), mechanismEvidenceIds: mechanisms.map(source => source.id), candidatePairs: pairs };
   });
 }
 
@@ -101,7 +115,7 @@ export function attributionEvidenceIds(entry) {
   return [...new Set(entry.chains.flatMap(chain => [chain.rootEvidenceId, chain.reactionEvidenceId, ...(chain.timingEvidenceId ? [chain.timingEvidenceId] : []), ...chain.mechanismEvidenceIds]))];
 }
 
-export function validateRecapAttribution(value, envelope, targets, ledger, { requireComplete = false } = {}) {
+export function validateRecapAttribution(value, envelope, targets, ledger, { requireComplete = false, macroData = null } = {}) {
   if (value?.contractVersion !== ATTRIBUTION_VERSION || value.market !== envelope.market || value.marketAsOf !== envelope.marketAsOf || !Array.isArray(value.entries) || value.entries.length !== targets.length) throw new Error("复盘传导审查必须覆盖全部目标与相同交易日");
   const map = new Map(ledger.sources.map(source => [source.id, source]));
   const entries = new Map(value.entries.map(entry => [entry.target, entry]));
@@ -110,7 +124,7 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
     const entry = entries.get(target.symbol);
     if (!["reported", "inferred", "unresolved"].includes(entry.basis) || entry.observedReturn !== target.change || !Array.isArray(entry.chains) || entry.chains.length > 3) throw new Error(`${target.symbol} 归因依据或实际方向无效`);
     selected(entry.counterEvidenceIds, map, "反证", 0, 6);
-    readerText(entry.counterAssessment, "反证分析", 40, 1_200);
+    assessmentText(entry.counterAssessment, "反证分析", 40, 1_200);
     if (entry.basis === "unresolved") {
       if (entry.chains.length || requireComplete) throw new Error(`${target.symbol} 未完成事件传导审查`);
       continue;
@@ -120,20 +134,28 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       if (chain.timingEvidenceId !== null && typeof chain.timingEvidenceId !== "string") throw new Error(`${target.symbol} 当时事实确认的引用字段无效`);
       const [root, report] = selected([chain.rootEvidenceId, chain.reactionEvidenceId], map, "事件与市场反应", 2, 2);
       const confirmation = chain.timingEvidenceId == null ? report : selected([chain.timingEvidenceId], map, "当时的事实确认")[0];
-      if (!freshRoot(root, envelope) || !reaction(report, envelope) || !independent(root, report) || !chronology(root, report, envelope, confirmation)) throw new Error(`${target.symbol} 官方事件、独立反应或时间先后不成立`);
-      anchors(chain.eventAnchors, root, report);
+      if (!freshRoot(root, envelope, macroData)) throw new Error(`${target.symbol} 官方事件 ${root.id} 未核验、过时或缺少原始观测数据`);
+      if (!reaction(report, envelope)) throw new Error(`${target.symbol} 反应引用 ${report.id} 的 role=${report.role} 不满足已核验的 causal 角色、原文因果或会话时间；请使用该目标 candidatePairs 中的 reaction 引用，否则保留 unresolved`);
+      if (!independent(root, report) || !chronology(root, report, envelope, confirmation)) throw new Error(`${target.symbol} 官方事件、独立反应或时间先后不成立`);
+      const observedFactor = root.kind === "macro_observation";
+      if (observedFactor) {
+        if (entry.basis !== "inferred" || chain.timingEvidenceId !== null || !reportedRateFactorMatch(root, report, envelope)) throw new Error(`${target.symbol} 观测不能伪装为当日有发布时间的事件或确定归因`);
+        assertRateFactorAnchors(chain.eventAnchors, root);
+        if (!/observation|observed|观测|观察/iu.test(chain.limitations) || !hasUnknownRatePublication(chain.limitations) || !/\bpar\b|平价/iu.test(chain.limitations)) throw new Error(`${target.symbol} 观测推断须区分平价收益率与报道报价，并保留未知发布时间`);
+      } else anchors(chain.eventAnchors, root, report);
       if (chain.timingEvidenceId) {
         if (!isCalendarDate(root.publishedAt)) throw new Error(`${target.symbol} 精确发布时间来源无需附加未知时刻确认`);
         anchors(chain.eventAnchors, root, confirmation);
       }
       if (!DIRECTIONS.includes(chain.expectedDirection)) throw new Error(`${target.symbol} 传导方向无效`);
-      readerText(chain.transmission, "传导机制", 50, 1_200);
-      readerText(chain.limitations, "传导局限", 30, 900);
-      const mechanisms = selected(chain.mechanismEvidenceIds, map, "背景传导", entry.basis === "inferred" ? 1 : 0);
+      assessmentText(chain.transmission, "传导机制", 50, 1_200);
+      assessmentText(chain.limitations, "传导局限", 30, 900);
+      const directMarketFactor = observedFactor && target.kind === "market" && report.targets.includes(target.symbol);
+      const mechanisms = selected(chain.mechanismEvidenceIds, map, "背景传导", entry.basis === "inferred" && !directMarketFactor ? 1 : 0);
       if (mechanisms.some(source => !background(source, envelope, target))) throw new Error(`${target.symbol} 背景传导证据类型或适用对象无效`);
       if (entry.basis === "reported") {
         if (!root.targets.includes(target.symbol) || !report.targets.includes(target.symbol)) throw new Error(`${target.symbol} 报道归因未直接对应目标`);
-      } else if (!mechanismsCover(mechanisms, target)) throw new Error(`${target.symbol} 推断缺少全部适用对象的一手传导披露`);
+      } else if (!directMarketFactor && !mechanismsCover(mechanisms, target)) throw new Error(`${target.symbol} 推断缺少全部适用对象的一手传导披露`);
     }
     const move = Number(target.change.slice(0, -1));
     const observed = move > 0 ? "positive" : move < 0 ? "negative" : "flat";

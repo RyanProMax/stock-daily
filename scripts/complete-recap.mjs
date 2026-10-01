@@ -13,6 +13,7 @@ import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
 import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution } from "./recap-attribution.mjs";
+import { auditRecapRateFactors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
 const SIZE_EVIDENCE = /成交|量能|缩量|放量|振幅|波幅|盘中|涨跌家数|抵消|对冲|分化|权重|\b(?:volume|turnover|intraday|range|breadth|offset|counter|divergen|weight|narrow|restrain|limit)\w*/iu;
@@ -164,9 +165,9 @@ function ids(values, sources, label, min = 1) {
   return values.map((id) => sources.get(id));
 }
 
-export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = null } = {}) {
+export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = null, macroData = null } = {}) {
   const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
-  const inferenceCandidates = new Map(recapAttributionCandidates(envelope, recapTargets(envelope), ledger).map(item => [item.target, item]));
+  const inferenceCandidates = new Map(recapAttributionCandidates(envelope, recapTargets(envelope), ledger, { macroData }).map(item => [item.target, item]));
   const entries = completeRecapPlan(envelope).anomalies.map(anomaly => {
     const sources = ledger.sources.filter(source => source.anomalyId === anomaly.id && source.targets.includes(anomaly.target));
     const facts = sources.filter(source => source.role === "facts" && source.sourceType === "first_party" && source.kind !== "background");
@@ -187,9 +188,13 @@ export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = nu
   return { market: envelope.market, marketAsOf: envelope.marketAsOf, eligibleCount: entries.filter(entry => !entry.gaps.length).length, requiredCount: entries.length, entries };
 }
 
-export function validateCompleteRecap(value, envelope, ledger, social, { requireComplete = false, tradingData = null, attribution = null } = {}) {
+export function validateCompleteRecap(value, envelope, ledger, social, { requireComplete = false, tradingData = null, attribution = null, macroData = null } = {}) {
   const targets = recapTargets(envelope);
-  const attributions = attribution ? new Map(validateRecapAttribution(attribution, envelope, targets, ledger, { requireComplete }).entries.map(item => [item.target, item])) : null;
+  if (ledger.sources.some(source => source.kind === "macro_observation")) {
+    if (!macroData) throw new Error("复盘观测缺少财政部原始数据");
+    auditRecapRateFactors(ledger, macroData, envelope);
+  }
+  const attributions = attribution ? new Map(validateRecapAttribution(attribution, envelope, targets, ledger, { requireComplete, macroData }).entries.map(item => [item.target, item])) : null;
   const observations = new Map(recapObservations(envelope, tradingData).map(item => [item.target, item]));
   const sourceMap = new Map(ledger.sources.map((item) => [item.id, item]));
   if (value.contractVersion !== RECAP_VERSION || value.market !== envelope.market || value.marketAsOf !== envelope.marketAsOf || !Array.isArray(value.entries) || value.entries.length !== targets.length) throw new Error("复盘必须逐项覆盖完整的 20 个目标");
@@ -228,6 +233,7 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const why = readerText(raw.why, `${target.symbol} why`, raw.status === "unresolved" ? 20 : 100, 900);
     const whyEn = readerText(raw.whyEn, `${target.symbol} whyEn`, 40, 1_800);
     if (inferred && (!/推断|推论|推测/u.test(why) || !/\binfer(?:ence|red|ring)?\b/iu.test(whyEn))) throw new Error(`${target.symbol} 推断必须在两种语言中明确标注`);
+    if (cause.some(source => source.kind === "macro_observation") && (!/观测|观察/u.test(why) || !/平价/u.test(why) || !hasUnknownRatePublication(why) || !/\bobserv(?:ation|ed)\b/iu.test(whyEn) || !/\bpar\b/iu.test(whyEn) || !hasUnknownRatePublication(whyEn))) throw new Error(`${target.symbol} 两种语言须保留观测口径与未知公布时刻，不得把它写成新闻催化`);
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);
     const magnitudeEn = readerText(raw.magnitudeEn, `${target.symbol} magnitudeEn`, 40, 1_200);
     const selectedMeasurements = validateMagnitudeObservationIds(measurementIds, measured, { copy: magnitude, copyEn: magnitudeEn });

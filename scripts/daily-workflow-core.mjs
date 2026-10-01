@@ -6,8 +6,9 @@ import {
   verifiedExternalSourceType,
 } from "./source-registry.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
+import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v34";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v35";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1074,7 +1075,7 @@ const FACT_NUMBER_MENTION =
 const POSITIVE_DIRECTION =
   /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
@@ -1187,13 +1188,14 @@ function numericMentions(value) {
     let unit = numberMentionUnit(match.groups.prefix, match.groups.suffix);
     let direction = nearestDirection(copy, start, end, signedNumber);
     if (unit === "number") {
-      if (/^月(?!份?的?期)/u.test(after)) unit = "calendar_month";
+      if (/(?:S&P|Standard (?:&|and) Poor[’']s|标普)\s*$/iu.test(before)) unit = "index_identifier_sp";
+      else if (/^月(?!份?的?期)/u.test(after)) unit = "calendar_month";
       else if (number >= 1900 && number <= 2199 && (/^(?:财)?年/u.test(after) || /(?:\b(?:since|in|FY|fiscal year)\s*|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}[, ]*)?)$/iu.test(before))) unit = "calendar_year";
       else if (/^日/u.test(after) || /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*$/u.test(before)) unit = "calendar_day";
       else if (/^季度/u.test(after) && /第$/u.test(before) || /\bQ$/u.test(before)) unit = "quarter_number";
       else if (/第$/u.test(before) || /^(?:st|nd|rd|th)\b/u.test(after)) unit = "ordinal_number";
       else if (/^(?:-?years?\b|年(?:期|以来|低|高|纪录|新|半))/iu.test(after)) unit = "duration_years";
-      if (["calendar_month", "calendar_year", "calendar_day", "quarter_number", "ordinal_number", "duration_years"].includes(unit)) direction = null;
+      if (["index_identifier_sp", "calendar_month", "calendar_year", "calendar_day", "quarter_number", "ordinal_number", "duration_years"].includes(unit)) direction = null;
     }
     return canonicalMention({ number, display: match[0].trim(), unit, direction });
   });
@@ -1392,7 +1394,7 @@ function normalizedSourceKind(source, envelope) {
 export async function verifyResearchSources(
   researchOutputs,
   envelope,
-  { reader = readExternalSource, signal, verifiedCache = new Map() } = {},
+  { reader = readExternalSource, signal, verifiedCache = new Map(), checkSessionIntegrity = false } = {},
 ) {
   const candidates = researchOutputs.flatMap((output) => output.sources);
   const results = new Array(candidates.length);
@@ -1409,12 +1411,13 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.comparisonNotesChecked === true && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
         const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024 } : {}) });
+        assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publishedAt = verifiedSourceTime(
@@ -1424,6 +1427,7 @@ export async function verifyResearchSources(
           opened.publishedDateCandidates ?? [],
           sourceType,
         );
+        const closingChecks = checkSessionIntegrity ? assertSessionClosingClaims(opened.text, envelope, publishedAt) : [];
         let normalizedCandidate = {
           ...candidate,
           title: readerText(candidate.title, "verified source title", 4, 220),
@@ -1507,6 +1511,7 @@ export async function verifyResearchSources(
             earningsContextChecked: true,
             comparisonNotesChecked: true,
             timingChecked: true,
+            ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),
