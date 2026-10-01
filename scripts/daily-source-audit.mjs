@@ -12,6 +12,7 @@ import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
 import { pdfSourceRecord } from "./pdf-source.mjs";
 import { cninfoPdfIdentity, cninfoPdfPublication } from "./cninfo-pdf-publication.mjs";
+import { chinaPmiDocument } from "./china-pmi-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -705,6 +706,8 @@ export function sourcePublishedAtCandidates(
   if (isGdpNowCommentary(source)) return [];
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
+  const chinaPmi = chinaPmiDocument(decoded, source);
+  if (chinaPmi) return [chinaPmi.publishedAt];
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
   const values = [];
   const isModificationLabel = (index) =>
@@ -941,6 +944,8 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
     return record ? [record.updateDate] : [];
   }
   const decoded = decodeSourceBody(body, contentType);
+  const chinaPmi = chinaPmiDocument(decoded, source);
+  if (chinaPmi) return [chinaPmi.publicationDate];
   const values = jsonLdArticlePublishedValues(decoded, source);
   for (const match of decoded.matchAll(/<meta[^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]*>/giu)) values.push(match[1]);
   for (const match of decoded.matchAll(/<meta[^>]+content=["'](\d{4}-\d{2}-\d{2})["'][^>]+(?:property|name)=["'](?:datePublished|pubdate|publishdate|article:published_time)["'][^>]*>/giu)) values.push(match[1]);

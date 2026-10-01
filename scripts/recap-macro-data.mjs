@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { stableHash } from "./daily-workflow-core.mjs";
 import { readExternalSource } from "./daily-source-audit.mjs";
+import { collectRecapChinaPmiData, validateRecapChinaPmiData } from "./recap-china-pmi-data.mjs";
 
 const ATOM = "http://www.w3.org/2005/Atom";
 const DATA = "http://schemas.microsoft.com/ado/2007/08/dataservices";
@@ -97,10 +98,12 @@ export function validateRecapMacroData(book, envelope) {
     if (book.gaps.length !== 1 || book.gaps[0].series !== SERIES || book.context !== null || typeof book.gaps[0].reason !== "string" || !book.gaps[0].reason) throw new Error("复盘宏观缺口记录无效");
     book.snapshots.forEach(snapshot => parseTreasurySnapshot(snapshot, envelope));
   } else if (stableHash(book.context) !== stableHash(derive(book, envelope))) throw new Error("复盘宏观数据派生值被修改");
+  if (envelope.market === "CN") validateRecapChinaPmiData(book.chinaPmi, envelope);
+  else if (book.chinaPmi != null) throw new Error("美国市场不能套用中国 PMI 输入");
   return book;
 }
 
-export async function collectRecapMacroData(envelope, { reader = readExternalSource, now = () => new Date() } = {}) {
+export async function collectRecapMacroData(envelope, { reader = readExternalSource, now = () => new Date(), signal } = {}) {
   const book = { market: envelope.market, marketAsOf: envelope.marketAsOf, snapshots: [], context: null, gaps: [] };
   const year = Number(envelope.marketAsOf.slice(0, 4));
   const years = [year];
@@ -108,7 +111,7 @@ export async function collectRecapMacroData(envelope, { reader = readExternalSou
   try {
     for (const year of years) {
       const url = treasuryDataUrl(year);
-      const response = await reader(url, { structured: true, signal: AbortSignal.timeout(45_000) });
+      const response = await reader(url, { structured: true, signal: signal ?? AbortSignal.timeout(45_000) });
       const xml = new TextDecoder("utf-8", { fatal: true }).decode(response.rawBody);
       book.snapshots.push({ url, finalUrl: response.finalUrl, xml, payloadHash: stableHash(xml), fetchedAt: now().toISOString() });
       parseTreasurySnapshot(book.snapshots.at(-1), envelope);
@@ -119,5 +122,6 @@ export async function collectRecapMacroData(envelope, { reader = readExternalSou
     book.snapshots = book.snapshots.filter(snapshot => { try { parseTreasurySnapshot(snapshot, envelope); return true; } catch { return false; } });
     book.gaps.push({ series: SERIES, reason: String(error.message).slice(0, 300) });
   }
+  if (envelope.market === "CN") book.chinaPmi = await collectRecapChinaPmiData(envelope, { reader, now, signal: signal ?? AbortSignal.timeout(90_000) });
   return validateRecapMacroData(book, envelope);
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readExternalSource, normalizedEvidenceText } from "./daily-source-audit.mjs";
+import { readExternalSource, normalizedEvidenceText, decodeSourceBody } from "./daily-source-audit.mjs";
 import { marketAsOfFromInput, marketAsOfFromReport } from "./daily-policy.mjs";
 import {
   verifiedExternalSourceLabel,
@@ -15,8 +15,9 @@ import transmissionConfig from "../data/recap-transmission-sources.json" with { 
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 import { verifiedCurrentCorporateAction, isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
+import { CHINA_PMI_EVIDENCE_VERSION, chinaPmiDocument, chinaPmiSurveyDefinition, isChinaPmiArticle } from "./china-pmi-release.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v51";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v52";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v2";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v2";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
@@ -1096,7 +1097,7 @@ const FACT_NUMBER_MENTION =
 const POSITIVE_DIRECTION =
   /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
@@ -1502,12 +1503,13 @@ export async function verifyResearchSources(
         const candidateUrl = new URL(candidate.originalUrl);
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
         const cachedPdfIssuerValid = (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
-        if (cachedPdfIssuerValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const cachedPmiValid = !isChinaPmiArticle(candidate.originalUrl) || (cached?.surveyChecked === true && cached.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION);
+        if (cachedPdfIssuerValid && cachedPmiValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const sourceType = verifiedExternalSourceType(opened.finalUrl, "web");
         assertCurrentPdfIssuer(candidate, opened);
@@ -1552,6 +1554,9 @@ export async function verifyResearchSources(
           throw new Error("支持段落无法在来源正文中定位");
         }
         let forecastDefinition;
+        const surveyRecord = isChinaPmiArticle(opened.finalUrl) && Buffer.isBuffer(opened.rawBody) ? chinaPmiDocument(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
+        const surveyDefinition = chinaPmiSurveyDefinition(surveyRecord);
+        if (surveyDefinition && (candidate.role !== "facts" || !["official", "event"].includes(candidate.kind) || candidate.scope !== "event_only" || candidate.causalConnection || candidate.comparisons.length)) throw new Error("PMI 调查事实须保留公共事件范围，不能充当股票板块敞口、价格因果或财报对比");
         if (isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(opened.finalUrl)) {
           const record = gdpNowCommentaryRecord(opened.rawBody ?? Buffer.alloc(0), opened.finalUrl);
           if (!record || candidate.role !== "facts" || !["official", "event"].includes(candidate.kind) || candidate.causalConnection || !supportingExcerptMatches(normalizedEvidenceText(record.paragraph), normalizedExcerpt, candidate.supportingExcerpt)) throw new Error("GDPNow 引文须属于唯一的最新模型更新，不能借用历史条目或充当行情因果报道");
@@ -1616,6 +1621,7 @@ export async function verifyResearchSources(
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),
             ...((companySubjects.length || backgroundSubjects?.length) && opened.pdfDocument?.issuer ? { pdfIssuerEvidenceVersion: PDF_ISSUER_EVIDENCE_VERSION } : {}),
             ...(forecastDefinition ? { forecastDefinition, forecastChecked: true, useLimitation: forecastDefinition.limitation } : {}),
+            ...(surveyDefinition ? { surveyDefinition, surveyChecked: true, useLimitation: surveyDefinition.limitation } : {}),
             ...(corporateAction ? { corporateAction, corporateActionChecked: true, useLimitation: corporateAction.limitation } : {}),
             timePrecision: isCalendarDate(publishedAt) ? "date" : "instant",
             ...(isCalendarDate(publishedAt) ? { timingLimitation: "The source establishes a release date; intraday publication and availability are unverified." } : {}),

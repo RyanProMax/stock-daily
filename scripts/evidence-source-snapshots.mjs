@@ -15,6 +15,7 @@ import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./s
 import { auditRecapRateFactors } from "./recap-rate-factors.mjs";
 import { secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
 import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
+import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.mjs";
 
 export const SOURCE_SNAPSHOT_VERSION = "verified-original-source-snapshots-v1";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -172,6 +173,13 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
       if (!record || source.forecastChecked !== true || stableHash(source.forecastDefinition) !== stableHash(gdpNowForecastDefinition(record)) || source.role !== "facts" || !["official", "event"].includes(source.kind) || source.causalConnection || !supportingExcerptMatches(normalizedEvidenceText(record.paragraph), quote, source.supportingExcerpt)) throw new Error("GDPNow 模型定义、最新条目和引文未由冻结原文重建");
       assertGdpNowCopy(source.facts, [source]);
     } else if (source.forecastDefinition || source.forecastChecked) throw new Error("非 GDPNow 原文不得伪造模型核验记录");
+    const pmiRecord = /^(?:text\/html|application\/xhtml)/iu.test(original.contentType) ? chinaPmiDocument(decodeSourceBody(original.rawBody, original.contentType), source.url) : null;
+    if (pmiRecord) {
+      if (source.surveyChecked !== true || stableHash(source.surveyDefinition) !== stableHash(chinaPmiSurveyDefinition(pmiRecord)) || source.role !== "facts" || source.scope !== "event_only" || !["official", "event"].includes(source.kind) || source.causalConnection || source.comparisons?.length) throw new Error("PMI 调查口径或公共事件范围未由冻结原文重建");
+      const frozen = [macroData?.chinaPmi?.release, macroData?.chinaPmi?.interpretation].find(item => item?.source === source.url);
+      const ledgerOriginal = book.snapshots.find(item => item.source === (source.originalUrl ?? source.url));
+      if (frozen && frozen.bodyHash !== ledgerOriginal?.bodyHash) throw new Error("PMI 引文和宏观数据使用了不同版本的发布原文");
+    } else if (source.surveyDefinition || source.surveyChecked) throw new Error("非 PMI 原文不得伪造调查核验记录");
     assertFactsNumbersInExcerpt({ ...source, facts: source.facts ?? "" });
     assertComparisonNotesInExcerpt(source);
     assertMaterialEarningsContext(source, original.text);

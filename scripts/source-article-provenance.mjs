@@ -1,5 +1,6 @@
 import { JSDOM } from "jsdom";
 import { verifiedExternalSourceLabel, verifiedExternalSourceType, verifiedFirstPartyIssuerIdentity } from "./source-registry.mjs";
+import { chinaPmiDocument } from "./china-pmi-release.mjs";
 
 export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v2";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
@@ -67,6 +68,8 @@ function agency(value) {
 // version availability or reporting origin. Photo credits, recommended
 // articles, website footers and a generic dateModified are excluded.
 export function sourceArticleProvenance(decodedHtml, source) {
+  const chinaPmi = chinaPmiDocument(decodedHtml, source);
+  if (chinaPmi) return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "authority:stats.gov.cn", identified: true, basis: "bound_authority_document" }, publication: { status: "verified", initialPublishedAt: chinaPmi.publishedAt, currentVersionAt: chinaPmi.publishedAt, timeBasis: "first_publication" } };
   const sourceType = verifiedExternalSourceType(source), issuer = verifiedFirstPartyIssuerIdentity(source);
   if (sourceType !== "publisher" && !(sourceType === "first_party" && issuer)) return null;
   const document = new JSDOM(decodedHtml).window.document;

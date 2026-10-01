@@ -59,6 +59,7 @@ import {
 } from "./complete-recap.mjs";
 import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
+import { chinaPmiResearchSources, chinaPmiSourceReader } from "./recap-china-pmi-data.mjs";
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
@@ -1928,7 +1929,7 @@ export class MarketWorkflow {
       ...(exclusions.length ? { excludedSources: exclusions } : {}),
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
-      ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps } : {}),
+      ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps, ...(this.macroData.chinaPmi ? { chinaPmiContext: this.macroData.chinaPmi.context, chinaPmiGaps: this.macroData.chinaPmi.gaps } : {}) } : {}),
       ...(this.recapResearchEvidence ? { sharedEvidence: this.recapResearchEvidence } : {}),
     };
   }
@@ -2059,7 +2060,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v30",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v31",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2897,7 +2898,7 @@ export class MarketWorkflow {
       await this.saveManifest();
     }
     this.macroData = macroData;
-    await atomicJson(resolve(this.runDir, "artifacts/recap-macro-context.json"), { context: macroData.context, gaps: macroData.gaps });
+    await atomicJson(resolve(this.runDir, "artifacts/recap-macro-context.json"), { context: macroData.context, gaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
     const tradingPath = resolve(this.runDir, "artifacts/recap-trading-data.json");
     let tradingData;
     if (await exists(tradingPath)) {
@@ -2940,15 +2941,16 @@ export class MarketWorkflow {
       this.manifest.companyBackgroundHash = stableHash(companyBackground);
       await this.saveManifest();
     }
-    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission)));
+    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), chinaPmiSourceReader(macroData.chinaPmi, companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission))));
     this.recapSourceReader = this.recapSnapshotReader.reader;
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };
     let nextAccess = initialAccess;
     let nextEvidence = [];
     let ledger;
-    if (transmission.sources.length || companyBackground.sources.length) {
-      outputs.push({ sources: [...transmission.sources, ...companyBackground.sources], rejectedSources: [], alternatives: [] });
+    const chinaPmiSources = chinaPmiResearchSources(macroData.chinaPmi, this.envelope, plan);
+    if (transmission.sources.length || companyBackground.sources.length || chinaPmiSources.length) {
+      outputs.push({ sources: [...transmission.sources, ...companyBackground.sources, ...chinaPmiSources], rejectedSources: [], alternatives: [] });
       ledger = await this.verifyEvidence(outputs);
       nextEvidence = ledger.sources;
     }
@@ -2985,7 +2987,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
-    const attributionPayload = () => ({ envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps });
+    const attributionPayload = () => ({ envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
     const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
     let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;
     if (attributor) await atomicJson(resolve(this.runDir, "artifacts/recap-attribution-before-research-repair.json"), attributor.output);
