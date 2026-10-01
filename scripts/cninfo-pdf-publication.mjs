@@ -1,6 +1,14 @@
 import { pdfSourceRecord } from "./pdf-source.mjs";
 
 const key = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, "");
+// Covers can spell a four-digit year with Chinese numerals or place their
+// own legal name and report title on one line. Normalize only these exact
+// cover formats; the official announcement must still bind the same title.
+function coverKey(line) {
+  const digits = "零一二三四五六七八九";
+  return key(line).replace(/(?:二[零〇][零一二三四五六七八九〇]{2})(?=年)/gu, year => [...year].map(char => char === "〇" ? "0" : String(digits.indexOf(char))).join(""));
+}
+const periodicTitle = "20\\d{2}年(?:年度|半年度|第?一季度|第?三季度)报告(?:\\((?:更新|修订|更正)(?:版|稿|后)?\\))?";
 
 function periodicPdfIdentity(pages) {
   const lines = pages[0].text.split("\n");
@@ -8,8 +16,12 @@ function periodicPdfIdentity(pages) {
   // declaration. Those table rows are not additional cover issuers.
   const declarationIndex = lines.findIndex(line => /董事会.*保证/u.test(key(line)));
   const coverLines = declarationIndex < 0 ? lines : lines.slice(0, declarationIndex);
-  const companies = [...new Set(coverLines.map(key).filter(line => /^[^：:]{3,70}(?:股份)?有限公司$/u.test(line)))];
-  const titles = [...new Set(lines.map(key).filter(line => /^20\d{2}年(?:年度|半年度|第?一季度|第?三季度)报告(?:\((?:更新|修订|更正)(?:版|稿|后)?\))?$/u.test(line)))];
+  const combined = coverLines.map(coverKey).flatMap(line => {
+    const match = new RegExp(`^([^：:]{3,70}(?:股份)?有限公司)(${periodicTitle})(?:全文)?$`, "u").exec(line);
+    return match ? [{ issuer: match[1], title: match[2] }] : [];
+  });
+  const companies = [...new Set([...coverLines.map(key).filter(line => /^[^：:]{3,70}(?:股份)?有限公司$/u.test(line)), ...combined.map(item => item.issuer)])];
+  const titles = [...new Set([...lines.map(coverKey).filter(line => new RegExp(`^${periodicTitle}$`, "u").test(line)), ...combined.map(item => item.title)])];
   if (companies.length !== 1 || titles.length !== 1 || !pages.slice(0, 3).some(page => /董事会[^。]{0,160}保证[^。]{0,160}真实[^。]{0,80}准确[^。]{0,80}完整/u.test(key(page.text)))) return null;
   const issuerName = companies[0], pairs = [];
   const header = pages[0].text.slice(0, 512);
@@ -19,7 +31,9 @@ function periodicPdfIdentity(pages) {
   // Shenzhen covers commonly omit the code. Their own company-profile table
   // supplies it on a later front page; the adjacent legal name must be exactly
   // the sole name printed on the cover, not a client/counterparty mention.
-  for (const page of pages.slice(0, 8)) {
+  // Long issuer glossaries can place the own-company profile on page 10.
+  // Keep a fixed front-matter bound, never scan customer tables in the body.
+  for (const page of pages.slice(0, 16)) {
     const text = key(page.text);
     if (!/公司简介/u.test(text) || !/公司(?:的)?中文名称/u.test(text)) continue;
     if (!text.includes("公司中文名称" + issuerName) && !text.includes("公司的中文名称" + issuerName)) return null;

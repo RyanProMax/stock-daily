@@ -59,5 +59,5 @@ try {
     page.cleanup();
   }
   if (warnings.some(warning => !verifiedPdfFontHintWarning(warning)) || warnings.length > 256) throw new Error("PDF parsing reported a warning or recovery outside verified font hints");
-  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v3`, pageCount: document.numPages, pages, fontHintWarnings: warnings, text: pages.map(page => page.text).join("\n\n") }));
+  process.stdout.write(JSON.stringify({ version: `pdfjs-${version}-text-v4`, pageCount: document.numPages, pages, fontHintWarnings: warnings, text: pages.map(page => page.text).join("\n\n") }));
 } finally { await task.destroy(); }

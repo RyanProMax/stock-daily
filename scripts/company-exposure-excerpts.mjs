@@ -48,12 +48,18 @@ export function companyExposureExcerpts(text, { language = "en", issuerName, acc
   return selected.sort((a, b) => a.position - b.position).map(item => item.quote);
 }
 
-// 金融资产 contains the adjacent characters 融资, and 毛利率 contains 利率;
-// neither alone states financing conditions or market interest-rate exposure.
-const CN_FACTOR = /需求|供给|供应|成本|(?<!毛)利率|(?<!金)融资|监管|汇率|宏观|竞争/u;
-const CN_IMPACT = /影响|波动|风险|压力|敏感|增长|增加|降低|下降|上升|承受|面临|依赖|导致|对冲/u;
-const CN_OUTCOME = /订单|交付|营业|业绩|盈利|收入|毛利|净利润|资金|借款|债务|利息|财务|采购|支出|投入|产能|生产|产品|客户|货款|存货|经营|研发|损失|对冲/u;
-const CN_BOILERPLATE = /董事会[^。]{0,80}(?:保证|承担)|不存在虚假记载|公司负责人[^。]{0,80}保证|会计政策|公允价值计量|会计估计|会计准则|会计处理|财务报表附注|摊余成本|初始确认|终止确认|融资租赁|重大融资成分|实际利率法|实际利率乘|计算确定利息收入|预期信用损失|估值技术|输入值|坏账准备|减值准备|计量方法|可收回金额|税前折现率|会计科目|单位[:：]|期初余额|期末余额|本期发生额|(?:金融资产|金融负债|金融工具)[^。]{0,180}(?:确认|分类|计量|转移|控制|合同现金流量)|前瞻性陈述|不构成[^。]{0,50}承诺|本人承诺|本人将|公司承诺|承诺事项|承诺书|未履行承诺|履约担保|填补[^。]{0,30}回报|市值管理/u;
+// 金融资产 and 应收款项融资 are asset-class labels; 毛利率 is a margin.
+// Their characters alone do not state financing conditions or rate exposure.
+const CN_FACTOR = /需求|供给|供应|成本|费用|(?<!毛)利率|(?<!金|项)融资|监管|汇率|宏观|竞争/u;
+// A risk heading, "improve resilience", or the need to develop products does
+// not itself describe an economic effect. Require an effect or a stated
+// relationship to the issuer's operating/financial outcome.
+const CN_IMPACT = /影响|波动|压力|敏感|增长|增加|降低|下降|上升|承受|依赖|导致|对冲|关联度|主要与[^。]{0,100}有关/u;
+const CN_OUTCOME = /订单|交付|营业|业绩|盈利|收入|毛利|净利润|资金|借款|债务|利息|财务|采购|支出|投入|产能|生产|货款|存货|经营|销售|市场份额|损失|对冲/u;
+const CN_BOILERPLATE = /董事会[^。]{0,80}(?:保证|承担)|不存在虚假记载|公司负责人[^。]{0,80}保证|会计政策|公允价值计量|会计估计|会计准则|会计处理|财务报表附注|股份支付交易|可行权权益工具|授予日公允价值|可行权情况的最佳估计|当期取得的服务计入|按照放弃债权|初始投资成本|资本管理政策的目标|具体请见本报告|摊余成本|初始确认|终止确认|融资租赁|重大融资成分|实际利率法|实际利率乘|计算确定利息收入|预期信用损失|估值技术|输入值|坏账准备|减值准备|计量方法|可收回金额|税前折现率|会计科目|单位[:：]|期初余额|期末余额|本期发生额|(?:金融资产|金融负债|金融工具)[^。]{0,180}(?:确认|分类|计量|转移|控制|合同现金流量)|前瞻性陈述|不构成[^。]{0,50}承诺|本人承诺|本人将|公司承诺|承诺事项|承诺书|承诺(?:时间|背景|类型|期限|内容|方)|未履行承诺|履约担保|填补[^。]{0,30}回报|摊薄即期回报|履行法院生效法律文书|诚信状况|市值管理/u;
+// Keep mitigation alongside the risk it qualifies, but do not let a planned
+// strategy alone establish the underlying transmission or exposure.
+const CN_PLANNED_MITIGATION = /^(?:应对措施[:：]|对此[，,]|(?:本公司|公司)将(?:持续|继续|通过|实时|不断|密切|积极|坚持|加强|加大|进一步|紧密|发挥|顺应))/u;
 
 function chineseExposureText(text, issuerName) {
   let compact = String(text).replace(/\s+/gu, "");
@@ -73,15 +79,15 @@ export function hasChineseCompanyEconomicExposure(excerpt, { issuerName } = {}) 
   const text = chineseExposureText(excerpt, issuerName);
   if (/按照(?:组合)?计提存货跌价准备|可变现净值|权益法|成本法|评估信用风险是否|损失准备的量化数据|参见附注/u.test(text)) return false;
   return text.split(/(?<=[。！？])/u).some(original => {
-    const sentence = original.replace(/^.*?风险(?:√适用□不适用)?(?=(?:本公司|公司))/u, "");
-    return chineseOwn(sentence) && CN_FACTOR.test(sentence) && CN_IMPACT.test(sentence) && CN_OUTCOME.test(sentence) && !CN_BOILERPLATE.test(original);
+    const sentence = original.replace(/^(?:\d+[.、])?(?:关于[^。]{1,70}风险[:：]|[（(]\d+[）)][^。]{1,40}风险)/u, "");
+    return chineseOwn(sentence) && CN_FACTOR.test(sentence) && CN_IMPACT.test(sentence) && CN_OUTCOME.test(sentence) && !CN_BOILERPLATE.test(original) && !CN_PLANNED_MITIGATION.test(sentence);
   });
 }
 
 function chineseCompanyExposureExcerpts(text, issuerName, acceptExcerpt) {
   const original = text.replace(/\s+/gu, " ").trim();
   const sentences = [...new Intl.Segmenter("zh", { granularity: "sentence" }).segment(original)].map(item => ({ quote: item.segment.trim(), position: item.index }));
-  const qualification = /^(?:但|然而|不过|尽管|虽然|同时|相反|此外|其中|因此|上述|该风险|在此情况下|为控制|为应对|为降低|(?:本公司|公司)[^。]{0,70}(?:不|尚未|可能|采取|降低|规避|控制|应对|保持|采用|对冲|固定利率))/u;
+  const qualification = /^(?:但|然而|不过|尽管|虽然|同时|相反|此外|其中|因此|上述|该风险|在此情况下|如果|如未来|若|由于|鉴于|对此|应对措施[:：]|未来[，,]|目前[，,]|管理层(?:认为|会|将|根据)|为控制|为应对|为降低|(?:本公司|公司)[^。]{0,70}(?:不|尚未|可能|采取|降低|规避|控制|应对|保持|采用|对冲|固定利率))/u;
   const candidates = [];
   for (let index = 0; index < sentences.length; index += 1) {
     if (!hasChineseCompanyEconomicExposure(sentences[index].quote, { issuerName })) continue;

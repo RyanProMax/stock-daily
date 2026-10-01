@@ -1050,7 +1050,11 @@ export async function readExternalSource(
   if (cninfoHistory !== undefined) validateCninfoHistoryBody(cninfoHistory);
   const resolveDestination =
     resolver ??
-    ((hostname) => resolveWithDoh(hostname, { runner, curlPath, signal }));
+    ((hostname) => ["static.cninfo.com.cn", "www.cninfo.com.cn"].includes(hostname)
+      // Native DNS passes the same public-IP validation and exact TLS pinning.
+      // The overseas CDN answers stall large originals on the current host.
+      ? dnsLookup(hostname, { all: true, verbatim: true })
+      : resolveWithDoh(hostname, { runner, curlPath, signal }));
   const requestContent =
     requester ??
     ((value, destination, options) =>

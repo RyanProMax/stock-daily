@@ -14,6 +14,7 @@
 - [x] Implement the separate qualified-inference assessment, independent final-review requirements and immutable publication audit; reject missing/timing/scope/direction links in adversarial regressions.
 - [x] Collect and rederive native Chinese PMI release tables, publication identity, monthly deltas and official industry passages; preserve survey definitions and reject equity-scope substitution.
 - [x] Bind the reviewed MOF policy interpretation to its native article, visible dates and publication clock; accept exact CNINFO report titles without an issuer prefix while retaining original issuer/file/calendar checks.
+- [x] Recover native company originals through validated CDN destinations, bind reviewed cover/profile formats, and independently rederive economic passages while rejecting accounting, undertaking and standalone strategy filler.
 - [ ] Demonstrate independently accepted real qualified-inference chains; background alone must never complete attribution.
 - [ ] Correct verified calendar/ordinal/unit translations and date-only pre-close confirmation; revalidate frozen candidates before spending more research queries.
 - [ ] Demonstrate a real accepted all-sector report and exact production readback; implementation tests do not count as this outcome.

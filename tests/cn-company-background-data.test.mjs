@@ -6,9 +6,10 @@ import { fixturePdf } from "./pdf-fixture.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "../scripts/recap-company-background-data.mjs";
 import { CNINFO_REGISTRY_URL, CNINFO_HISTORY_URL, cninfoHistoryBody, cninfoLatestPeriodic, validateCninfoHistoryBody } from "../scripts/cninfo-history-request.mjs";
 import { companyExposureExcerpts, hasChineseCompanyEconomicExposure } from "../scripts/company-exposure-excerpts.mjs";
-import { readExternalSource } from "../scripts/daily-source-audit.mjs";
+import { normalizedEvidenceText, readExternalSource } from "../scripts/daily-source-audit.mjs";
 import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
-import { verifyResearchSources, verifiedBackgroundExposureSubjects } from "../scripts/daily-workflow-core.mjs";
+import { BACKGROUND_EXPOSURE_VERSION, stableHash, verifyResearchSources, verifiedBackgroundExposureSubjects } from "../scripts/daily-workflow-core.mjs";
+import { pdfTextExcerptChecker } from "../scripts/pdf-text-evidence.mjs";
 
 const digest = body => createHash("sha256").update(body).digest("hex");
 const date = "2026-07-01";
@@ -167,4 +168,51 @@ test("native running footers, accounting choices and unrelated ownership cannot 
   const text = "公司的产品需求和综合毛利率受原材料成本、市场竞争及供应链波动影响，实际盈利还取决于产品组合和客户采购计划，目前业务效果仍具有一定不确定性。";
   assert.equal(hasChineseCompanyEconomicExposure(text, { issuerName }), true);
   assert.deepEqual(companyExposureExcerpts(text, { language: "zh", issuerName }), [text]);
+  const sensitivity = "于2026年6月30日，在其他变量保持不变的情况下，如果未来一年内浮动借款利率上升或下降100个基点，则本公司的净利润将减少或增加901.11万元。 管理层认为100个基点合理反映了下一年度利率可能发生变动的合理范围。";
+  assert.deepEqual(companyExposureExcerpts(sensitivity, { language: "zh", issuerName }), [sensitivity]);
+});
+
+test("operating exposure excludes risk labels, strategy, stock-compensation rules and undertaking forms", () => {
+  const issuerName = "样例公司股份有限公司";
+  for (const quote of [
+    "关于市场竞争风险：公司所处行业属于知识密集型与资金密集型相结合的行业，自研自产的壁垒较高，全球范围内仅有少数厂商掌握相关技术并形成生产规模，市场集中度相对较高。",
+    "（3）新技术研发风险 基于公司对未来市场发展趋势的预测，公司往往需要根据新兴市场对技术和产品的需求情况，提早展开新技术与产品的研发。",
+    "公司将密切关注国际局势，充分发挥全产业链优势及海外产业布局，不断提高产品在国内、国际市场的竞争力，建立全球化的产能布局和供应链体系，提高企业抗风险能力。",
+    "对于授予后完成等待期内的服务或达到规定业绩条件才可行权的股份支付交易，本公司根据对可行权权益工具数量的最佳估计，按照授予日公允价值，将当期取得的服务计入相关成本或费用，相应增加资本公积。",
+    "公司的信用风险主要产生于货币资金、应收票据、应收账款、应收款项融资、其他应收款、长期应收款等，这些金融资产的信用风险源自交易对手违约，最大的风险敞口等于这些工具的账面金额。",
+    "承诺时间：2014/6/16 与再融资相关的承诺 承诺内容：摊薄即期回报采取填补措施。报告期内公司及控股股东均不存在未履行法院生效法律文书确定的义务、债务到期未清偿等影响诚信状况的情形。",
+    "如授予后立即可行权，在授予日以承担负债的公允价值计入相关成本或费用，相应增加负债；如需完成等待期内的服务，在每个资产负债表日按照本公司承担负债的公允价值金额，将当期取得的服务计入成本或费用，相应调整负债。",
+    "将债务转为权益工具方式进行的债务重组导致债权人将债权转为对联营企业的权益性投资的，本公司按照放弃债权的公允价值和其他成本计量其初始投资成本。",
+    "公司主要存在市场及客户需求波动风险、竞争加剧风险、经营管理风险、业绩下滑风险、持续亏损风险等，具体请见本报告第三节中相关描述。",
+    "对此，公司将实时跟踪国家宏观经济政策趋势，根据宏观经济环境变化适时调整经营策略，通过技术创新增强公司抵御经济周期性波动带来不利影响的能力。",
+    "在性能优化方面，公司持续推进高吞吐、低时延推理技术研发，完善多种数据格式和低精度计算的支持能力，降低模型部署对存储和计算资源的需求。",
+  ]) {
+    assert.equal(hasChineseCompanyEconomicExposure(quote, { issuerName }), false);
+    assert.deepEqual(companyExposureExcerpts(quote, { language: "zh", issuerName }), []);
+  }
+  // A realized credit-cost impact is different from an asset-class label.
+  assert.equal(hasChineseCompanyEconomicExposure("本公司的融资成本受市场利率变化影响，客户回款下降可能增加公司资金压力。", { issuerName }), true);
+  const text = "公司的产品销售、经营业绩、财务状况和发展前景与宏观经济有着较大的关联度。 如果未来经济增长持续放缓，则可能影响下游需求，从而使公司面临经营业绩下降的风险。 对此，公司将通过自主研发、降低经营成本，应对需求变化。";
+  assert.deepEqual(companyExposureExcerpts(text, { language: "zh", issuerName }), [text]);
+});
+
+test("a prior positive background cache cannot preserve an accounting passage after economic verification changes", async () => {
+  const f = fixture(), e = f.entities[0], url = "https://static.cninfo.com.cn/finalpage/" + date + "/" + e.id + ".PDF";
+  const good = "本公司的客户需求和经营成本受到宏观经济变化影响，客户融资条件可能影响投资计划及订单兑现，公司的实际销售收入和盈利仍具有不确定性。";
+  const bad = "对于授予后达到规定业绩条件才可行权的股份支付交易，本公司根据可行权权益工具数量的最佳估计，按照授予日公允价值，将当期取得的服务计入成本或费用，相应增加资本公积。";
+  f.pdfs.set(url, fixturePdf([[`证券代码：${e.code} 证券简称：${e.name}`, `${e.name}股份有限公司`, "2026年半年度报告", "本公司董事会保证报告内容的真实、准确、完整。"], [...good.match(/.{1,40}/gu), ...bad.match(/.{1,40}/gu)]]));
+  const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
+  const candidate = book.sources.find(source => source.originalUrl === url);
+  assert.ok(candidate, JSON.stringify({ gaps: book.gaps, failures: book.failures }));
+  const reader = companyBackgroundSourceReader(book), original = await reader(url);
+  const verified = await verifyResearchSources([{ sources: [candidate], alternatives: [] }], f.envelope, { reader });
+  assert.equal(verified.sources.length, 1);
+  const legacyCandidate = { ...candidate, supportingExcerpt: bad };
+  const candidateHash = stableHash(legacyCandidate);
+  const legacy = { ...verified.sources[0], ...legacyCandidate, candidateHash, excerptHash: stableHash(normalizedEvidenceText(bad)), pdfTextEvidence: pdfTextExcerptChecker(original)(bad), subjectIdentityVersion: "verified-background-exposure-v3" };
+  assert.notEqual(legacy.subjectIdentityVersion, BACKGROUND_EXPOSURE_VERSION);
+  let opened = 0;
+  const ledger = await verifyResearchSources([{ sources: [legacyCandidate], alternatives: [] }], f.envelope, { verifiedCache: new Map([[candidateHash, legacy]]), reader: async source => { opened++; return reader(source); } });
+  assert.equal(opened, 1); assert.deepEqual(ledger.sources, []);
+  assert.match(ledger.rejected[0].reason, /自身经济因素及影响/);
 });

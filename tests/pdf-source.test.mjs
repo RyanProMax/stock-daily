@@ -85,7 +85,19 @@ test("only native paired Wingdings 2 form marks and the narrowly identified True
   assert.equal(verifiedPdfFormMarker(item, { ...font, name: "ABCDEE+Wingdings 2" }, "", "适用 □不适用"), true);
   for (const [i, f, before, after] of [[item, { ...font, missingFile: true }, "□是", "否"], [item, { ...font, name: "SimSun" }, "□是", "否"], [item, font, "利率", "适用"], [{ str: "\uF053" }, font, "□是", "否"], [item, font, "", "适用"]]) assert.equal(verifiedPdfFormMarker(i, f, before, after), false);
   assert.equal(verifiedPdfFontHintWarning("Warning: TT: undefined function: 21"), true);
+  assert.equal(verifiedPdfFontHintWarning("Warning: Not enough space in glyfs to duplicate first glyph."), true);
+  assert.equal(verifiedPdfFontHintWarning("Warning: Not enough space in glyfs to duplicate another glyph."), false);
   for (const message of ["Warning: Indexing all PDF objects", "Warning: TT: complementing a missing function tail", "Warning: TT: invalid function id: 21", "Warning: Missing ToUnicode", "Warning: TT: undefined function: 65536"]) assert.equal(verifiedPdfFontHintWarning(message), false);
+});
+
+test("native unselected Wingdings 2 choices and SymbolMT bullets retain characters without interpreting choices", () => {
+  const form = { name: "QJLWVE+Wingdings2", missingFile: false, isType3Font: false };
+  assert.equal(verifiedPdfFormMarker({ str: "\uF0A3" }, form, "", "适用 \uF052不适用"), true);
+  assert.equal(verifiedPdfFormMarker({ str: "\uF052" }, form, "\uF0A3适用 ", "不适用"), true);
+  for (const [glyph, before, after] of [["\uF0A3", "", "适用"], ["\uF0A3", "", "适用 \uF053不适用"], ["\uF0A3", "利率", "适用 \uF052不适用"], ["\uF052", "\uF0A3成本", "不适用"]]) assert.equal(verifiedPdfFormMarker({ str: glyph }, form, before, after), false);
+  const bullet = { name: "TZCMBP+SymbolMT", missingFile: false, isType3Font: false };
+  assert.equal(verifiedPdfListMarker({ str: "\uF0B7" }, bullet, "", " 市场风险"), true);
+  for (const [glyph, font, before] of [["\uF0B7", form, ""], ["\uF06C", bullet, ""], ["\uF0B7", { ...bullet, missingFile: true }, ""], ["\uF0B7", { ...bullet, isType3Font: true }, ""], ["\uF0B7", bullet, "利润减少"]]) assert.equal(verifiedPdfListMarker({ str: glyph }, font, before, " 市场风险"), false);
 });
 
 test("a periodic cover binds the sole legal issuer, its own front-page stock profile and exact native title", () => {
@@ -97,6 +109,17 @@ test("a periodic cover binds the sole legal issuer, its own front-page stock pro
   assert.equal(identity.symbol, "600123.SS"); assert.equal(identity.title, "2026年半年度报告");
   const value = metadata(); value.announcement.announcementTitle = "样例医药股份有限公司2026年半年度报告";
   assert.equal(cninfoPdfPublication(body, receipt(value), url).issuer.symbol, "600123.SS");
+  for (const alternateCover of [["样例医药股份有限公司", "二零二六年半年度报告"], ["样例医药股份有限公司2026年半年度报告全文", "1"]]) {
+    const alternate = fixturePdf([alternateCover, declaration, profile]);
+    assert.equal(cninfoPdfIdentity(alternate, url).symbol, "600123.SS");
+    assert.equal(cninfoPdfPublication(alternate, receipt(value), url).title, value.announcement.announcementTitle);
+    assert.equal(cninfoPdfIdentity(fixturePdf([alternateCover.concat("其他公司股份有限公司2026年半年度报告全文"), declaration, profile]), url), null);
+  }
+  assert.equal(cninfoPdfIdentity(fixturePdf([["样例医药股份有限公司", "二〇二七年半年度报告", "2026年半年度报告"], declaration, profile]), url), null);
+  const glossary = Array.from({ length: 7 }, () => ["第一节 重要提示、释义：客户及供应商名称仅用于术语说明，不能代替本公司身份。"]);
+  assert.equal(cninfoPdfIdentity(fixturePdf([cover, declaration, ...glossary, profile]), url).symbol, "600123.SS");
+  assert.equal(cninfoPdfIdentity(fixturePdf([cover, declaration, ...Array.from({ length: 14 }, () => glossary[0]), profile]), url), null);
+  assert.equal(cninfoPdfIdentity(fixturePdf([cover, declaration, ...glossary, profile.map(line => line.replace("中文名称 样例医药", "中文名称 其他医药"))]), url), null);
   for (const changed of [fixturePdf([cover, declaration, profile.map(line => line.replace("中文名称 样例医药", "中文名称 其他医药"))]), fixturePdf([cover, declaration, profile.concat("股票简称 其他公司 股票代码 600999")]), fixturePdf([cover.concat("其他公司股份有限公司"), declaration, profile])]) assert.equal(cninfoPdfIdentity(changed, url), null);
 });
 

@@ -20,10 +20,10 @@ import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v57";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v58";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
-export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v5";
-export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v3";
+export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
+export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1469,7 +1469,7 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
     subjects = bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, metric.symbol) ? [metric.symbol] : [];
   }
   if (!subjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
-  if (!/需求|供给|供应|成本|利率|融资|监管|汇率|宏观|竞争|风险|\b(?:demand|supply|costs?|rates?|financing|borrowing|credit markets?|capital markets?|customer spending|economic conditions?|macroeconomic|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+  if (!/需求|供给|供应|成本|费用|利率|融资|监管|汇率|宏观|竞争|风险|\b(?:demand|supply|costs?|rates?|financing|borrowing|credit markets?|capital markets?|customer spending|economic conditions?|macroeconomic|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
   return subjects;
 }
 

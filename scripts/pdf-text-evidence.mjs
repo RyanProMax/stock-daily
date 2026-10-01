@@ -1,6 +1,6 @@
 import { pdfSourceRecord, PDF_SOURCE_VERSION } from "./pdf-source.mjs";
 
-export const PDF_TEXT_EVIDENCE_VERSION = "verified-pdf-text-excerpt-v1";
+export const PDF_TEXT_EVIDENCE_VERSION = "verified-pdf-text-excerpt-v2";
 const normalized = value => String(value).normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}.+%\-]+/gu, "").replaceAll("维权", "");
 
 export function pdfTextExcerptChecker(opened) {
@@ -12,7 +12,7 @@ export function pdfTextExcerptChecker(opened) {
   const formPositions = [];
   const ranges = record.pages.map(page => {
     const text = normalized(page.text), start = offset; offset += text.length;
-    for (const match of page.text.matchAll(/\uF052/gu)) formPositions.push(start + normalized(page.text.slice(0, match.index)).length);
+    for (const match of page.text.matchAll(/[\uF052\uF0A3]/gu)) formPositions.push(start + normalized(page.text.slice(0, match.index)).length);
     return { page: page.number, start, end: offset, text };
   });
   const body = ranges.map(page => page.text).join("");
