@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertFactsNumbersInExcerpt, bodySupportsDeterministicTarget, marketEnvelope } from "../scripts/daily-workflow-core.mjs";
+import { assertFactsNumbersInExcerpt, bodySupportsDeterministicTarget, marketEnvelope, stableHash, verifyResearchSources } from "../scripts/daily-workflow-core.mjs";
+import { recapFixture } from "./complete-recap-fixture.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 
 test("translated calendar months and ordinal periods preserve the actual reported values", () => {
@@ -57,5 +58,42 @@ test("original long-form S&P 500 names identify only the benchmark, never an AI 
     const text = `${name} slipped as long-term Treasury yields weighed on the market.`;
     assert.equal(bodySupportsDeterministicTarget(text, envelope, "SPX"), true);
     assert.equal(bodySupportsDeterministicTarget(text, envelope, "AI-US-servers"), false);
+  }
+});
+
+test("Chinese close shorthand and volume changes preserve signs without losing units", () => {
+  const supportingExcerpt = "9月30日A股收盘，沪指涨0.31%，深证成指跌0.11%，创业板指跌0.23%，科创综指跌1.81%。沪深两市成交额合计1.44万亿元，较上一交易日放量约288.21亿元。";
+  const facts = "9月30日收盘，沪指上涨0.31%，深证成指下跌0.11%，创业板指下跌0.23%，科创综指下跌1.81%；成交额较上一交易日增加约288.21亿元。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt }));
+  for (const changed of [facts.replace("上涨0.31", "下跌0.31"), facts.replace("下跌0.11", "上涨0.11"), facts.replace("下跌1.81", "上涨1.81"), facts.replace("增加约288.21", "减少约288.21"), facts.replace("288.21亿元", "288.21万美元")]) assert.throws(() => assertFactsNumbersInExcerpt({ facts: changed, supportingExcerpt }), /数字/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "成交额减少15.2亿元。", supportingExcerpt: "成交额较上一交易日缩量15.2亿元。" }));
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "成交额增加15.2亿元。", supportingExcerpt: "成交额较上一交易日缩量15.2亿元。" }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "价格上涨5元。", supportingExcerpt: "涨价预期仍在讨论，收盘报5元。" }), /数字/);
+});
+
+test("an explicitly quoted price level cannot borrow a following percentage's movement verb", () => {
+  const supportingExcerpt = "深物业A早盘低开，收盘报12.24元，涨9.97%。万科A盘中最低下探至3.67元，收盘报4.26元，涨4.41%。";
+  const facts = "深物业A收于12.24元、上涨9.97%；万科A最低触及3.67元、收于4.26元并上涨4.41%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt }));
+  for (const changed of [facts.replace("上涨9.97", "下跌9.97"), facts.replace("上涨4.41", "下跌4.41"), facts.replace("12.24元", "12.24美元"), facts.replace("3.67元", "3.67%")]) assert.throws(() => assertFactsNumbersInExcerpt({ facts: changed, supportingExcerpt }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "股价上涨12.24元。", supportingExcerpt: "收盘报12.24元，涨9.97%。" }), /数字/);
+  assert.throws(() => assertFactsNumbersInExcerpt({ facts: "股价上涨收于12.24元。", supportingExcerpt: "股价跌1.25%，收于12.24元。" }), /数字/);
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: "股价下跌1.25%，收于12.24元。", supportingExcerpt: "股价跌1.25%，收盘报12.24元。" }));
+  const indices = "上证指数报3842.19点，上涨0.31%；深证成指报12887.62点，下跌0.11%；科创50指数报1530.01点，下跌2.51%。";
+  const equivalent = "上证指数报3842.19点、上涨0.31%；深证成指报12887.62点、下跌0.11%；科创50指数报1530.01点、下跌2.51%。";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: equivalent, supportingExcerpt: indices }));
+  for (const changed of [equivalent.replace("上涨0.31", "下跌0.31"), equivalent.replace("下跌2.51", "上涨2.51"), equivalent.replace("科创50", "科创500"), equivalent.replace("1530.01", "1530.02")]) assert.throws(() => assertFactsNumbersInExcerpt({ facts: changed, supportingExcerpt: indices }), /数字/);
+
+});
+
+test("legacy numeric caches cannot retain a newly recognized reversed Chinese close", async () => {
+  const f = recapFixture("CN"), anomaly = f.plan.anomalies[0];
+  const source = { originalUrl: "https://www.reuters.com/markets/china/example-close", title: "China market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "沪指收涨0.31%，市场成交维持平稳，行业表现出现分化，投资者继续关注经济数据和政策变化。", facts: "沪指收跌0.31%，市场成交维持平稳，行业表现出现分化。", causalConnection: false, comparisons: [] };
+  const candidateHash = stableHash(source);
+  for (const marker of [undefined, "verified-number-direction-v0"]) {
+    let reads = 0;
+    const cache = new Map([[candidateHash, { ...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: marker }]]);
+    const result = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { verifiedCache: cache, reader: async () => { reads++; return { finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt] }; } });
+    assert.equal(reads, 1); assert.equal(result.sources.length, 0); assert.match(result.rejected[0].reason, /0\.31%/);
   }
 });

@@ -15,7 +15,8 @@ import transmissionConfig from "../data/recap-transmission-sources.json" with { 
 import { GDP_NOW_EVIDENCE_VERSION, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { uniqueFundRiskSection } from "./fund-risk-section.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v45";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v46";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v1";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v2";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
@@ -1080,9 +1081,9 @@ function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], s
 const FACT_NUMBER_MENTION =
   /(?<outerSign>[+-]?)(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|ppts?\b|pp\b|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|US dollars?\b|USD\b|%|％|个百分点|百分点|个基点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
-  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
+  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|放量(?=\s*(?:[+-]?\d|超|逾|近|约|至))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|缩量(?=\s*(?:[+-]?\d|超|逾|近|约|至))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
@@ -1133,13 +1134,17 @@ function nearestDirection(value, start, end, rawNumber) {
   let leftBoundary = boundaries.filter(index => index < start).at(-1) ?? -1;
   // A settlement clause can continue the same movement after a comma.
   // Decimal points and thousands separators above are not clause boundaries.
-  if (/[，,]/u.test(value[leftBoundary] ?? "") && /^\s*(?:收于|收报|报收|至|settled? at|closed at|closing at)/iu.test(value.slice(leftBoundary + 1, start))) {
+  if (/[，,]/u.test(value[leftBoundary] ?? "") && /^\s*(?:收于|收报|收盘报|报收|至|settled? at|closed at|closing at)/iu.test(value.slice(leftBoundary + 1, start))) {
     leftBoundary = boundaries.filter(index => index < leftBoundary && !/[，,]/u.test(value[index])).at(-1) ?? -1;
   }
   const rightBoundary = boundaries.find(index => index >= end) ?? value.length;
   const clauseStart = leftBoundary + 1;
   const clause = value.slice(clauseStart, rightBoundary);
   const numberOffset = start - clauseStart;
+  // A closing/low price is an explicitly bound level. A movement verb
+  // following it belongs to the later return, not backwards to this level.
+  // Explicit preceding movement still binds and must retain its sign.
+  const quotedPriceLevel = /(?:收于|收报|收盘报|报收|(?:指数|成指|板指|股指|沪指)报|最低(?:触及|下探至)|盘中最低下探至)\s*$/u.test(value.slice(Math.max(0, start - 24), start));
   const candidates = [];
   for (const [direction, pattern] of [
     ["positive", POSITIVE_DIRECTION],
@@ -1147,6 +1152,7 @@ function nearestDirection(value, start, end, rawNumber) {
   ]) {
     pattern.lastIndex = 0;
     for (const match of clause.matchAll(pattern)) {
+      if (quotedPriceLevel && (match.index ?? 0) >= numberOffset) continue;
       if (match[0].toLowerCase() === "up" && /\b(?:gave|give|given)\s+$/iu.test(clause.slice(0, match.index))) continue;
       if (/^(?:超过|高于|低于)$/u.test(match[0]) && /^\s*(?:只|家|项|人)/u.test(value.slice(end)) && (match.index ?? 0) < numberOffset) continue;
       candidates.push({
@@ -1196,13 +1202,14 @@ function numericMentions(value) {
     let direction = nearestDirection(copy, start, end, signedNumber);
     if (unit === "number") {
       if (/(?:S&P|Standard (?:&|and) Poor[’']s|标普)\s*$/iu.test(before)) unit = "index_identifier_sp";
+      else if (/科创\s*$/u.test(before) && /^指数/u.test(after)) unit = "index_identifier_star";
       else if (/^月(?!份?的?期)/u.test(after)) unit = "calendar_month";
       else if (number >= 1900 && number <= 2199 && (/^(?:财)?年/u.test(after) || /(?:\b(?:since|in|FY|fiscal year)\s*|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:\d{1,2}[, ]*)?)$/iu.test(before))) unit = "calendar_year";
       else if (/^日/u.test(after) || /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*$/u.test(before)) unit = "calendar_day";
       else if (/^季度/u.test(after) && /第$/u.test(before) || /\bQ$/u.test(before)) unit = "quarter_number";
       else if (/第$/u.test(before) || /^(?:st|nd|rd|th)\b/u.test(after)) unit = "ordinal_number";
       else if (/^(?:-?years?\b|年(?:期|以来|低|高|纪录|新|半))/iu.test(after)) unit = "duration_years";
-      if (["index_identifier_sp", "calendar_month", "calendar_year", "calendar_day", "quarter_number", "ordinal_number", "duration_years"].includes(unit)) direction = null;
+      if (["index_identifier_sp", "index_identifier_star", "calendar_month", "calendar_year", "calendar_day", "quarter_number", "ordinal_number", "duration_years"].includes(unit)) direction = null;
     }
     return canonicalMention({ number, display: match[0].trim(), unit, direction });
   });
@@ -1466,7 +1473,7 @@ export async function verifyResearchSources(
         }
         const candidateHash = stableHash(candidate);
         const cached = verifiedCache.get(candidateHash);
-        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        if (cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
@@ -1567,6 +1574,7 @@ export async function verifyResearchSources(
             ...normalizedCandidate,
             earningsContextChecked: true,
             comparisonNotesChecked: true,
+            numericEvidenceVersion: NUMERIC_EVIDENCE_VERSION,
             timingChecked: true,
             provenanceChecked: true,
             reportingOrigin: opened.articleProvenance?.origin ?? null,
