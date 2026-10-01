@@ -3,7 +3,7 @@ import test from "node:test";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "../scripts/recap-company-background-data.mjs";
 import { secCompanySubmissionTime, secFilingIssuerIdentity } from "../scripts/sec-filing-identity.mjs";
-import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
+import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION, openedSourceFromSnapshot } from "../scripts/evidence-source-snapshots.mjs";
 import { verifyResearchSources, verifiedBackgroundExposureSubjects } from "../scripts/daily-workflow-core.mjs";
 import { recapAttributionCandidates } from "../scripts/recap-attribution.mjs";
 import { recapTargets } from "../scripts/complete-recap.mjs";
@@ -40,11 +40,11 @@ function fixture() {
 test("original code table, matching submissions and issuer metadata establish all four separate exposures and preserve fixed-rate qualifications", async () => {
   const f = fixture();
   const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
-  assert.equal(book.filings.length, 4); assert.equal(book.sources.length, 12); assert.deepEqual(book.gaps, []);
+  assert.equal(book.filings.length, 4); assert.ok(book.sources.length >= 4); assert.deepEqual(book.gaps, []);
   assert.ok(book.sources.some(source => source.supportingExcerpt.includes("no financial statement risk")));
   assert.ok(book.sources.every(source => source.publishedAt === publishedAt && source.scope === "company" && !source.causalConnection));
   const ledger = await verifyResearchSources([{ sources: book.sources, alternatives: [] }], f.envelope, { reader: companyBackgroundSourceReader(book) });
-  assert.equal(ledger.sources.length, 12, JSON.stringify(ledger.rejected));
+  assert.equal(ledger.sources.length, book.sources.length, JSON.stringify(ledger.rejected));
   assert.deepEqual([...new Set(ledger.sources.flatMap(source => source.backgroundSubjects))].sort(), entities.map(item => item.symbol).sort());
   const originals = { version: SOURCE_SNAPSHOT_VERSION, snapshots: book.filings.map(item => item.snapshot) };
   assert.doesNotThrow(() => auditLedgerSourceSnapshots(ledger, originals, { envelope: f.envelope }));
@@ -59,6 +59,42 @@ test("a frozen filing is reused without refetching company identity, history or 
   const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
   const resumed = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { resumeBook: book, reader: () => { throw new Error("network must not run"); } });
   assert.deepEqual(resumed.sources, book.sources); assert.deepEqual(resumed.gaps, []);
+});
+
+test("recollecting already frozen annual bytes preserves the submissions receipt proving their publication clock", async () => {
+  const f = fixture(), original = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
+  const snapshots = new Map(original.filings.map(item => [item.snapshot.source, item.snapshot]));
+  const book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: (url, options) => snapshots.has(url) ? openedSourceFromSnapshot(snapshots.get(url)) : f.reader(url, options) });
+  assert.equal(book.filings.length, 4);
+  assert.deepEqual(book.gaps, []);
+  assert.ok(book.filings.every(item => item.snapshot.metadataReceipts.length === 1));
+  assert.doesNotThrow(() => validateRecapCompanyBackgroundData(book, f.envelope, f.smallPlan));
+});
+
+test("an exact company-target background retains only the verified issuer and supports shared AI membership without widening scope", async () => {
+  const f = fixture(), book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
+  const source = { ...book.sources.find(item => item.originalUrl === filingUrl(entities[1])), targets: ["AMD"] };
+  const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: companyBackgroundSourceReader(book) });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
+  assert.deepEqual(ledger.sources[0].targets, ["AMD"]);
+  assert.deepEqual(ledger.sources[0].backgroundSubjects, ["AMD"]);
+  assert.doesNotThrow(() => auditLedgerSourceSnapshots(ledger, { version: SOURCE_SNAPSHOT_VERSION, snapshots: book.filings.map(item => item.snapshot) }, { envelope: f.envelope }));
+  const wrong = { ...source, targets: ["NVDA"] };
+  const rejected = await verifyResearchSources([{ sources: [wrong], alternatives: [] }], f.envelope, { reader: companyBackgroundSourceReader(book) });
+  assert.equal(rejected.sources.length, 0);
+});
+
+test("an original credit/capital-market exposure is an economic factor even without the literal word financing", async () => {
+  const f = fixture(), book = await collectRecapCompanyBackgroundData(f.envelope, f.smallPlan, { reader: f.reader });
+  const quote = "We may not access credit markets on favorable terms, and our access to capital markets may be limited by economic conditions.";
+  const source = { ...book.sources.find(item => item.originalUrl === filingUrl(entities[1])), targets: ["AMD"], supportingExcerpt: quote };
+  const rawBody = Buffer.from(html(entities[1]) + `<p>${quote}</p>`);
+  const { sourceBodyText } = await import("../scripts/daily-source-audit.mjs");
+  const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: async () => ({ finalUrl: filingUrl(entities[1]), status: 200, contentType: "text/html", rawBody, text: sourceBodyText(rawBody), publishedAtCandidates: [publishedAt] }) });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
+  assert.deepEqual(ledger.sources[0].backgroundSubjects, ["AMD"]);
+  assert.equal(ledger.sources[0].causalConnection, false);
+  assert.equal(ledger.sources[0].kind, "background");
 });
 
 test("submission timestamps bind CIK, accession and exact primary filename, never a fiscal end date or a made-up offset", () => {

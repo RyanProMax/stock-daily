@@ -13,7 +13,7 @@ import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./s
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v41";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v42";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
 const MARKETS = ["CN", "US"];
 const INTERNAL_COPY =
@@ -1405,7 +1405,8 @@ export function verifiedCurrentCompanySubjects(source, opened, envelope) {
 }
 
 export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
-  const metric = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance].find(item => item.symbol === source.targets?.[0]);
+  const target = source.targets?.[0], metrics = [...envelope.markets, ...envelope.sectorPerformance, ...envelope.aiChainPerformance];
+  const metric = metrics.find(item => item.symbol === target) ?? (source.scope === "company" ? metrics.find(item => item.constituents?.some(company => company.symbol === target)) : null);
   if (!metric) throw new Error("背景披露缺少确定性适用对象");
   const expectedScope = envelope.sectorPerformance.includes(metric) ? "sector" : envelope.aiChainPerformance.includes(metric) ? "ai_layer" : "market";
   if (source.scope !== "company" && source.scope !== expectedScope) throw new Error("背景披露的适用范围与对应目标不一致");
@@ -1414,10 +1415,11 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
   const authority = authorities.some(domain => host === domain || host.endsWith(`.${domain}`));
   let subjects;
   if (source.scope === "company") {
+    const constituents = (metric.constituents ?? []).filter(item => metric.symbol === target || item.symbol === target);
     const issuer = secFilingIssuerIdentity(opened);
     const label = verifiedFirstPartyIssuerLabel(opened.finalUrl);
     const own = label && normalizedEvidenceText(label);
-    subjects = (metric.constituents ?? []).filter(item => issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
+    subjects = constituents.filter(item => issuer ? issuer.symbols.includes(item.symbol) : authority ? bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, item.symbol) : own && [item.symbol, item.nameEn].filter(value => value && value.length >= 3).some(value => own === normalizedEvidenceText(value) || own.includes(normalizedEvidenceText(value)) || normalizedEvidenceText(value).includes(own))).map(item => item.symbol);
     if (!issuer && !label && !authority) throw new Error("公司背景原文未证明发行主体，不能将被提及的客户或竞争对手当作披露主体");
     if ((issuer || label) && !/\b(?:we|our|the company)\b|本公司|我们|我司/iu.test(source.supportingExcerpt) && !subjects.some(symbol => bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, symbol))) throw new Error("公司背景段落未明确描述其自身敞口");
   } else {
@@ -1426,7 +1428,7 @@ export function verifiedBackgroundExposureSubjects(source, opened, envelope) {
     subjects = bodySupportsDeterministicTarget(source.supportingExcerpt, envelope, metric.symbol) ? [metric.symbol] : [];
   }
   if (!subjects.length) throw new Error("背景披露未明确对应目标或其指定成分，不能用泛泛风险套用板块");
-  if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
+  if (!/需求|供给|成本|利率|融资|监管|风险|\b(?:demand|supply|costs?|rates?|financing|borrowing|credit markets?|capital markets?|customer spending|economic conditions?|macroeconomic|regulat\w*|risks?)\b/iu.test(source.supportingExcerpt)) throw new Error("背景原文未包含可检验的经济传导因素");
   return subjects;
 }
 

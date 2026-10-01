@@ -4,13 +4,12 @@ import { stableHash } from "./daily-workflow-core.mjs";
 import { backgroundEvidenceInWindow } from "./evidence-timing.mjs";
 import { snapshotFromOpenedSource, openedSourceFromSnapshot } from "./evidence-source-snapshots.mjs";
 import { secFilingIssuerIdentity, secCompanySubmissionsUrl, secCompanySubmissionTime } from "./sec-filing-identity.mjs";
+import { companyExposureExcerpts } from "./company-exposure-excerpts.mjs";
 
-export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v1";
+export const COMPANY_BACKGROUND_VERSION = "verified-company-exposure-v2";
 const REGISTRY = "https://www.sec.gov/files/company_tickers.json";
 const digest = body => createHash("sha256").update(body).digest("hex");
 const ANNUAL = new Set(["10-K", "20-F", "40-F"]);
-const FACTOR = /\b(?:interest rates?|financing|credit markets?|capital markets?|borrowing|macroeconomic|economic conditions?|customer spending|demand|supply|costs?)\b/iu;
-const OWN = /\b(?:we|our|the company)\b/iu;
 
 function targets(plan) {
   return [...new Map(plan.anomalies.filter(item => item.kind === "ai_layer").flatMap(anomaly => anomaly.observation.constituents.map(item => [item.symbol, { symbol: item.symbol, anomaly }]))).values()];
@@ -49,26 +48,7 @@ function latestAnnual(profile, entity, envelope) {
   return candidates[0];
 }
 
-function excerpts(opened) {
-  const paragraphs = opened.text.split(/\n+/u).filter(text => text.length >= 60 && FACTOR.test(text) && OWN.test(text));
-  const candidates = [];
-  for (const paragraph of paragraphs) {
-    let quote = paragraph;
-    if (quote.length > 700) {
-      const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(paragraph)].map(item => item.segment.trim());
-      quote = "";
-      for (const sentence of sentences) { if (quote.length + sentence.length + 1 > 700) break; quote += (quote ? " " : "") + sentence; }
-    }
-    if (quote.length < 60 || quote.length > 700 || !/[.!?]$/u.test(quote) || !FACTOR.test(quote) || !OWN.test(quote)) continue;
-    const priority = /interest rates?|financing|credit markets?|capital markets?|borrowing/iu.test(quote) ? 3 : /macroeconomic|economic conditions?/iu.test(quote) ? 2 : 1;
-    candidates.push({ quote, priority, position: opened.text.indexOf(quote) });
-  }
-  // Keep distinct actual disclosures, including qualifications denying a
-  // particular rate sensitivity. An exposure record is not a causal verdict.
-  return [...new Map(candidates.sort((a, b) => b.priority - a.priority || a.position - b.position).map(item => [item.quote, item])).values()].slice(0, 3).sort((a, b) => a.position - b.position).map(item => item.quote);
-}
-
-function derive(book, envelope, plan) {
+function derive(book, envelope, plan, originalCache = new Map()) {
   const sources = [], gaps = [];
   const openedFilings = new Map();
   // Corrupt originals are invalid input, not an ordinary research gap.
@@ -77,9 +57,19 @@ function derive(book, envelope, plan) {
     const profile = book.profiles.find(item => item.symbol === filing.symbol);
     if (!profile) throw new Error("冻结年报缺少对应官方申报记录");
     const selected = latestAnnual(profile.receipt, entity, envelope);
-    const opened = openedSourceFromSnapshot(filing.snapshot), issuer = secFilingIssuerIdentity(opened);
+    // Checkpointing need not parse/segment every unchanged annual again. The
+    // key binds all raw bytes and timing receipts; any change reopens it. A
+    // standalone validation always starts with a fresh cache.
+    const originalKey = stableHash(filing.snapshot);
+    let original = originalCache.get(originalKey);
+    if (!original) {
+      const opened = openedSourceFromSnapshot(filing.snapshot);
+      original = { opened, issuer: secFilingIssuerIdentity(opened), quotes: companyExposureExcerpts(opened.text) };
+      originalCache.set(originalKey, original);
+    }
+    const { opened, issuer } = original;
     if (filing.snapshot.source !== selected.url || opened.finalUrl !== selected.url || !issuer || issuer.cik !== entity.cik || issuer.form !== selected.form || !issuer.symbols.includes(filing.symbol) || !opened.publishedAtCandidates.includes(selected.publishedAt)) throw new Error("冻结年报主体、代码、表格或时刻与官方记录不一致");
-    openedFilings.set(filing.symbol, opened);
+    openedFilings.set(filing.symbol, original);
   }
   for (const { symbol, anomaly } of targets(plan)) {
     try {
@@ -89,9 +79,8 @@ function derive(book, envelope, plan) {
       const selected = latestAnnual(profiles[0].receipt, entity, envelope);
       const filings = book.filings.filter(item => item.symbol === symbol);
       if (filings.length !== 1 || filings[0].snapshot.source !== selected.url) throw new Error("尚无对应年报的冻结原文");
-      const opened = openedFilings.get(symbol), issuer = secFilingIssuerIdentity(opened);
+      const { opened, issuer, quotes } = openedFilings.get(symbol);
       if (!issuer || issuer.cik !== entity.cik || issuer.form !== selected.form || !issuer.symbols.includes(symbol) || !opened.publishedAtCandidates.includes(selected.publishedAt)) throw new Error("年报主体、上市代码、表格或受理时刻未与官方记录一致");
-      const quotes = excerpts(opened);
       if (!quotes.length) throw new Error("年报中没有完整可核验的自身传导披露句子");
       for (const quote of quotes) sources.push({ originalUrl: selected.url, sourceLabel: "SEC", title: `${issuer.name}: disclosed business and financing risks`, publishedAt: selected.publishedAt, kind: "background", supportingExcerpt: quote, facts: "公司此前披露了涉及经营、需求、成本或融资条件的风险说明，具体影响取决于业务及财务项目和合同条款。", scope: "company", targets: [anomaly.target], hypothesisIds: [anomaly.hypotheses[1].id], causalConnection: false, comparisons: [], role: "facts", anomalyId: anomaly.id });
     } catch (error) { gaps.push({ symbol, reason: error.message }); }
@@ -134,7 +123,8 @@ export async function collectRecapCompanyBackgroundData(envelope, plan, { reader
   if (envelope.market !== "US") return book;
   const requested = targets(plan);
   book.failures ??= [];
-  const checkpoint = async () => { Object.assign(book, derive(book, envelope, plan)); if (onCheckpoint) await onCheckpoint(book); };
+  const originalCache = new Map();
+  const checkpoint = async () => { Object.assign(book, derive(book, envelope, plan, originalCache)); if (onCheckpoint) await onCheckpoint(book); };
   try { book.registry ??= receipt(REGISTRY, await reader(REGISTRY, { structured: true, signal }), now); }
   catch (error) { book.gaps = requested.map(({ symbol }) => ({ symbol, reason: `官方公司身份不可用：${error.message}` })); return book; }
   for (const { symbol } of requested) {
@@ -155,7 +145,7 @@ export async function collectRecapCompanyBackgroundData(envelope, plan, { reader
       if (!issuer || issuer.cik !== entity.cik || issuer.form !== selected.form || !issuer.symbols.includes(symbol)) throw new Error("年报主体、上市代码或表格未与官方记录一致");
       const direct = opened.publishedAtCandidates ?? [];
       if (direct.length && !direct.includes(selected.publishedAt)) throw new Error("原文发布时间与相应官方申报受理时刻不一致");
-      const original = { ...opened, publishedAtCandidates: [selected.publishedAt], metadataReceipts: direct.length ? [] : [{ finalUrl: secCompanySubmissionsUrl(selected.url), status: profile.status, contentType: profile.contentType, rawBody: Buffer.from(profile.bodyBase64, "base64") }] };
+      const original = { ...opened, publishedAtCandidates: [selected.publishedAt], metadataReceipts: direct.length ? opened.metadataReceipts ?? [] : [{ finalUrl: secCompanySubmissionsUrl(selected.url), status: profile.status, contentType: profile.contentType, rawBody: Buffer.from(profile.bodyBase64, "base64") }] };
       const snapshot = snapshotFromOpenedSource(selected.url, original, opened.fetchedAt ?? now().toISOString());
       if (book.filings.reduce((sum, item) => sum + Buffer.byteLength(item.snapshot.bodyBase64, "base64"), 0) + opened.rawBody.length > 96 * 1024 * 1024) throw new Error("公司敞口原文字节超过上限");
       book.filings.push({ symbol, snapshot });

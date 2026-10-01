@@ -57,7 +57,8 @@ export function openedSourceFromSnapshot(snapshot) {
   const publishedDateCandidates = sourcePublishedDateCandidates(body, snapshot.contentType, snapshot.finalUrl);
   if (stableHash(publishedAtCandidates) !== stableHash(snapshot.publishedAtCandidates) || stableHash(publishedDateCandidates) !== stableHash(snapshot.publishedDateCandidates)) throw new Error("原文快照的发布时间未由冻结原文证明");
   const articleProvenance = /(?:html|xhtml)/iu.test(snapshot.contentType) ? sourceArticleProvenance(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
-  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, articleProvenance, rawBody: body };
+  const metadataReceipts = receipts.map(receipt => ({ finalUrl: receipt.finalUrl, status: receipt.status, contentType: receipt.contentType, rawBody: bytes(receipt) }));
+  return { source: snapshot.source, finalUrl: snapshot.finalUrl, status: snapshot.status, contentType: snapshot.contentType, text, publishedAtCandidates, publishedDateCandidates, articleProvenance, rawBody: body, metadataReceipts, fetchedAt: snapshot.fetchedAt };
 }
 
 export function snapshotFromOpenedSource(source, opened, fetchedAt = new Date().toISOString()) {

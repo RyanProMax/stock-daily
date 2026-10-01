@@ -4,6 +4,7 @@ import { normalizedEvidenceText } from "../scripts/daily-source-audit.mjs";
 import { RECAP_VERSION, completeRecapPlan } from "../scripts/complete-recap.mjs";
 import { tradingRequests } from "../scripts/recap-market-data.mjs";
 import { ATTRIBUTION_VERSION } from "../scripts/recap-attribution.mjs";
+import { COMPANY_BACKGROUND_VERSION } from "../scripts/recap-company-background-data.mjs";
 
 export function recapFixture(market = "US") {
   const envelope = marketEnvelope(fixtureInput(), market);
@@ -37,6 +38,6 @@ export function recapFixture(market = "US") {
   const tradingData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], entries: [], gaps: tradingRequests(envelope).map(item => ({ symbol: item.symbol, reason: "Test fixture has no trading history; never infer volume or range from it." })) };
   const macroData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], context: null, gaps: [{ series: "daily_treasury_yield_curve", reason: "Test fixture has no official yield observations." }] };
   const transmissionData = { market, marketAsOf: envelope.marketAsOf, snapshots: [], sources: [], gaps: [] };
-  const companyBackgroundData = { version: "verified-company-exposure-v1", market, marketAsOf: envelope.marketAsOf, registry: null, profiles: [], filings: [], sources: [], gaps: market === "US" ? [...new Set(plan.anomalies.filter(item => item.kind === "ai_layer").flatMap(item => item.observation.constituents.map(company => company.symbol)))].map(symbol => ({ symbol, reason: "Test fixture does not claim access to an original company disclosure." })) : [] };
+  const companyBackgroundData = { version: COMPANY_BACKGROUND_VERSION, market, marketAsOf: envelope.marketAsOf, registry: null, profiles: [], filings: [], sources: [], gaps: market === "US" ? [...new Set(plan.anomalies.filter(item => item.kind === "ai_layer").flatMap(item => item.observation.constituents.map(company => company.symbol)))].map(symbol => ({ symbol, reason: "Test fixture does not claim access to an original company disclosure." })) : [] };
   return { envelope, plan, ledger, social, raw, tradingData, macroData, attribution, transmissionData, companyBackgroundData };
 }
