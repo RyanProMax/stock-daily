@@ -129,3 +129,34 @@ test("resumed mixed ledgers reaudited against frozen originals retain accepted p
     assert.equal(second.sources[0].reportingOrigin.key, "agency:associated_press");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+const hpeUrl = "https://www.hpe.com/us/en/newsroom/press-release/2026/08/networking-priorities.html";
+const hpeArticle = { ...article, mainEntityOfPage: { "@id": hpeUrl.replace("/us/en/", "/content/hpe/country/us/en/") }, publisher: { name: "Hewlett Packard Enterprise" }, author: { name: "Global Communication Team" } };
+const hpeHtml = (data = hpeArticle, changes = {}) => html(data, { extra: `<link rel="canonical" href="${hpeUrl}"><meta property="og:url" content="${hpeUrl}">`, ...changes });
+
+test("a native issuer CMS alias needs exact public identities, its own publisher, headline and two separate clocks", () => {
+  const raw = hpeHtml(), provenance = sourceArticleProvenance(raw, hpeUrl);
+  assert.deepEqual(provenance.publication, { status: "verified", initialPublishedAt: initial, currentVersionAt: updated, timeBasis: "article_update" });
+  assert.deepEqual(provenance.origin, { key: "issuer:hpe.com", identified: true, basis: "bound_issuer_article" });
+  assert.deepEqual(sourcePublishedAtCandidates(Buffer.from(raw), "text/html", hpeUrl), [initial]);
+  for (const changed of [
+    raw.replace(`rel="canonical" href="${hpeUrl}"`, `rel="canonical" href="${hpeUrl}?other=1"`),
+    raw.replace(`property="og:url" content="${hpeUrl}"`, `property="og:url" content="${hpeUrl}other"`),
+    raw.replace('</head>', `<link rel="canonical" href="${hpeUrl}"></head>`),
+    hpeHtml({ ...hpeArticle, mainEntityOfPage: { "@id": hpeArticle.mainEntityOfPage["@id"] + "other" } }),
+    hpeHtml({ ...hpeArticle, publisher: { name: "Unrelated Company" } }),
+    hpeHtml(hpeArticle, { heading: "Different recommended article" }),
+    hpeHtml({ ...hpeArticle, dateModified: "2026-02-30T21:08:12Z" }),
+  ]) assert.notEqual(sourceArticleProvenance(changed, hpeUrl).publication?.status, "verified");
+  assert.equal(sourceArticleProvenance(raw, hpeUrl.replace("www.hpe.com", "www.hpe.com.evil.example")), null);
+  assert.equal(sourceArticleProvenance(raw, hpeUrl.replace("www.hpe.com", "www.dell.com")).publication?.status === "verified", false);
+});
+
+test("issuer clocks require a bound original article and cannot come from generic government or footer modifications", () => {
+  const direct = { ...hpeArticle, mainEntityOfPage: hpeUrl }; delete direct.dateModified;
+  const firstHtml = hpeHtml(direct).replace(/<meta property="article:modified_time"[^>]+>/u, "");
+  assert.equal(sourceArticleProvenance(firstHtml, hpeUrl).publication.timeBasis, "first_publication");
+  const government = "https://www.bea.gov/news/release";
+  assert.equal(sourceArticleProvenance(html({ ...article, mainEntityOfPage: government }), government), null);
+  assert.equal(sourceArticleProvenance(firstHtml.replace('</head>', '<meta property="article:modified_time" content="2026-08-22T21:00:00Z"></head>'), hpeUrl).publication.status, "unverified_update");
+});

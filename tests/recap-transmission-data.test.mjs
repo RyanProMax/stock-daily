@@ -51,3 +51,24 @@ test("frozen original source reads reuse the same body and cannot silently chang
   await opened("https://www.reuters.com/markets/another-original");
   assert.equal(fallbackCalls, 1);
 });
+
+test("factor sentences split by an XLRE page footer retain their subject and qualifications within the excerpt bound", async () => {
+  const f = recapFixture();
+  const factor = `An investment\n68\nFund Summaries\nXLRE\nin a real property company may be subject to changes in supply and demand, interest rates, property taxes, operating expenses and economic conditions, including qualifications that do not establish an inverse rate sensitivity.`;
+  const full = original().replace('Companies in the real estate sector are affected by supply and demand, operating costs and government regulation.', factor);
+  const book = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(full) });
+  const source = book.sources.find(item => item.targets[0] === "XLRE");
+  assert.ok(source.supportingExcerpt.includes(factor));
+  assert.ok(source.supportingExcerpt.length <= 700);
+  const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: transmissionSourceReader(book) });
+  assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
+  assert.equal(ledger.sources[0].causalConnection, false);
+  const longer = full.replace(factor, factor.replace('including qualifications', 'with additional operating and regulatory uncertainty, '.repeat(5) + 'including qualifications'));
+  const longBook = await collectRecapTransmissionData(f.envelope, f.plan, { reader: reader(longer) });
+  const longQuote = longBook.sources.find(item => item.targets[0] === "XLRE");
+  assert.ok(longQuote.supportingExcerpt.startsWith('Real Estate Sector Risk:\nAn investment'));
+  assert.ok(longQuote.supportingExcerpt.endsWith('do not establish an inverse rate sensitivity.'));
+  assert.ok(longQuote.supportingExcerpt.length <= 700);
+  const longLedger = await verifyResearchSources([{ sources: [longQuote], alternatives: [] }], f.envelope, { reader: transmissionSourceReader(longBook) });
+  assert.equal(longLedger.sources.length, 1, JSON.stringify(longLedger.rejected));
+});

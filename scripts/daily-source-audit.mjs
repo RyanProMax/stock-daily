@@ -817,6 +817,13 @@ export function sourcePublishedAtCandidates(
     }
   }
   values.push(...jsonLdArticlePublishedValues(decoded, source));
+  // A strictly bound issuer article may use the native CMS identity in its
+  // metadata. Its first creation clock remains distinct from its current
+  // version; verification uses the latter through article provenance.
+  if (sourceHostname === "www.hpe.com") {
+    const publication = sourceArticleProvenance(decoded, source)?.publication;
+    if (publication?.status === "verified") values.push(publication.initialPublishedAt);
+  }
   for (const match of decoded.matchAll(
     /ACCEPTANCE-DATETIME(?:>|:)[ \t]*(20\d{12})/giu,
   )) {

@@ -6,6 +6,21 @@ import { backgroundEvidenceInWindow } from "./evidence-timing.mjs";
 const CONFIG = new URL("../data/recap-transmission-sources.json", import.meta.url);
 const FACTOR = /demand|supply|costs?|rates?|financing|regulat/iu;
 
+function completeRiskSentences(section) {
+  const offsets = [], footers = [...section.matchAll(/\n\d{1,3}\nFund Summaries\nX(?:[A-Z]{2}|LRE)\n/gu)];
+  let clean = "", cursor = 0;
+  for (const footer of footers) {
+    for (let index = cursor; index < footer.index; index++) { offsets.push(index); clean += section[index]; }
+    offsets.push(footer.index); clean += " "; cursor = footer.index + footer[0].length;
+  }
+  for (let index = cursor; index < section.length; index++) { offsets.push(index); clean += section[index]; }
+  return [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(clean)].map(item => {
+    const start = item.index + item.segment.length - item.segment.trimStart().length;
+    const end = item.index + item.segment.trimEnd().length;
+    return section.slice(offsets[start], offsets[end - 1] + 1).trim();
+  }).filter(Boolean);
+}
+
 function derive(snapshot, envelope, plan) {
   const config = snapshot.config;
   const url = new URL(snapshot.finalUrl);
@@ -26,18 +41,18 @@ function derive(snapshot, envelope, plan) {
       const tail = text.slice(at + heading.length);
       const next = /\n[A-Z][^\n:]{1,100} Risk:/u.exec(tail);
       const section = heading + tail.slice(0, next ? next.index : 3_000);
-      const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(section)].map(item => item.segment.trim());
-      // PDF-style page footers in the HTML can break Intl sentence segments.
-      // Preserve the complete opening statement through its actual full stop.
-      const first = section.slice(0, section.indexOf(".") + 1);
-      const factor = (name === "Utilities" ? sentences.find(item => /inverse relationship.*interest rates/iu.test(item)) : null) ?? sentences.slice(1).find(item => FACTOR.test(item) && first.length + item.length + 1 <= 700);
-      if (!first || !factor || first.length + factor.length + 1 > 700) throw new Error("未找到完整且有传导因素的原始句子");
-      let excerpt = `${first} ${factor}`;
+      const sentences = completeRiskSentences(section), first = sentences[0];
+      // Segment an unpaged view, then recover the full original sentence.
+      // A footer cannot orphan a subject or remove an economic qualification.
+      const factor = (name === "Utilities" ? sentences.slice(1).find(item => /inverse relationship.*interest rates/iu.test(item)) : null) ?? sentences.slice(1).find(item => FACTOR.test(item) && heading.length + item.length + 1 <= 700);
+      if (!first || !factor || heading.length + factor.length + 1 > 700) throw new Error("未找到完整且有传导因素的原始句子");
+      const prefix = first.length + factor.length + 1 <= 700 ? first : heading;
+      let excerpt = `${prefix}\n${factor}`;
       if (!bodySupportsDeterministicTarget(excerpt, envelope, anomaly.target)) {
-        const between = section.slice(first.length, section.indexOf(factor));
-        const marker = /\nFund Summaries\n(X[A-Z]{2})\n/u.exec(between);
+        const between = section.slice(heading.length, section.indexOf(factor) + factor.length);
+        const marker = /\nFund Summaries\n(X(?:[A-Z]{2}|LRE))\n/u.exec(between);
         if (marker?.[1] !== anomaly.target) throw new Error("风险正文未确认对应基金代码");
-        excerpt = `${first}\n${marker[1]}\n${factor}`;
+        excerpt = `${prefix}\n${marker[1]}\n${factor}`;
       }
       if (excerpt.length > 700) throw new Error("完整原始段落超过可核验长度");
       sources.push({ originalUrl: config.url, sourceLabel: "SEC", title: `${config.issuer}: ${heading.slice(0, -1)}`, publishedAt: dates[0], kind: "background", supportingExcerpt: excerpt, facts: `${anomaly.observation.name}基金的一手风险披露说明，该行业的结构性暴露可能影响经营表现；这是此前披露的风险机制，不能单独证明本次交易日的价格原因。`, scope: "sector", targets: [anomaly.target], hypothesisIds: [anomaly.hypotheses[1].id], causalConnection: false, comparisons: [], role: "facts", anomalyId: anomaly.id });

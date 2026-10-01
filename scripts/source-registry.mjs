@@ -1,4 +1,6 @@
 import xSources from "../data/ai-x-sources.json" with { type: "json" };
+import issuerDomains from "../data/issuer-domains.json" with { type: "json" };
+import { validateIssuerDomainRecords } from "./issuer-domain-identity.mjs";
 
 // These issuer domains already have a first-party identity reference in the
 // reviewed original-source registry. Specialist/KOL websites are not issuers.
@@ -6,6 +8,8 @@ const VERIFIED_ISSUERS = new Map();
 for (const source of xSources) if (source.authority === "first_party" && source.identityEvidence) {
   for (const domain of source.canonicalDomains) if (!VERIFIED_ISSUERS.has(domain)) VERIFIED_ISSUERS.set(domain, source.label);
 }
+const FILING_ISSUERS = validateIssuerDomainRecords(issuerDomains);
+for (const source of FILING_ISSUERS) if (!VERIFIED_ISSUERS.has(source.domain)) VERIFIED_ISSUERS.set(source.domain, source.label);
 
 const FIRST_PARTY_SOURCE_DOMAINS = [
   ...VERIFIED_ISSUERS.keys(),
@@ -103,6 +107,7 @@ const SOURCE_LABELS = new Map([
   ["csindex.com.cn", "中证指数有限公司"],
   ["gtimg.cn", "腾讯证券行情"],
   ["nasdaq.com", "Nasdaq"],
+  ["nyse.com", "New York Stock Exchange"],
   ["sse.com.cn", "上海证券交易所"],
   ["szse.cn", "深圳证券交易所"],
   ["thepaper.cn", "澎湃新闻"],
@@ -131,6 +136,14 @@ export function verifiedFirstPartyIssuerLabel(source) {
   return null;
 }
 
+export function verifiedFirstPartyIssuerIdentity(source) {
+  let hostname; try { hostname = new URL(source).hostname.toLowerCase(); } catch { return null; }
+  const filing = FILING_ISSUERS.find(record => hostnameMatches(hostname, record.domain));
+  if (filing) return { domain: filing.domain, label: filing.label };
+  for (const [domain, label] of VERIFIED_ISSUERS) if (hostnameMatches(hostname, domain)) return { domain, label };
+  return null;
+}
+
 export function verifiedExternalSourceType(source, platform = "web") {
   if (platform === "x") return "expert";
   let hostname, pathname;
@@ -144,6 +157,7 @@ export function verifiedExternalSourceType(source, platform = "web") {
   // Exchange-hosted editorial and syndicated releases are reporting, not an
   // issuer/regulator's primary disclosure merely because of the host name.
   if (hostnameMatches(hostname, "nasdaq.com") && /^\/(?:articles|press-release|news-and-insights)(?:\/|-|$)/u.test(pathname)) return "publisher";
+  if ((hostname === "e.nyse.com" && pathname === "/mac-desk-midday-market-update") || (hostnameMatches(hostname, "nyse.com") && pathname === "/xbcf7t9")) return "publisher";
   if (
     FIRST_PARTY_SOURCE_DOMAINS.some((domain) =>
       hostnameMatches(hostname, domain),

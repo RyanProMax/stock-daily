@@ -1,10 +1,11 @@
 import { JSDOM } from "jsdom";
-import { verifiedExternalSourceLabel, verifiedExternalSourceType } from "./source-registry.mjs";
+import { verifiedExternalSourceLabel, verifiedExternalSourceType, verifiedFirstPartyIssuerIdentity } from "./source-registry.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v1";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v2";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+const corporateNameKey = value => titleKey(normalized(value).replace(/(?:[\s,.]+(?:co|corp|corporation|company|inc|incorporated|ltd|limited|plc)\.?)+$/iu, ""));
 
 function exactUrl(value, base) {
   try {
@@ -27,13 +28,21 @@ function instant(value) {
 
 function matchingArticles(document, source) {
   const matches = [], expected = exactUrl(source, source);
+  // HPE's own page binds its public article URL to a CMS mainEntityOfPage.
+  // This exact path relation is allowed only with both native public identity
+  // records. It is not a URL rewrite, redirect or borrowed parent timestamp.
+  const publicUrl = new URL(source), cmsAlias = publicUrl.hostname === "www.hpe.com" && /^\/us\/en\/newsroom\/press-release\//u.test(publicUrl.pathname) && !publicUrl.search
+    && [...document.querySelectorAll('link[rel="canonical"]')].length === 1 && exactUrl(document.querySelector('link[rel="canonical"]').getAttribute("href"), source) === expected
+    && [...document.querySelectorAll('meta[property="og:url"]')].length === 1 && exactUrl(document.querySelector('meta[property="og:url"]').getAttribute("content"), source) === expected
+    ? exactUrl(`https://www.hpe.com/content/hpe/country${publicUrl.pathname}`, source) : null;
   const visit = value => {
     if (Array.isArray(value)) { value.forEach(visit); return; }
     if (!value || typeof value !== "object") return;
     const types = (Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]]).map(value => String(value ?? "").toLowerCase());
     const entity = value.mainEntityOfPage;
     const identities = [value.url, value["@id"], typeof entity === "string" ? entity : null, entity?.url, entity?.["@id"]];
-    if (types.some(type => TYPES.has(type)) && identities.some(value => exactUrl(value, source) === expected)) matches.push(value);
+    const ownPublisher = names(value.publisher).some(name => corporateNameKey(name) === corporateNameKey(verifiedFirstPartyIssuerIdentity(source)?.label));
+    if (types.some(type => TYPES.has(type)) && (identities.some(value => exactUrl(value, source) === expected) || (cmsAlias && ownPublisher && identities.some(value => exactUrl(value, source) === cmsAlias)))) matches.push(value);
     Object.values(value).forEach(visit);
   };
   for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
@@ -58,18 +67,20 @@ function agency(value) {
 // version availability or reporting origin. Photo credits, recommended
 // articles, website footers and a generic dateModified are excluded.
 export function sourceArticleProvenance(decodedHtml, source) {
-  if (verifiedExternalSourceType(source) !== "publisher") return null;
+  const sourceType = verifiedExternalSourceType(source), issuer = verifiedFirstPartyIssuerIdentity(source);
+  if (sourceType !== "publisher" && !(sourceType === "first_party" && issuer)) return null;
   const document = new JSDOM(decodedHtml).window.document;
   const headlines = [...document.querySelectorAll("h1")].map(item => normalized(item.textContent)).filter(Boolean);
   const allArticles = matchingArticles(document, source);
-  const articles = allArticles.filter(item => headlines.length === 1 && titleKey(item.headline) === titleKey(headlines[0]) && titleKey(item.headline).length >= 8);
+  const articles = allArticles.filter(item => headlines.length === 1 && titleKey(item.headline) === titleKey(headlines[0]) && titleKey(item.headline).length >= 8 && (!issuer || names(item.publisher).some(name => corporateNameKey(name) === corporateNameKey(issuer.label))));
   const host = new URL(source).hostname.replace(/^www\./u, "");
   const nativeAgency = /(?:^|\.)apnews\.com$/u.test(host) ? "agency:associated_press" : /(?:^|\.)reuters\.com$/u.test(host) ? "agency:reuters" : null;
-  let origin = nativeAgency ? { key: nativeAgency, identified: true, basis: "original_agency_domain" } : { key: `publisher:${host.replace(/^(?:[a-z]{2})\.finance\.yahoo\.com$/u, "finance.yahoo.com")}`, identified: false, basis: "origin_unresolved" };
+  let origin = issuer ? { key: `issuer:${issuer.domain}`, identified: false, basis: "origin_unresolved" } : nativeAgency ? { key: nativeAgency, identified: true, basis: "original_agency_domain" } : { key: `publisher:${host.replace(/^(?:[a-z]{2})\.finance\.yahoo\.com$/u, "finance.yahoo.com")}`, identified: false, basis: "origin_unresolved" };
   let publication = null;
   if (allArticles.some(item => item.dateModified != null) || document.querySelector('meta[property="article:modified_time"]')) publication = { status: "unverified_update" };
   if (articles.length === 1) {
     const article = articles[0], authors = names(article.author), authorAgencies = authors.map(agency).filter(Boolean);
+    if (issuer) origin = { key: `issuer:${issuer.domain}`, identified: true, basis: "bound_issuer_article" };
     const bodies = [...document.querySelectorAll("article")].filter(item => {
       const heading = item.querySelector("h1");
       return !heading || titleKey(heading.textContent) === titleKey(article.headline);
@@ -89,11 +100,13 @@ export function sourceArticleProvenance(decodedHtml, source) {
       })) authorAgencies.push(agency(text));
     }
     const agencies = [...new Set(authorAgencies.filter(Boolean))];
-    if (agencies.length === 1) origin = { key: agencies[0], identified: true, basis: "bound_article_attribution" };
-    else if (!agencies.length && authors.length && names(article.publisher).some(name => titleKey(name) === titleKey(verifiedExternalSourceLabel(source)))) origin = { ...origin, identified: true, basis: "bound_publisher_and_author" };
-    else if (agencies.length > 1) origin = { ...origin, identified: false, basis: "ambiguous_attribution" };
-    if (article.dateModified != null) {
-      const initialPublishedAt = instant(article.datePublished), currentVersionAt = instant(article.dateModified);
+    if (!issuer) {
+      if (agencies.length === 1) origin = { key: agencies[0], identified: true, basis: "bound_article_attribution" };
+      else if (!agencies.length && authors.length && names(article.publisher).some(name => titleKey(name) === titleKey(verifiedExternalSourceLabel(source)))) origin = { ...origin, identified: true, basis: "bound_publisher_and_author" };
+      else if (agencies.length > 1) origin = { ...origin, identified: false, basis: "ambiguous_attribution" };
+    }
+    if (article.dateModified != null || (issuer && !document.querySelector('meta[property="article:modified_time"]'))) {
+      const initialPublishedAt = instant(article.datePublished), currentVersionAt = instant(article.dateModified ?? article.datePublished);
       const clocksAgree = (property, value) => [...document.querySelectorAll(`meta[property="${property}"]`)].every(item => {
         const raw = item.getAttribute("content") ?? "";
         // Offset-free labels cannot corroborate or override the exact zoned
