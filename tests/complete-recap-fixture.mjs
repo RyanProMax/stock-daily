@@ -12,7 +12,7 @@ export function recapFixture(market = "US") {
   const plan = completeRecapPlan(envelope);
   const ledger = { sources: plan.anomalies.flatMap((anomaly, index) => [
     { id: `${index}-facts`, anomalyId: anomaly.id, role: "facts", targets: [anomaly.target], sourceType: "first_party", url: `https://www.sec.gov/Archives/example-${index}`, sourceLabel: "SEC", supportingExcerpt: "The issuer confirmed a change in demand and borrowing costs in its official disclosure.", excerptHash: "facts-hash", verifiedAt: "2026-08-21T21:00:00Z", publishedAt: "2026-08-21T19:00:00Z" },
-    { id: `${index}-causal`, anomalyId: anomaly.id, role: "causal", targets: [anomaly.target], sourceType: "publisher", url: `https://www.reuters.com/markets/example-${index}`, sourceLabel: "Reuters", supportingExcerpt: `${anomaly.target} rose because improved demand supported earnings expectations, while offsetting borrowing costs and lower volume limited the advance.`, causalConnection: true, excerptHash: "causal-hash", verifiedAt: "2026-08-21T21:00:00Z", publishedAt: "2026-08-21T20:30:00Z" },
+    { id: `${index}-causal`, anomalyId: anomaly.id, role: "causal", kind: "market_wrap", targets: [anomaly.target], sourceType: "publisher", url: `https://www.reuters.com/markets/example-${index}`, sourceLabel: "Reuters", supportingExcerpt: `${anomaly.target} rose because improved demand supported earnings expectations, while offsetting borrowing costs and lower volume limited the advance.`, causalConnection: true, excerptHash: "causal-hash", verifiedAt: "2026-08-21T21:00:00Z", publishedAt: "2026-08-21T20:30:00Z" },
   ]) };
   const social = { status: "ok", attempted: true, leads: [] };
   for (const source of ledger.sources) {

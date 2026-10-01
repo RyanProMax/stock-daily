@@ -1,11 +1,11 @@
 import { assertFactsNumbersInExcerpt, hasCausalPassage } from "./daily-workflow-core.mjs";
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
-import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
+import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow, sourceEvidenceDeadline } from "./evidence-timing.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
 import { isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 
-export const ATTRIBUTION_VERSION = "verified-recap-attribution-v2";
+export const ATTRIBUTION_VERSION = "verified-recap-attribution-v3";
 const DIRECTIONS = ["positive", "negative", "flat"];
 const GENERIC_TERMS = /^(?:market|markets|stock|stocks|shares|prices?|demand|supply|costs?|growth|rates?|interest rates|earnings|news|report|rose|fell|美国|中国|市场|股票|需求|供给|成本|利率|上涨|下跌)$/iu;
 const CALENDAR_TERM = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday)$/iu;
@@ -36,7 +36,7 @@ function freshRoot(source, envelope, macroData = null) {
 
 function reaction(source, envelope) {
   const time = Date.parse(source?.publishedAt);
-  return verified(source) && source.role === "causal" && source.sourceType === "publisher" && source.causalConnection === true && hasCausalPassage(source.supportingExcerpt) && !isCalendarDate(source.publishedAt) && Number.isFinite(time) && time >= Date.parse(envelope.session.windowStart) && time <= Date.parse(envelope.session.wrapDeadline ?? envelope.session.windowEnd);
+  return verified(source) && source.role === "causal" && source.sourceType === "publisher" && source.causalConnection === true && hasCausalPassage(source.supportingExcerpt) && !isCalendarDate(source.publishedAt) && Number.isFinite(time) && time > Date.parse(envelope.session.windowStart) && time <= sourceEvidenceDeadline(source.kind, envelope.session) && (source.kind !== "market_wrap" || time >= Date.parse(envelope.session.windowEnd));
 }
 
 function background(source, envelope, target) {

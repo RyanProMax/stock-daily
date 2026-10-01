@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 
-export const MOF_DOCUMENT_VERSION = "verified-mof-finance-document-v1";
+export const MOF_DOCUMENT_VERSION = "verified-mof-finance-document-v2";
 const clean = value => String(value ?? "").normalize("NFC").replace(/\s+/gu, " ").trim();
 const key = value => clean(value).replace(/\s+/gu, "");
 

@@ -54,7 +54,7 @@ import {
 import { publishableExternalSourceDomains } from "./source-registry.mjs";
 import { collectXIntelligence } from "./x-intelligence.mjs";
 import {
-  assessRecapEvidenceCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
+  assessRecapEvidenceCoverage, compactRecapCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
   validateRecapReview, verifySocialLeads,
 } from "./complete-recap.mjs";
 import { collectRecapTradingData, validateRecapTradingData } from "./recap-market-data.mjs";
@@ -66,6 +66,7 @@ import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./eviden
 import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "./recap-company-background-data.mjs";
 import { planRecapResearchRepair } from "./recap-research-repair.mjs";
+import { recapEvidenceTiming } from "./evidence-timing.mjs";
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -2060,7 +2061,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v34",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v35",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2987,8 +2988,8 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
-    const attributionPayload = () => ({ envelope: this.envelope, targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
-    const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
+    const attributionPayload = () => ({ envelope: this.envelope, evidenceTiming: recapEvidenceTiming(this.envelope), targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
+    const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage: compactRecapCoverage(coverage) }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
     let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;
     if (attributor) await atomicJson(resolve(this.runDir, "artifacts/recap-attribution-before-research-repair.json"), attributor.output);
     const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null });

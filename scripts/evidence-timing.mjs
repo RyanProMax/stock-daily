@@ -2,6 +2,22 @@ export function isCalendarDate(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
+// Reporting about an already completed session may arrive later than the
+// market-data collection deadline. New events still stop at the actual close;
+// an arbitrary supplied wrapDeadline cannot extend this eight-hour ceiling.
+export function sourceEvidenceDeadline(kind, session) {
+  const close = Date.parse(session.windowEnd);
+  return close + (kind === "market_wrap" ? 8 * 3_600_000 : 0);
+}
+
+export function recapEvidenceTiming(envelope) {
+  return {
+    ordinaryEventDeadline: envelope.session.windowEnd,
+    marketWrapDeadline: new Date(sourceEvidenceDeadline("market_wrap", envelope.session)).toISOString(),
+    marketDataCollectionDeadline: envelope.session.wrapDeadline,
+  };
+}
+
 export function officialReleaseDateInWindow(date, envelope) {
   if (!isCalendarDate(date)) return false;
   const zone = envelope.market === "CN" ? "Asia/Shanghai" : "America/New_York";

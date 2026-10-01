@@ -162,6 +162,7 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     if (!original || original.finalUrl !== source.url || original.status !== (source.status ?? original.status) || verifiedExternalSourceType(original.finalUrl) !== source.sourceType) throw new Error("证据来源与冻结原文地址、状态或身份不一致");
     assertAccessibleOriginalArticle(original);
     if (mofDocumentIdentity(source.url) ? source.authorityDocumentVersion !== MOF_DOCUMENT_VERSION : source.authorityDocumentVersion) throw new Error("财政部公告身份核验版本未由冻结原文重建");
+    if (mofDocumentIdentity(source.url) && (source.publishedAt !== original.publishedAtCandidates[0] || source.timePrecision !== "instant" || source.timingLimitation)) throw new Error("财政部已绑定的精确发布时间不得退化为日期或被替换");
     if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);

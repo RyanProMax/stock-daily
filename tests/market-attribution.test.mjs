@@ -11,6 +11,7 @@ import {
 import { buildMarketBriefs } from "../scripts/daily-collect.mjs";
 import {
   buildMarketSessions,
+  evidenceFitsSession,
   driverDirectionMatches,
   zonedDateTimeIso,
 } from "../scripts/market-attribution.mjs";
@@ -606,6 +607,20 @@ test("external evidence must fall inside the relevant market window", () => {
     () => validateReport(report, input),
     /外部证据不在本次市场窗口内/,
   );
+});
+
+test("same-session wraps share a bounded eight-hour deadline across feed selection and publication", () => {
+  const input = validateInput(fixtureInput()), session = input.marketSessions.find(item => item.market === "CN");
+  const report = fixtureReport(input), evidence = report.drivers[0].evidence[1];
+  evidence.kind = "market_wrap"; evidence.publishedAt = "2026-08-21T10:18:47.000Z";
+  assert.equal(evidenceFitsSession(evidence, session), true);
+  assert.doesNotThrow(() => validateReport(report, input));
+  evidence.publishedAt = "2026-08-21T15:00:01.000Z";
+  assert.equal(evidenceFitsSession(evidence, { ...session, wrapDeadline: "2026-08-22T20:00:00Z" }), false);
+  assert.throws(() => validateReport(report, input), /外部证据不在本次市场窗口内/);
+  evidence.publishedAt = "2026-08-21T10:18:47.000Z"; evidence.kind = "official";
+  assert.equal(evidenceFitsSession(evidence, session), false);
+  assert.throws(() => validateReport(report, input), /外部证据不在本次市场窗口内/);
 });
 
 test("precise event and official times cannot follow close; date-only primary facts retain their uncertainty", () => {

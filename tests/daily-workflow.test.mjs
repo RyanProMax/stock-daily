@@ -8,6 +8,7 @@ import {
 } from "../scripts/daily-policy.mjs";
 import { yahooSectorPoint, currentSectorMetrics } from "../scripts/sector-heat.mjs";
 import { auditStructuredOutputSchema } from "../scripts/structured-output-schema-audit.mjs";
+import { ATTRIBUTION_VERSION } from "../scripts/recap-attribution.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 import { fetchComparisonReport } from "../scripts/daily-freshness.mjs";
 import {
@@ -268,7 +269,7 @@ test("resume and repair are scoped to immutable stage artifacts", async () => {
 });
 
 test("Codex output schemas satisfy strict structured-output requirements", async () => {
-  const names = ["plan", "evidence", "adjudication", "draft", "review", "translation"];
+  const names = ["plan", "evidence", "adjudication", "draft", "review", "translation", "recap-attribution"];
   const schemas = await Promise.all(
     names.map((name) =>
       readFile(new URL(`../docs/daily-agents/${name}.schema.json`, import.meta.url), "utf8").then(JSON.parse),
@@ -277,6 +278,7 @@ test("Codex output schemas satisfy strict structured-output requirements", async
   for (const schema of schemas) {
     assert.equal(auditStructuredOutputSchema(schema).status, "valid");
   }
+  assert.equal(schemas.at(-1).properties.contractVersion.const, ATTRIBUTION_VERSION);
   const invalid = structuredClone(schemas[3]);
   invalid.$defs.aiView.required = invalid.$defs.aiView.required.filter(
     (key) => key !== "mechanism",

@@ -3,6 +3,7 @@ import test from "node:test";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { recapTargets, validateCompleteRecap } from "../scripts/complete-recap.mjs";
 import { recapAttributionCandidates, validateRecapAttribution } from "../scripts/recap-attribution.mjs";
+import { recapEvidenceTiming } from "../scripts/evidence-timing.mjs";
 
 function inferredFixture() {
   const f = recapFixture();
@@ -40,6 +41,23 @@ test("an inferred exposure chain keeps broad originals separate and requires exp
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /其他目标/);
 });
 
+test("a primary policy event preserves its scope while an independent report supplies the target price connection", () => {
+  const f = inferredFixture(), entry = f.attribution.entries[0];
+  f.root.kind = "official"; f.root.scope = "event_only";
+  f.root.supportingExcerpt = "The authority announced Residential mortgage subsidy, providing 1 percentage point of support for qualifying new first-home loans; eligibility and implementation remain limited.";
+  f.report.supportingExcerpt = "SPX rose because Residential mortgage subsidy, providing 1 percentage point of support for qualifying new first-home loans, improved expectations; weaker technology shares limited the net move.";
+  entry.chains[0].eventAnchors = ["Residential mortgage subsidy", "1 percentage point"];
+  // The benchmark's reported connection does not also complete the utility
+  // inference merely because that sector has a background exposure paragraph.
+  f.entry.basis = "unresolved"; f.entry.chains = [];
+  assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger));
+  assert.equal(f.root.scope, "event_only");
+  f.report.targets = ["XLU"];
+  assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /直接对应/);
+  f.report.targets = [entry.target]; f.root.scope = "company"; f.root.companySubjectChecked = true; f.root.companySubjects = ["unrelated-company"];
+  assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /直接对应/);
+});
+
 test("unrelated, generic, misdated, unverified and direction-contradicted chains cannot complete attribution", () => {
   for (const mutate of [
     f => f.entry.chains[0].eventAnchors = ["interest rates", "demand"],
@@ -67,12 +85,32 @@ test("date-only roots require the exact timed event value before close, never a 
   f.attribution.entries[0].chains[0].eventAnchors = ["Consumer Confidence Expectations Index", "68.4 points"];
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /时间先后/);
   f.report.publishedAt = "2026-08-21T19:30:00Z";
+  f.report.kind = "event";
   assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger));
   f.entry.chains[0].eventAnchors = ["Acme Robotics", "factory order recovery"];
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /具体数值/);
   f.entry.chains[0].eventAnchors = ["Consumer Confidence Expectations Index", "68.4 points"];
   f.report.supportingExcerpt = f.report.supportingExcerpt.replace("68.4 points", "88.6 points");
   assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger), /锚点/);
+});
+
+test("late same-session wrap reporting preserves pre-close event chronology within a bounded eight-hour window", () => {
+  const f = confirmedDateFixture();
+  f.report.publishedAt = "2026-08-21T23:30:00Z";
+  const timing = recapEvidenceTiming(f.envelope);
+  assert.ok(Date.parse(f.report.publishedAt) > Date.parse(timing.marketDataCollectionDeadline));
+  assert.ok(Date.parse(f.report.publishedAt) <= Date.parse(timing.marketWrapDeadline));
+  assert.doesNotThrow(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger, { requireComplete: true }));
+  assert.ok(recapAttributionCandidates(f.envelope, recapTargets(f.envelope), f.ledger).some(item => item.candidatePairs.some(pair => pair.reaction === f.report.id)));
+  for (const mutate of [
+    v => v.report.kind = "event",
+    v => { v.report.publishedAt = "2026-08-22T04:00:01Z"; v.envelope.session.wrapDeadline = "2026-08-23T20:00:00Z"; },
+    v => v.confirmation.publishedAt = "2026-08-21T20:01:00Z",
+    v => { v.root.publishedAt = "2026-08-21T21:00:00Z"; delete v.entry.chains[0].timingEvidenceId; },
+  ]) {
+    const changed = confirmedDateFixture(); changed.report.publishedAt = "2026-08-21T23:30:00Z"; mutate(changed);
+    assert.throws(() => validateRecapAttribution(changed.attribution, changed.envelope, recapTargets(changed.envelope), changed.ledger, { requireComplete: true }));
+  }
 });
 
 function confirmedDateFixture() {

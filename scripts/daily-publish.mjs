@@ -26,7 +26,7 @@ import {
   topSectorHeat,
 } from "./sector-heat.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
-import { isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
+import { isCalendarDate, officialReleaseDateInWindow, sourceEvidenceDeadline } from "./evidence-timing.mjs";
 
 export { verifiedExternalSourceType } from "./source-registry.mjs";
 
@@ -653,16 +653,11 @@ function validateEvidence(value, input, market, label) {
   } else {
     const start = Date.parse(session.windowStart);
     const close = Date.parse(session.windowEnd);
-    const deadline = Date.parse(session.wrapDeadline);
     const factsStart = start - 72 * 60 * 60 * 1_000;
-    const marketWrapDeadline = Math.max(
-      deadline,
-      close + 8 * 60 * 60 * 1_000,
-    );
     if (
       publishedTime <= factsStart ||
       publishedTime >
-        (evidence.kind === "market_wrap" ? marketWrapDeadline : close) ||
+        sourceEvidenceDeadline(evidence.kind, session) ||
       dataSources.has(source) ||
       (evidence.kind === "market_wrap" && publishedTime < close) ||
       (evidence.kind !== "market_wrap" && publishedTime > close)

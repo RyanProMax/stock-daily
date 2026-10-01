@@ -3,7 +3,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["contractVersion", "market", "marketAsOf", "entries"],
   "properties": {
-    "contractVersion": {"const": "verified-recap-attribution-v2", "type": "string"},
+    "contractVersion": {"const": "verified-recap-attribution-v3", "type": "string"},
     "market": {"type": "string", "enum": ["CN", "US"]},
     "marketAsOf": {"type": "string", "minLength": 10, "maxLength": 10},
     "entries": {

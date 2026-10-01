@@ -191,6 +191,23 @@ export function assessRecapEvidenceCoverage(envelope, ledger, { tradingData = nu
   return { market: envelope.market, marketAsOf: envelope.marketAsOf, eligibleCount: entries.filter(entry => !entry.gaps.length).length, requiredCount: entries.length, entries };
 }
 
+// Every target shares many root/reaction pairs. Preserve every field and its
+// ordering once, with per-target indexes, instead of repeating entire records
+// until the native runtime refuses its input. The persisted audit stays full.
+export function compactRecapCoverage(coverage) {
+  const attributionPairs = [], indexes = new Map();
+  const entries = coverage.entries.map(entry => {
+    const { candidatePairs, ...candidates } = entry.attributionCandidates;
+    const candidatePairIndexes = candidatePairs.map(pair => {
+      const key = stableHash(pair);
+      if (!indexes.has(key)) { indexes.set(key, attributionPairs.length); attributionPairs.push(structuredClone(pair)); }
+      return indexes.get(key);
+    });
+    return { ...structuredClone(entry), attributionCandidates: { ...structuredClone(candidates), candidatePairIndexes } };
+  });
+  return { ...structuredClone(coverage), attributionPairs, entries };
+}
+
 export function validateCompleteRecap(value, envelope, ledger, social, { requireComplete = false, tradingData = null, attribution = null, macroData = null } = {}) {
   const targets = recapTargets(envelope);
   if (ledger.sources.some(source => source.kind === "macro_observation")) {

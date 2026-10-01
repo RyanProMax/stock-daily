@@ -1,3 +1,5 @@
+import { sourceEvidenceDeadline } from "./evidence-timing.mjs";
+
 const MARKET_SESSION_CONFIG = {
   CN: { symbol: "SSE", closeHour: 15, timeZone: "Asia/Shanghai" },
   US: { symbol: "SPX", closeHour: 16, timeZone: "America/New_York" },
@@ -100,9 +102,7 @@ export function evidenceFitsSession(item, session) {
   if (!Number.isFinite(publishedAt)) return false;
   const start = Date.parse(session.windowStart);
   const close = Date.parse(session.windowEnd);
-  const end = Date.parse(
-    item.kind === "market_wrap" ? session.wrapDeadline : session.windowEnd,
-  );
+  const end = sourceEvidenceDeadline(item.kind, session);
   return (
     publishedAt > start &&
     publishedAt <= end &&

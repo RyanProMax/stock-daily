@@ -6,7 +6,7 @@ import test from "node:test";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 import { assertFactsNumbersInExcerpt, marketEnvelope, publicComparison, stableHash, validateResearchOutput } from "../scripts/daily-workflow-core.mjs";
 import { MarketWorkflow, assertResearchBatchBudget, compatibleFeatureArgs, recapResearchSourceAccess } from "../scripts/daily-workflow.mjs";
-import { RECAP_VERSION, assessRecapEvidenceCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap, validateRecapReview, verifySocialLeads } from "../scripts/complete-recap.mjs";
+import { RECAP_VERSION, assessRecapEvidenceCoverage, compactRecapCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap, validateRecapReview, verifySocialLeads } from "../scripts/complete-recap.mjs";
 import { workflowMarketContentHash, preserveInactiveStoredSlice, auditWorkflowCausalEvidence } from "../scripts/daily-workflow-publish.mjs";
 import { verifiedExternalSourceType } from "../scripts/source-registry.mjs";
 
@@ -66,6 +66,23 @@ test("evidence coverage is measured before a writer can pad missing causes", () 
   assert.equal(coverage.eligibleCount, 19);
   assert.ok(coverage.entries[0].gaps.includes("target_causality"));
   assert.ok(coverage.entries[0].gaps.includes("magnitude"));
+});
+
+test("native attribution input shares repeated pairs without losing any target, timing proof or qualification", () => {
+  const f = recapFixture(), coverage = assessRecapEvidenceCoverage(f.envelope, f.ledger);
+  coverage.entries[0].attributionCandidates.candidatePairs[0].timingEvidenceIds = ["exact-before-close-confirmation"];
+  const originalHash = stableHash(coverage), compact = compactRecapCoverage(coverage);
+  const { attributionPairs, ...expanded } = structuredClone(compact);
+  for (const entry of expanded.entries) {
+    const { candidatePairIndexes, ...candidates } = entry.attributionCandidates;
+    entry.attributionCandidates = { ...candidates, candidatePairs: candidatePairIndexes.map(index => attributionPairs[index]) };
+  }
+  assert.deepEqual(expanded, coverage);
+  assert.equal(stableHash(coverage), originalHash);
+  assert.equal(stableHash(compactRecapCoverage(coverage)), stableHash(compact));
+  assert.ok(JSON.stringify(compact).length < JSON.stringify(coverage).length / 3);
+  compact.attributionPairs[0].timingEvidenceIds.push("cannot-mutate-original");
+  assert.equal(stableHash(coverage), originalHash);
 });
 
 test("thin, ungrounded, expert-only and target-mismatched attribution cannot pass", () => {

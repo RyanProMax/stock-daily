@@ -8,7 +8,7 @@ import {
   verifiedFirstPartyIssuerIdentity,
   verifiedSecIssuerIdentity,
 } from "./source-registry.mjs";
-import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow } from "./evidence-timing.mjs";
+import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow, sourceEvidenceDeadline } from "./evidence-timing.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { secArchiveIdentity, secFilingIssuerIdentity } from "./sec-filing-identity.mjs";
 import transmissionConfig from "../data/recap-transmission-sources.json" with { type: "json" };
@@ -20,7 +20,7 @@ import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v55";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v56";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v3";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v5";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v3";
@@ -1057,21 +1057,14 @@ function sourceTimeInEvidenceWindow(source, envelope, value) {
   if (source.kind === "background") return backgroundEvidenceInWindow(value, envelope);
   const published = Date.parse(value);
   const start = Date.parse(envelope.session.windowStart);
-  const close = Date.parse(envelope.session.windowEnd);
-  const deadline = Date.parse(envelope.session.wrapDeadline);
+  const deadline = sourceEvidenceDeadline(source.kind, envelope.session);
   const factsStart = start - 72 * 60 * 60 * 1_000;
-  const marketWrapDeadline = Math.max(
-    deadline,
-    close + 8 * 60 * 60 * 1_000,
-  );
   return (
     source.role === "facts"
       ? published > factsStart &&
-        (published <= close ||
-          (source.kind === "market_wrap" && published <= marketWrapDeadline))
+        published <= deadline
       : published > start &&
-        (published <= close ||
-          (source.kind === "market_wrap" && published <= marketWrapDeadline))
+        published <= deadline
   );
 }
 
@@ -1511,7 +1504,7 @@ export async function verifyResearchSources(
         const pdfUrl = /\.pdf$/iu.test(candidateUrl.pathname);
         const cachedPdfIssuerValid = (!(pdfUrl || /^application\/pdf(?:;|$)/iu.test(cached?.contentType ?? "")) || cached?.pdfTextEvidence?.version === PDF_TEXT_EVIDENCE_VERSION) && (!pdfUrl || candidate.scope !== "company" || cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION) && (!pdfUrl || candidateUrl.hostname !== "static.cninfo.com.cn" || candidate.role !== "facts" || (candidate.scope === "company" && candidate.targets.length === 1 && cached?.pdfIssuerEvidenceVersion === PDF_ISSUER_EVIDENCE_VERSION));
         const cachedPmiValid = !isChinaPmiArticle(candidate.originalUrl) || (cached?.surveyChecked === true && cached.surveyDefinition?.version === CHINA_PMI_EVIDENCE_VERSION);
-        const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION;
+        const cachedMofValid = !mofDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === MOF_DOCUMENT_VERSION && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
         if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
@@ -1528,8 +1521,12 @@ export async function verifyResearchSources(
         const publication = opened.articleProvenance?.publication;
         if (mofRecord && (stableHash(opened.publishedAtCandidates) !== stableHash(mofRecord.publishedAtCandidates) || stableHash(opened.publishedDateCandidates) !== stableHash(mofRecord.publishedDateCandidates) || publication?.status !== "verified" || publication.initialPublishedAt !== mofRecord.publishedAtCandidates[0] || publication.currentVersionAt !== mofRecord.publishedAtCandidates[0] || publication.timeBasis !== "first_publication" || opened.articleProvenance?.origin?.key !== "authority:mof.gov.cn" || opened.articleProvenance.origin.identified !== true)) throw new Error("财政部证据时间或来源与原始正文记录不一致");
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
+        // A fully bound native MOF record supplies a precise publication clock.
+        // Verify a supplied calendar claim before replacing its lower precision.
+        if (mofRecord && isCalendarDate(candidate.publishedAt)) verifiedSourceTime(candidate, envelope, mofRecord.publishedAtCandidates, mofRecord.publishedDateCandidates, sourceType, corporateAction);
+        const timedCandidate = mofRecord ? { ...candidate, publishedAt: mofRecord.publishedAtCandidates[0] } : candidate;
         const publishedAt = verifiedSourceTime(
-          candidate,
+          timedCandidate,
           envelope,
           publication?.status === "verified" ? [publication.currentVersionAt] : opened.publishedAtCandidates ?? [],
           opened.publishedDateCandidates ?? [],

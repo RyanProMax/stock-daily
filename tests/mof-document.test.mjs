@@ -79,18 +79,31 @@ test("a bound policy original verifies conditions at event scope without certify
   const source = { anomalyId: anomaly.id, role: 'facts', originalUrl: url, sourceLabel: '财政部', title, publishedAt: '2026-08-20', kind: 'official', supportingExcerpt: excerpt, facts: excerpt, scope: 'event_only', targets: [anomaly.target], hypothesisIds: [anomaly.hypotheses[0].id], causalConnection: false, comparisons: [] };
   const ledger = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: () => opened() });
   assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
-  assert.equal(ledger.sources[0].publishedAt, '2026-08-20');
+  assert.equal(ledger.sources[0].publishedAt, '2026-08-20T07:16:00.000Z');
+  assert.equal(ledger.sources[0].timePrecision, 'instant');
+  assert.equal(ledger.sources[0].timingLimitation, undefined);
   assert.equal(ledger.sources[0].initialPublishedAt, '2026-08-20T07:16:00.000Z');
-  assert.equal(ledger.sources[0].authorityDocumentVersion, 'verified-mof-finance-document-v1');
+  assert.equal(ledger.sources[0].authorityDocumentVersion, 'verified-mof-finance-document-v2');
   assert.equal(ledger.sources[0].scope, 'event_only');
   assert.equal(ledger.sources[0].causalConnection, false);
   assert.equal(ledger.sources[0].sourceType, 'first_party');
   const book = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [snapshotFromOpenedSource(url, await opened())] };
   auditLedgerSourceSnapshots(ledger, book, { envelope: f.envelope });
-  for (const version of [undefined, 'verified-mof-finance-document-v0']) {
+  for (const version of [undefined, 'verified-mof-finance-document-v1']) {
     const old = structuredClone(ledger); old.sources[0].authorityDocumentVersion = version;
     assert.throws(() => auditLedgerSourceSnapshots(old, book, { envelope: f.envelope }), /核验版本/);
   }
+  const degraded = structuredClone(ledger);
+  degraded.sources[0].publishedAt = '2026-08-20'; degraded.sources[0].timePrecision = 'date';
+  assert.throws(() => auditLedgerSourceSnapshots(degraded, book, { envelope: f.envelope }), /精确发布时间/);
+  const requests = [];
+  const replay = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: (...args) => { requests.push(args); return opened(); }, verifiedCache: new Map([[stableHash(source), degraded.sources[0]]]) });
+  assert.equal(requests.length, 1); assert.equal(replay.sources[0].publishedAt, '2026-08-20T07:16:00.000Z');
+  const wrong = await verifyResearchSources([{ sources: [{ ...source, publishedAt: '2026-08-21' }], alternatives: [] }], f.envelope, { reader: () => opened() });
+  assert.equal(wrong.sources.length, 0);
+  const earlierClose = { ...f.envelope, session: { ...f.envelope.session, windowEnd: '2026-08-20T07:00:00Z' } };
+  const afterClose = await verifyResearchSources([{ sources: [source], alternatives: [] }], earlierClose, { reader: () => opened() });
+  assert.equal(afterClose.sources.length, 0); assert.match(afterClose.rejected[0].reason, /交易窗口/);
 });
 
 test("ordinary and legacy-cache verification request native raw bytes before accepting an exact policy clock", async () => {
@@ -109,7 +122,7 @@ test("ordinary and legacy-cache verification request native raw bytes before acc
   const cached = structuredClone(first.sources[0]); delete cached.authorityDocumentVersion;
   const replay = await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader, verifiedCache: new Map([[stableHash(source), cached]]) });
   assert.equal(replay.sources.length, 1); assert.equal(requests.length, 2);
-  assert.equal(replay.sources[0].authorityDocumentVersion, 'verified-mof-finance-document-v1');
+  assert.equal(replay.sources[0].authorityDocumentVersion, 'verified-mof-finance-document-v2');
   const missing = structuredClone(original); delete missing.rawBody;
   assert.equal((await verifyResearchSources([{ sources: [source], alternatives: [] }], f.envelope, { reader: async () => missing })).sources.length, 0);
   for (const mutate of [
