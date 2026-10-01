@@ -49,6 +49,7 @@ export async function collectXIntelligence(referenceTime) {
     return {
       candidates: Array.isArray(payload.items) ? payload.items : [],
       diagnostics: {
+        collectorVersion: String(payload.collectorVersion ?? "unverified"),
         status:
           typeof payload.status === "string" && payload.status
             ? payload.status
@@ -57,6 +58,12 @@ export async function collectXIntelligence(referenceTime) {
         candidateCount: Number(payload.candidateCount ?? 0),
         rawPostCount: Number(payload.rawPostCount ?? 0),
         filteredPostCount: Number(payload.filteredPostCount ?? 0),
+        ...(Array.isArray(payload.queryGroups) ? { queryGroups: payload.queryGroups.map(group => ({
+          authority: group.authority, sourceCount: Number(group.sourceCount ?? 0),
+          query: group.query, attempted: group.attempted === true, status: group.status,
+          rawPostCount: Number(group.rawPostCount ?? 0), filteredPostCount: Number(group.filteredPostCount ?? 0),
+          limitMayRestrictCoverage: group.limitMayRestrictCoverage === true,
+        })) } : {}),
         ...(payload.recoveredFromCooldown === true
           ? { recoveredFromCooldown: true }
           : {}),

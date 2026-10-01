@@ -33,6 +33,107 @@ def create_account_db(path: Path, *, lock_until: datetime | None = None) -> None
 
 
 class XIntelligenceTests(unittest.TestCase):
+    def test_separate_authority_queries_keep_kol_discovery_out_of_the_promotional_result_cap(self):
+        reference = datetime(2026, 9, 30, 9, tzinfo=timezone.utc)
+        sources = [
+            {"handle": "Official", "label": "Official", "authority": "first_party", "markets": ["CN"], "layers": []},
+            {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["CN"], "layers": []},
+            {"handle": "Research", "label": "Research", "authority": "specialist", "markets": ["CN"], "layers": []},
+        ]
+        calls = []
+        thesis = "Bond valuation remains vulnerable because inflation and interest rates raise financing costs, while credit conditions offset some pressure on equity markets."
+
+        class Api:
+            async def search(self, query, limit):
+                calls.append((query, limit))
+                handle = "Analyst" if "from:Analyst" in query else "Official" if "from:Official" in query else "Research"
+                for index in range(100 if handle == "Official" else 1):
+                    text = "Join us for our annual conference and visit the booth. " * 4 if handle == "Official" else thesis
+                    yield SimpleNamespace(id=f"{handle}-{index}", date=reference - timedelta(hours=1), user=SimpleNamespace(username=handle), rawContent=text)
+
+        async def run():
+            return await x_intelligence.search_authority_groups(Api(), sources, reference - timedelta(hours=72), reference, 100, deadline=asyncio.get_running_loop().time() + 10)
+        result = asyncio.run(run())
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual({item["authorHandle"] for item in result["items"]}, {"Analyst", "Research"})
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(limit == 100 for _, limit in calls))
+        self.assertTrue(all(query.count("from:") == 1 for query, _ in calls))
+        self.assertEqual(result["queryGroups"][0]["authority"], "expert")
+        self.assertEqual(result["rawPostCount"], 102)
+        self.assertTrue(result["queryGroups"][-1]["limitMayRestrictCoverage"])
+
+    def test_partial_authority_access_is_not_reported_as_complete_or_as_no_expert_posts(self):
+        reference = datetime(2026, 9, 30, 9, tzinfo=timezone.utc)
+        sources = [{"handle": handle, "label": handle, "authority": authority, "markets": ["CN"], "layers": []} for handle, authority in [("Analyst", "expert"), ("Research", "specialist")]]
+
+        class Api:
+            async def search(self, query, limit):
+                if "from:Analyst" in query:
+                    raise RuntimeError("HTTP 403 Forbidden")
+                yield SimpleNamespace(id="1", date=reference, user=SimpleNamespace(username="Research"), rawContent="Inventory and demand conditions affect pricing because production capacity and shipments remain constrained; future orders will determine the actual impact.")
+
+        async def run():
+            return await x_intelligence.search_authority_groups(Api(), sources, reference - timedelta(hours=72), reference, 100, deadline=asyncio.get_running_loop().time() + 10)
+        result = asyncio.run(run())
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["queryGroups"][0]["status"], "access_denied")
+        self.assertEqual(result["queryGroups"][1]["status"], "ok")
+        self.assertEqual(len(result["items"]), 1)
+
+    def test_expired_shared_deadline_makes_no_new_request_and_preserves_missing_coverage(self):
+        reference = datetime(2026, 9, 30, 9, tzinfo=timezone.utc)
+        source = {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["CN"], "layers": []}
+        async def run():
+            return await x_intelligence.search_authority_groups(object(), [source], reference - timedelta(hours=72), reference, 100, deadline=asyncio.get_running_loop().time() - 1)
+        result = asyncio.run(run())
+        self.assertNotEqual(result["status"], "empty_response")
+        self.assertFalse(result["queryGroups"][0]["attempted"])
+        self.assertEqual(result["queryGroups"][0]["status"], "deadline_exceeded")
+
+    def test_late_page_timeout_keeps_received_posts_and_marks_coverage_incomplete(self):
+        reference = datetime(2026, 9, 30, 9, tzinfo=timezone.utc)
+        source = {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["CN"], "layers": []}
+        class Api:
+            async def search(self, query, limit):
+                yield SimpleNamespace(id="1", date=reference, user=SimpleNamespace(username="Analyst"), rawContent="Inventory and demand conditions affect pricing because production capacity remains constrained; future orders will determine the actual impact.")
+                await asyncio.sleep(1)
+        async def run():
+            return await x_intelligence.search_authority_groups(Api(), [source], reference - timedelta(hours=72), reference, 100, deadline=asyncio.get_running_loop().time() + 0.02)
+        result = asyncio.run(run())
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["queryGroups"][0]["status"], "network_error")
+        self.assertEqual(result["rawPostCount"], 1)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertTrue(result["items"][0]["textComplete"])
+
+    def test_named_authority_and_earnings_call_are_not_event_promotions(self):
+        for text in [
+            "The Conference Board survey shows higher interest rates expected by 68.4% of consumers, a rise of more than 5 percentage points over the previous survey.",
+            "The earnings conference call explains that inventory and capacity bottlenecks affect margins because current customer orders cannot yet be delivered.",
+            "当日成交量下降，缩量环境使资金分流和获利了结对价格的影响更大；这只是待核验的机制判断，仍须检查板块成分股的实际成交、价格以及独立市场报道。",
+        ]:
+            self.assertTrue(x_intelligence.is_selected_post(text, "expert"), text)
+        self.assertFalse(x_intelligence.is_selected_post("Join us at our earnings conference to hear why revenue could increase 30% because demand and orders remain strong. Register now for this important event.", "expert"))
+
+    def test_original_opinion_keeps_late_qualifications_and_refuses_oversized_posts(self):
+        reference = datetime(2026, 9, 30, 9, tzinfo=timezone.utc)
+        source = {"handle": "Analyst", "label": "Analyst", "authority": "expert", "markets": ["CN"], "layers": []}
+        text = "Inventory and demand affect pricing because orders remain uncertain. " * 16 + "This does not establish a current earnings increase; the earlier conclusion is conditional and could be reversed."
+        oversized = text + "x" * x_intelligence.MAX_POST_CHARACTERS
+        class Api:
+            async def search(self, query, limit):
+                for index, body in enumerate([text, oversized]):
+                    yield SimpleNamespace(id=str(index), date=reference, user=SimpleNamespace(username="Analyst"), rawContent=body)
+        stats = {"rawPostCount": 0, "filteredPostCount": 0}
+        items = asyncio.run(x_intelligence.search_items(Api(), "query", 100, {"analyst": source}, reference - timedelta(hours=72), reference, stats))
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["facts"], text)
+        self.assertTrue(items[0]["textComplete"])
+        self.assertEqual(items[0]["originalTextLength"], len(text))
+        self.assertTrue(items[0]["facts"].endswith("conditional and could be reversed."))
+        self.assertEqual(stats["filteredPostCount"], 1)
+
     def chunk_runtime(self):
         def original(text):
             if "entry-client-logged-out" in text:

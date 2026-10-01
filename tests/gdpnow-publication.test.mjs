@@ -87,7 +87,7 @@ test("GDPNow citations preserve model nature in bilingual explanations, alternat
   f.raw.entries[1].alternatives[0].evidenceIds.push(f.ledger.sources[0].id);
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }), /GDPNow/);
   f.raw.entries[1].alternatives[0].text += "GDPNow 模型估计下修。"; f.raw.entries[1].alternatives[0].textEn += " The GDPNow model estimate declined.";
-  f.social.leads.push({ id: "verified-post", authorHandle: "Expert", url: "https://x.com/Expert/status/123", publishedAt: clock });
+  f.social.leads.push({ id: "verified-post", authorHandle: "Expert", url: "https://x.com/Expert/status/123", publishedAt: clock, textComplete: true, text: "The GDPNow model estimate was revised down; this is a model estimate, not a realized GDP observation." });
   f.raw.entries[1].opinions.push({ postId: "verified-post", evidenceIds: [f.ledger.sources[0].id], text: "该经济数据变化可能影响后续需求和投资预期。", textEn: "The change in growth expectations could affect later demand and investment." });
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution }), /GDPNow/);
 });

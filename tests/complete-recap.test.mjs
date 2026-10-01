@@ -154,7 +154,7 @@ test("identical wire passages on different domains cannot produce high confidenc
 
 test("an original X post and an unrelated official citation cannot validate the post's factual numbers", () => {
   const f = recapFixture();
-  f.social.leads = [{ id: "x-test", authorHandle: "Analyst", url: "https://x.com/Analyst/status/123", publishedAt: "2026-08-21T18:00:00Z", text: "The share of consumers expecting higher interest rates rose to 68.4%, which may affect risk appetite." }];
+  f.social.leads = [{ id: "x-test", authorHandle: "Analyst", url: "https://x.com/Analyst/status/123", publishedAt: "2026-08-21T18:00:00Z", textComplete: true, text: "The share of consumers expecting higher interest rates rose to 68.4%, which may affect risk appetite." }];
   f.raw.entries[0].opinions = [{ postId: "x-test", evidenceIds: ["0-facts", "0-causal"], text: "该评论者指出，预期利率上涨的消费者比例达到68.4%，并认为这一预期可能影响风险偏好。", textEn: "The commentator notes that the share expecting higher interest rates reached 68.4% and considers this a possible influence on risk appetite." }];
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 事实数字的官方佐证/);
   // A publisher or the post itself is still insufficient for primary facts.
@@ -162,6 +162,15 @@ test("an original X post and an unrelated official citation cannot validate the 
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /KOL 事实数字的官方佐证/);
   f.ledger.sources[0].supportingExcerpt = "The share of consumers expecting higher interest rates rose to 68.4% in the current survey.";
   assert.equal(validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social).entries[0].opinions.length, 1);
+  delete f.social.leads[0].textComplete;
+  assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /完整原帖/);
+  f.social.leads[0].textComplete = true;
+  const original = f.social.leads[0].text;
+  for (const marker of [" (1/2)", " (1/5)", " 🧵", " This thread continues in the next post."]) {
+    f.social.leads[0].text = original + marker;
+    assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /串帖/);
+  }
+  f.social.leads[0].text = original;
   f.raw.entries[0].opinions[0].text = "该评论者指出，预期利率上涨的消费者比例下降至68.4%，并认为这一预期可能影响风险偏好。";
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social), /单位和方向/);
 });
@@ -195,6 +204,14 @@ test("X originals bind allowlisted authors and snowflake times; future posts and
   const verify = candidates => verifySocialLeads({ candidates, diagnostics: { status: "ok" } }, registry, f.envelope);
   assert.equal(verify([post]).leads.length, 1);
   assert.equal(verify([post]).leads[0].factualAuthority, false);
+  assert.equal(verify([post]).leads[0].textComplete, false);
+  const complete = { ...post, textComplete: true, originalTextLength: [...post.facts].length };
+  assert.equal(verify([complete]).leads[0].textComplete, true);
+  assert.equal(verify([complete]).leads[0].threadContextMissing, false);
+  const thread = { ...complete, facts: complete.facts + " (1/2)" };
+  thread.originalTextLength = [...thread.facts].length;
+  assert.equal(verify([thread]).leads[0].threadContextMissing, true);
+  for (const change of [{ textComplete: false }, { originalTextLength: 900 }, { facts: post.facts + " qualifier removed" }]) assert.equal(verify([{ ...complete, ...change }]).leads.length, 0);
   const closingTime = "2026-08-21T21:00:00Z";
   const closingId = ((BigInt(Date.parse(closingTime)) - 1288834974657n) << 22n).toString();
   assert.equal(verify([{ ...post, publishedAt: closingTime, url: `https://x.com/Analyst/status/${closingId}` }]).leads.length, 1);

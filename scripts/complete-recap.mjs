@@ -127,6 +127,10 @@ function zonedTime(value) {
   return Date.parse(value);
 }
 
+function hasMissingThreadContext(text) {
+  return /(?:\b(?:a|this|the) thread\b|\bthread\s*:|🧵|[（(]\s*\d{1,2}\s*\/\s*(?:[2-9]|[1-9]\d)\s*[）)]|(?:^|\s)1\/(?:[2-9]|[1-9]\d)(?=$|\s)|后续见|续帖|下一条)/iu.test(text);
+}
+
 export function verifySocialLeads(payload, registry, envelope) {
   const allowed = new Map(registry.map((item) => [item.handle.toLowerCase(), item]));
   const end = Date.parse(envelope.session?.wrapDeadline ?? envelope.session?.windowEnd ?? `${envelope.marketAsOf}T${envelope.market === "CN" ? "09" : "22"}:00:00Z`);
@@ -143,10 +147,14 @@ export function verifySocialLeads(payload, registry, envelope) {
       const created = Number((BigInt(match[2]) >> 22n) + 1288834974657n);
       if (Math.abs(created - published) > 2_000 || published > end || published < end - 72 * 3_600_000) throw new Error("X 原文时间与帖子 ID 或交易窗口不一致");
       if (candidate.platform !== "x" || typeof candidate.facts !== "string" || candidate.facts.trim().length < 40) throw new Error("X 原文正文缺失");
+      const textComplete = candidate.textComplete === true && Number.isInteger(candidate.originalTextLength) && candidate.originalTextLength === [...candidate.facts].length && candidate.originalTextLength <= 6000;
+      if (candidate.textComplete !== undefined && !textComplete) throw new Error("X 原帖完整性或文本长度不一致");
       leads.push({
         id: `x-${match[2]}`, url: url.href, authorHandle: author.handle,
         sourceLabel: author.label, authority: author.authority,
         publishedAt: new Date(published).toISOString(), text: candidate.facts,
+        textComplete,
+        threadContextMissing: hasMissingThreadContext(candidate.facts),
         layers: author.layers, identityEvidence: author.identityEvidence,
         coverage: author.coverage ?? ["ai"],
         // Original access verifies attribution, not factual correctness.
@@ -298,6 +306,8 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     const opinions = (raw.opinions ?? []).map((item) => {
       const post = socialMap.get(item.postId);
       if (!post) throw new Error("KOL 观点未引用本轮原站记录");
+      if (post.textComplete !== true) throw new Error("KOL 观点缺少完整原帖，不能用截断或未确认完整性的文本署名引用");
+      if (post.threadContextMissing === true || hasMissingThreadContext(post.text)) throw new Error("KOL 观点来自未核验完整上下文的串帖，须保留为研究线索");
       const corroboration = ids(item.evidenceIds, sourceMap, "KOL 事实佐证");
       const primary = corroboration.filter(source => source.sourceType === "first_party");
       if (!primary.length) throw new Error("KOL 涉及事实缺少官方佐证");

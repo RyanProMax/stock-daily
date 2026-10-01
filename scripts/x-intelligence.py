@@ -21,9 +21,12 @@ from urllib.parse import urlparse
 REQUIRED_TWSCRAPE_VERSION = (0, 20, 0)
 MAX_COOLDOWN_WAIT_SECONDS = 75
 SEARCH_WAIT_TIMEOUT_SECONDS = 80
+COLLECTION_BUDGET_SECONDS = 100
+MAX_POST_CHARACTERS = 6000
+X_COLLECTOR_VERSION = "verified-public-x-source-groups-v3"
 PROMOTION_PATTERN = re.compile(
-    r"\b(?:register|join us|save the date|tune in|watch live|webinar|conference|"
-    r"booth|keynote|meet us|event lineup|sponsor(?:ed|ship)?|giveaway|bounty)\b|"
+    r"\b(?:register|join us|save the date|tune in|watch live|webinar|"
+    r"visit (?:our |the )?booth|meet us|event lineup|sponsor(?:ed|ship)?|giveaway|bounty)\b|"
     r"报名|参会|峰会|论坛|直播|展位|大会日程|品牌活动",
     re.IGNORECASE,
 )
@@ -43,7 +46,8 @@ CONCRETE_FACT_PATTERN = re.compile(
     r"positioning|options|volatility|valuation|interest rates)\b|"
     r"订单|合同|协议|客户|发布|推出|交付|出货|量产|产能|产量|价格|报价|营收|"
     r"收入|利润|业绩|指引|销量|需求|供应|库存|带宽|时延|良率|投资|融资|收购|"
-    r"合作|路线图|预测|统计|通胀|就业|关税|国债|债券|信用|市场广度|期权|波动率|估值|利率",
+    r"合作|路线图|预测|统计|通胀|就业|关税|国债|债券|信用|市场广度|期权|波动率|估值|利率|"
+    r"成交|缩量|资金分流|获利了结|仓位拥挤|风险溢价",
     re.IGNORECASE,
 )
 NUMERIC_FACT_PATTERN = re.compile(
@@ -54,7 +58,8 @@ NUMERIC_FACT_PATTERN = re.compile(
 CAUSAL_THESIS_PATTERN = re.compile(
     r"\b(?:because|due to|pricing|valuation|margin|cash flow|inventory|backlog|"
     r"bottleneck|supply constraint|demand growth|discount rate)\b|"
-    r"由于|因为|估值|利润率|现金流|库存|订单积压|供给瓶颈|需求增长|贴现率|传导",
+    r"由于|因为|估值|利润率|现金流|库存|订单积压|供给瓶颈|需求增长|贴现率|传导|"
+    r"缩量|资金分流|获利了结|仓位拥挤|风险溢价",
     re.IGNORECASE,
 )
 
@@ -109,6 +114,12 @@ def utc_datetime(value: Any) -> datetime | None:
 
 def compact_text(value: Any) -> str:
     return " ".join(str(value or "").replace("\x00", " ").split())[:900]
+
+
+def complete_post_text(value: Any) -> str:
+    # Keep later qualifications and denials. Oversized posts are refused below,
+    # rather than turning their first 900 characters into the original opinion.
+    return " ".join(str(value or "").replace("\x00", " ").split())
 
 
 def author_handle(tweet: Any) -> str:
@@ -265,8 +276,10 @@ def extract_external_urls(tweet: Any, text: str) -> list[str]:
 
 
 def is_selected_post(text: str, authority: str) -> bool:
-    normalized = compact_text(text)
-    if len(normalized) < 90:
+    normalized = complete_post_text(text)
+    # Chinese mechanisms need fewer characters than their English equivalents.
+    minimum_length = 40 if re.search(r"[\u4e00-\u9fff]", normalized) else 90
+    if len(normalized) < minimum_length or len(normalized) > MAX_POST_CHARACTERS:
         return False
     has_concrete_fact = bool(CONCRETE_FACT_PATTERN.search(normalized))
     has_numeric_fact = bool(NUMERIC_FACT_PATTERN.search(normalized))
@@ -287,7 +300,7 @@ def is_selected_post(text: str, authority: str) -> bool:
 
 
 def unavailable(status: str, reason: str) -> dict[str, Any]:
-    return {"status": status, "reason": reason, "items": []}
+    return {"status": status, "reason": reason, "items": [], "collectorVersion": X_COLLECTOR_VERSION}
 
 
 async def search_items(
@@ -298,8 +311,9 @@ async def search_items(
     start_time: datetime,
     reference_time: datetime,
     diagnostics: dict[str, Any] | None = None,
+    accepted_items: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = accepted_items if accepted_items is not None else []
     tweets = api.search(query, limit=max(1, limit))
     try:
         async for tweet in tweets:
@@ -309,7 +323,7 @@ async def search_items(
             source = source_by_handle.get(handle.lower())
             created_at = utc_datetime(getattr(tweet, "date", None))
             tweet_id = str(getattr(tweet, "id", "") or "").strip()
-            text = compact_text(
+            text = complete_post_text(
                 getattr(tweet, "rawContent", None) or getattr(tweet, "text", None)
             )
             if (
@@ -327,6 +341,8 @@ async def search_items(
                 {
                     "title": f"@{source['handle']}：{text[:64]}",
                     "facts": text,
+                    "textComplete": True,
+                    "originalTextLength": len(text),
                     "url": f"https://x.com/{source['handle']}/status/{tweet_id}",
                     "source": source["label"],
                     "sourceLabel": source["label"],
@@ -355,7 +371,72 @@ async def search_items(
     return items
 
 
+def authority_queries(sources: list[dict[str, Any]], start_time: datetime, reference_time: datetime) -> list[dict[str, Any]]:
+    groups = []
+    # The single mixed latest-results cap allowed frequent promotional accounts
+    # to exhaust discovery before expert/specialist opinions were even seen.
+    for authority in ("expert", "specialist", "first_party"):
+        selected = [source for source in sources if source["authority"] == authority]
+        if not selected:
+            continue
+        authors = " OR ".join(f"from:{source['handle']}" for source in selected)
+        query = (f"({authors}) since:{start_time.date().isoformat()} "
+                 f"until:{(reference_time + timedelta(days=1)).date().isoformat()} "
+                 "-filter:replies -filter:retweets")
+        groups.append({"authority": authority, "sources": selected, "query": query})
+    return groups
+
+
+async def search_authority_groups(api: Any, sources: list[dict[str, Any]], start_time: datetime,
+                                  reference_time: datetime, limit: int, *, deadline: float,
+                                  library_failures: set[str] | None = None) -> dict[str, Any]:
+    items, groups = [], []
+    loop = asyncio.get_running_loop()
+    observed_failures = library_failures if library_failures is not None else set()
+    for group in authority_queries(sources, start_time, reference_time):
+        stats = {"authority": group["authority"], "sourceCount": len(group["sources"]),
+                 "query": group["query"], "rawPostCount": 0, "filteredPostCount": 0,
+                 "attempted": False}
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            stats["status"] = "deadline_exceeded"
+            groups.append(stats)
+            continue
+        observed_failures.clear()
+        stats["attempted"] = True
+        selected: list[dict[str, Any]] = []
+        try:
+            await asyncio.wait_for(search_items(
+                api, group["query"], limit,
+                {source["handle"].lower(): source for source in group["sources"]},
+                start_time, reference_time, stats, selected,
+            ), timeout=min(30, remaining))
+            stats["status"] = ("partial" if observed_failures and stats["rawPostCount"] else
+                               search_result_status(stats["rawPostCount"], observed_failures))
+        except asyncio.TimeoutError:
+            stats["status"] = "network_error"
+        except Exception as exc:
+            stats["status"] = classify_search_error(exc)
+        # A later page failure does not erase already received original posts.
+        # The group remains incomplete even when those leads survive.
+        items.extend(selected)
+        stats["limitMayRestrictCoverage"] = stats["rawPostCount"] >= max(1, limit)
+        groups.append(stats)
+    raw_count = sum(group["rawPostCount"] for group in groups)
+    incomplete = [group for group in groups if group["status"] not in {"ok", "empty_response"}]
+    status = "partial" if incomplete and raw_count else ("ok" if raw_count else "empty_response")
+    if incomplete and not raw_count:
+        categories = {group["status"] for group in incomplete}
+        status = search_result_status(0, categories)
+        if status == "empty_response":
+            status = "search_error"
+    return {"items": items, "status": status, "queryGroups": groups,
+            "rawPostCount": raw_count,
+            "filteredPostCount": sum(group["filteredPostCount"] for group in groups)}
+
+
 async def collect(args: argparse.Namespace) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + COLLECTION_BUDGET_SECONDS
     try:
         installed_version = version("twscrape")
     except PackageNotFoundError:
@@ -417,16 +498,6 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
     if not queue_available:
         return unavailable("cooldown", "X public search queue remains locked beyond the recovery window")
 
-    source_by_handle = {str(item["handle"]).lower(): item for item in sources}
-    handles = [str(item["handle"]) for item in sources]
-    author_query = " OR ".join(f"from:{handle}" for handle in handles)
-    query = (
-        f"({author_query}) since:{start_time.date().isoformat()} "
-        f"until:{(reference_time + timedelta(days=1)).date().isoformat()} "
-        "-filter:replies -filter:retweets"
-    )
-    items: list[dict[str, Any]] = []
-    search_diagnostics: dict[str, Any] = {"rawPostCount": 0, "filteredPostCount": 0}
     library_failures: set[str] = set()
 
     def observe_failure(message: Any) -> None:
@@ -434,54 +505,21 @@ async def collect(args: argparse.Namespace) -> dict[str, Any]:
         if category is not None:
             library_failures.add(category)
 
-    for attempt in range(2):
-        api = API(
-            str(db_path),
-            proxy=os.environ.get("TWSCRAPE_PROXY") or None,
-            wait_timeout=SEARCH_WAIT_TIMEOUT_SECONDS,
-            wait_interval=1,
+    api = API(str(db_path), proxy=os.environ.get("TWSCRAPE_PROXY") or None,
+              wait_timeout=SEARCH_WAIT_TIMEOUT_SECONDS, wait_interval=1)
+    observer = logger.add(observe_failure, level="WARNING")
+    try:
+        collected = await search_authority_groups(
+            api, sources, start_time, reference_time, args.limit,
+            deadline=deadline, library_failures=library_failures,
         )
-        observer = logger.add(observe_failure, level="WARNING")
-        try:
-            items = await search_items(
-                api,
-                query,
-                args.limit,
-                source_by_handle,
-                start_time,
-                reference_time,
-                search_diagnostics,
-            )
-            break
-        except Exception as exc:
-            post_state = search_queue_state(db_path)
-            if post_state["active_count"] == 0:
-                pool_error = RuntimeError(" ".join(post_state["errors"]))
-                status = classify_search_error(pool_error)
-                if status == "search_error":
-                    status = "auth_failed"
-            else:
-                status = classify_search_error(exc)
-                remaining_cooldown = cooldown_seconds(post_state)
-                if (
-                    status in {"network_error", "cooldown"}
-                    and remaining_cooldown is not None
-                    and remaining_cooldown > MAX_COOLDOWN_WAIT_SECONDS
-                ):
-                    status = "rate_limited"
-            if attempt == 0 and status in {"network_error", "cooldown"}:
-                queue_available, waited = await wait_for_search_queue(db_path)
-                waited_for_cooldown = waited_for_cooldown or waited
-                if queue_available:
-                    continue
-            return unavailable(status, f"X public search failed: {exc.__class__.__name__}")
-        finally:
-            logger.remove(observer)
-
+    finally:
+        logger.remove(observer)
+    items = collected.pop("items")
     unique = {item["url"]: item for item in items}
     return {
-        "status": search_result_status(search_diagnostics["rawPostCount"], library_failures),
-        **search_diagnostics,
+        **collected,
+        "collectorVersion": X_COLLECTOR_VERSION,
         "sourceCount": len(sources),
         "candidateCount": len(unique),
         "recoveredFromCooldown": waited_for_cooldown,
