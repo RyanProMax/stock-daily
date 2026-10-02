@@ -70,6 +70,16 @@ import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, 
 import { planRecapResearchRepair } from "./recap-research-repair.mjs";
 import { recapEvidenceTiming } from "./evidence-timing.mjs";
 import { beginNativeAgentAttempt, finishNativeAgentAttempt, auditNativeAgentAttempt, nativeSearchQueries as looseSearchQueries } from "./native-agent-receipts.mjs";
+import { workflowImplementationSnapshot, assertWorkflowImplementation } from "./workflow-implementation.mjs";
+const LOADED_IMPLEMENTATION = (async () => {
+  const snapshot = await workflowImplementationSnapshot();
+  const path = process.env.STOCK_DAILY_IMPLEMENTATION_SNAPSHOT;
+  if (!path) return snapshot;
+  const collectedImplementation = JSON.parse(await readFile(path, "utf8"));
+  await assertWorkflowImplementation(collectedImplementation);
+  if (collectedImplementation.hash !== snapshot.hash) throw new Error("行情采集与研究加载的工作流源码版本不一致");
+  return collectedImplementation;
+})().then(snapshot => ({ snapshot }), error => ({ error }));
 
 const PROJECT_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const AGENT_DIR = resolve(PROJECT_DIR, "docs/daily-agents");
@@ -1027,6 +1037,8 @@ export class MarketWorkflow {
   }
 
   async initialize() {
+    const { snapshot: implementation, error: implementationError } = await LOADED_IMPLEMENTATION;
+    if (implementationError) throw implementationError;
     await mkdir(this.workRoot, { recursive: true });
     const availability = await researchSourceAvailability(this.workRoot, {
       market: this.market, marketAsOf: this.envelope.marketAsOf, inputHash: this.inputHash,
@@ -1082,12 +1094,19 @@ export class MarketWorkflow {
           this.searchQueryCount += run.searchCount ?? run.queries?.length ?? 0;
         }
         this.manifest.searchQueryCount = this.searchQueryCount;
+        // Seal and charge already executed attempts even if maintenance now
+        // prevents any checkpoint reuse or further generation/publication.
+        await this.saveManifest();
+        await assertWorkflowImplementation(implementation);
+        await assertWorkflowImplementation(previous.implementation);
         await this.startWorkflowBudgetSession({ migrateLegacy: true });
         return;
       }
     }
+    await assertWorkflowImplementation(implementation);
     this.manifest = {
       workflowVersion: WORKFLOW_VERSION,
+      implementation: structuredClone(implementation),
       status: "running",
       market: this.market,
       marketAsOf: this.envelope.marketAsOf,
@@ -1583,6 +1602,7 @@ export class MarketWorkflow {
     inputArtifacts,
     promptSuffix = "",
   }) {
+    await assertWorkflowImplementation(this.manifest?.implementation);
     const { definition, prompt, schemaText, promptHash, schemaHash } =
       await agentStageInvocation(
         role,
@@ -2040,9 +2060,10 @@ export class MarketWorkflow {
   }
 
   async verifyEvidence(researchOutputs) {
+    await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v43",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v44",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2824,6 +2845,7 @@ export class MarketWorkflow {
     const reportPath = resolve(this.runDir, "artifacts/daily-report.json");
     const reportText = `${JSON.stringify(report, null, 2)}\n`;
     await writeFile(reportPath, reportText, "utf8");
+    await assertWorkflowImplementation(this.manifest?.implementation);
     this.manifest.status = "ready";
     delete this.manifest.lastError;
     delete this.manifest.failedAt;

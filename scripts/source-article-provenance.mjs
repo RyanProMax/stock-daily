@@ -6,7 +6,9 @@ import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v6";
+import { englishPublicationDate, newYorkPublicationDate } from "./fed-speech-publication.mjs";
+
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v7";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -84,6 +86,21 @@ function micronReleaseHeading(document, source, article) {
   if (headings.length !== 1 || dates.length !== 1 || !published || titleKey(headings[0].textContent) !== titleKey(article.headline)) return false;
   const visibleDate = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(new Date(published));
   return normalized(dates[0].textContent) === visibleDate;
+}
+
+function hpeReleaseDate(document, source, article) {
+  const url = new URL(source);
+  const path = /^\/us\/en\/newsroom\/press-release\/(20\d{2})\/(\d{2})\/[a-z0-9-]+\.html$/u.exec(url.pathname);
+  if (url.protocol !== "https:" || url.hostname !== "www.hpe.com" || url.search || url.hash || !path) return null;
+  const modules = document.querySelectorAll(".newsroom-article");
+  if (modules.length !== 1) return null;
+  const headers = modules[0].querySelectorAll(":scope > .newsroom-a-header");
+  if (headers.length !== 1) return null;
+  const titles = headers[0].querySelectorAll(":scope > h1.newsroom-a-title");
+  const dates = headers[0].querySelectorAll(":scope > .newsroom-a-info > .newsroom-a-data");
+  if (titles.length !== 1 || dates.length !== 1 || titleKey(titles[0].textContent) !== titleKey(article.headline)) return null;
+  const date = englishPublicationDate(dates[0].textContent), publishedAt = instant(article.datePublished);
+  return date && publishedAt && date === newYorkPublicationDate(publishedAt) && date.startsWith(`${path[1]}-${path[2]}-`) ? date : null;
 }
 
 function agency(value) {
@@ -167,6 +184,10 @@ export function sourceArticleProvenance(decodedHtml, source) {
         ? { status: "verified", initialPublishedAt, currentVersionAt, timeBasis: currentVersionAt === initialPublishedAt ? "first_publication" : "article_update" }
         : { status: "unverified_update" };
       if (publication.status === "verified" && issuer?.domain === "micron.com" && micronReleaseHeading(document, source, article)) publication.boundReleaseDate = initialPublishedAt.slice(0, 10);
+      if (publication.status === "verified" && issuer?.domain === "hpe.com") {
+        const date = hpeReleaseDate(document, source, article);
+        if (date) publication.boundReleaseDate = date;
+      }
     }
   }
   return { version: ARTICLE_PROVENANCE_VERSION, publication, origin };

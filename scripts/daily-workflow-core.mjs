@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readExternalSource, normalizedEvidenceText, decodeSourceBody, sourceBodyText } from "./daily-source-audit.mjs";
+import { readExternalSource, normalizedEvidenceText, decodeSourceBody, sourceBodyText, boundMetadataPublication } from "./daily-source-audit.mjs";
 import { marketAsOfFromInput, marketAsOfFromReport } from "./daily-policy.mjs";
 import {
   verifiedExternalSourceLabel,
@@ -25,8 +25,8 @@ import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-ev
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v68";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v4";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v69";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v5";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1098,9 +1098,9 @@ function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], s
 const FACT_NUMBER_MENTION =
   /(?<outerSign>[+-]?)(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|ppts?\b|pp\b|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|US dollars?\b|USD\b|%|％|个百分点|百分点|个基点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
-  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|up)\b/giu;
+  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|raising|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower(?:s|ed|ing)?|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
@@ -1150,7 +1150,9 @@ function nearestDirection(value, start, end, rawNumber) {
   }
   const attached = /^\s*(higher|lower|up|down)\b/iu.exec(value.slice(end));
   if (attached) return /^(?:lower|down)$/iu.test(attached[1]) ? "negative" : "positive";
-  const boundaries = [...value.matchAll(/[。.!！?？；;，,\n]/gu)]
+  // A new expectation clause has its own level/direction. Raising revenue
+  // guidance cannot turn a separately expected margin into a margin increase.
+  const boundaries = [...value.matchAll(/[。.!！?？；;，,\n]|\band\s+(?:expects?|expected)\b/giu)]
     .filter(match => !(/[.,]/u.test(match[0]) && /\d/u.test(value[(match.index ?? 0) - 1] ?? "") && /\d/u.test(value[(match.index ?? 0) + 1] ?? "")))
     .map(match => match.index ?? 0);
   let leftBoundary = boundaries.filter(index => index < start).at(-1) ?? -1;
@@ -1532,7 +1534,7 @@ export async function verifyResearchSources(
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || nativeIssuerReleaseIdentity(candidate.originalUrl) || yahooLiveArticleIdentity(candidate.originalUrl) || verifiedFirstPartyIssuerIdentity(candidate.originalUrl)?.domain === "micron.com" ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || nativeIssuerReleaseIdentity(candidate.originalUrl) || yahooLiveArticleIdentity(candidate.originalUrl) || ["micron.com", "hpe.com"].includes(verifiedFirstPartyIssuerIdentity(candidate.originalUrl)?.domain) || isCalendarDate(candidate.publishedAt) ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const boundAuthority = mofDocumentIdentity(opened.finalUrl) || pbocDocumentIdentity(opened.finalUrl);
         const boundRecord = boundAuthority && Buffer.isBuffer(opened.rawBody) ? (mofDocumentIdentity(opened.finalUrl) ? mofDocumentRecord : pbocDocumentRecord)(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
@@ -1555,9 +1557,13 @@ export async function verifyResearchSources(
         // Verify a supplied calendar claim before replacing its lower precision.
         if (boundRecord && isCalendarDate(candidate.publishedAt)) verifiedSourceTime(candidate, envelope, boundRecord.publishedAtCandidates, boundRecord.publishedDateCandidates, sourceType, corporateAction);
         const boundIssuerCalendar = sourceType === "first_party" && publication?.status === "verified" && publication.boundReleaseDate;
-        if (publication?.boundReleaseDate && (!boundIssuerCalendar || verifiedFirstPartyIssuerIdentity(opened.finalUrl)?.domain !== "micron.com" || !Buffer.isBuffer(opened.rawBody) || stableHash(publication) !== stableHash(sourceArticleProvenance(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl)?.publication))) throw new Error("公司公告可见日期和精确时点未由原始正文重建");
+        if (publication?.boundReleaseDate && (!boundIssuerCalendar || !["micron.com", "hpe.com"].includes(verifiedFirstPartyIssuerIdentity(opened.finalUrl)?.domain) || !Buffer.isBuffer(opened.rawBody) || stableHash(publication) !== stableHash(sourceArticleProvenance(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl)?.publication))) throw new Error("公司公告可见日期和精确时点未由原始正文重建");
         if (boundIssuerCalendar && isCalendarDate(candidate.publishedAt) && candidate.publishedAt !== boundIssuerCalendar) throw new Error("公司公告所报日期与原文可见发布日期不一致");
-        const timedCandidate = boundRecord ? { ...candidate, publishedAt: boundRecord.publishedAtCandidates[0] } : boundIssuerCalendar && isCalendarDate(candidate.publishedAt) ? { ...candidate, publishedAt: publication.currentVersionAt } : candidate;
+        const metadataPublication = boundMetadataPublication(opened);
+        if (metadataPublication && (sourceType !== "first_party" || stableHash(opened.text) !== stableHash(sourceBodyText(opened.rawBody, opened.contentType)) || opened.publishedAtCandidates?.length !== 1 || Date.parse(opened.publishedAtCandidates[0]) !== Date.parse(metadataPublication.publishedAt))) throw new Error("权威原文与对应发布记录的身份、正文或时点不一致");
+        const metadataCalendar = metadataPublication && isCalendarDate(candidate.publishedAt);
+        if (metadataCalendar) verifiedSourceTime(candidate, envelope, [metadataPublication.publishedAt], [metadataPublication.publicationDate], sourceType, corporateAction);
+        const timedCandidate = boundRecord ? { ...candidate, publishedAt: boundRecord.publishedAtCandidates[0] } : boundIssuerCalendar && isCalendarDate(candidate.publishedAt) ? { ...candidate, publishedAt: publication.currentVersionAt } : metadataCalendar ? { ...candidate, publishedAt: metadataPublication.publishedAt } : candidate;
         const publishedAt = verifiedSourceTime(
           timedCandidate,
           envelope,
@@ -1569,7 +1575,7 @@ export async function verifyResearchSources(
         const closingChecks = checkSessionIntegrity ? assertSessionClosingClaims(opened.text, envelope, publishedAt) : [];
         let normalizedCandidate = {
           ...candidate,
-          title: readerText(boundRecord?.title ?? issuerRecord?.title ?? yahooRecord?.title ?? candidate.title, "verified source title", 4, 220),
+          title: readerText(boundRecord?.title ?? issuerRecord?.title ?? yahooRecord?.title ?? metadataPublication?.title ?? candidate.title, "verified source title", 4, 220),
           facts: readerText(candidate.facts, "verified source facts", 20, 1_600),
           publishedAt,
           kind: normalizedSourceKind(
@@ -1662,6 +1668,7 @@ export async function verifyResearchSources(
             ...(issuerRecord ? { issuerDocumentVersion: issuerRecord.version, issuerTitleChecked: true } : {}),
             ...(yahooRecord ? { publisherDocumentVersion: yahooRecord.version, publisherTitleChecked: true } : {}),
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
+            ...(metadataPublication ? { officialPublication: metadataPublication, ...(!publication ? { timeBasis: metadataPublication.timeBasis } : {}) } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),
             ...(companySubjects.length ? { companySubjects, companySubjectChecked: true } : {}),

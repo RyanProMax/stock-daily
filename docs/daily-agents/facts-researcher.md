@@ -58,7 +58,9 @@ For one market anomaly, verify the event, policy, filing, financial result, guid
 
 - Run exactly two focused searches for this anomaly: one supplied seed followed by one adaptive query.
 - Do not infer a price cause and set `causalConnection` to false.
+- Keep `facts` to the source's actual economic or company facts. Put evidence boundaries in `scope`/`targets` and missing evidence in `rejectedSources` or `alternatives`. Do not append verification or workflow commentary to reader-facing facts.
 - Do not use social posts, mirrors, search pages, inaccessible pages, or undated pages. Date-only evidence is restricted to the official first-party release rule above.
+- Preserve a complete, contiguous owned-body passage, including its conditions and forecast wording. Do not stitch a page heading, speaker biography and a later paragraph into one excerpt. An official speech's exact RSS publication must match its speaker, title, article URL and visible release day. A SEC acceptance clock establishes filing availability for the corresponding accession and attachment; it does not establish an earlier issuer announcement time. Keep an issuer article's initial release day distinct from its current version availability.
 - If a required baseline cannot be verified, leave comparisons empty instead of calling the result a beat or miss.
 
 # Output

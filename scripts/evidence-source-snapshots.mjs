@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { isIP } from "node:net";
-import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, decodeSourceBody, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
+import { BEA_RELEASE_FEED, beaReleasePublishedAtCandidates, boundMetadataPublication, decodeSourceBody, fedSpeechPublishedAtCandidates, isPublicAddress, normalizedEvidenceText, readExternalSource, secSubmissionMetadataUrl, sourceBodyText, sourcePublishedAtCandidates, sourcePublishedDateCandidates } from "./daily-source-audit.mjs";
 import { GDP_NOW_FEED, assertGdpNowCopy, gdpNowCommentaryRecord, gdpNowForecastDefinition, gdpNowPublishedAtCandidates, isGdpNowCommentary } from "./gdpnow-publication.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
 import { nfraDocumentIdentity, nfraDocumentRecord } from "./nfra-document.mjs";
@@ -94,7 +94,7 @@ export function openedSourceFromSnapshot(snapshot) {
       text = authorityDocument.text;
       publishedAtCandidates = authorityDocument.publishedAtCandidates;
     }
-    else if (receipt.finalUrl === "https://www.federalreserve.gov/feeds/speeches.xml" && new URL(snapshot.finalUrl).hostname === "www.federalreserve.gov") publishedAtCandidates = fedSpeechPublishedAtCandidates(body, metadata, snapshot.finalUrl);
+    else if (receipt.finalUrl === "https://www.federalreserve.gov/feeds/speeches.xml" && new URL(snapshot.finalUrl).hostname === "www.federalreserve.gov" && /^(?:application|text)\/xml(?:;|$)/iu.test(receipt.contentType)) publishedAtCandidates = fedSpeechPublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === GDP_NOW_FEED && isGdpNowCommentary(snapshot.finalUrl) && /^(?:application|text)\/xml(?:;|$)/iu.test(receipt.contentType)) publishedAtCandidates = gdpNowPublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === BEA_RELEASE_FEED) publishedAtCandidates = beaReleasePublishedAtCandidates(body, metadata, snapshot.finalUrl);
     else if (receipt.finalUrl === secCompanySubmissionsUrl(snapshot.finalUrl)) publishedAtCandidates = secCompanySubmissionTime(metadata, snapshot.finalUrl);
@@ -192,6 +192,10 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const body = normalizedEvidenceText(original.text);
     if (quote.length < 20 || stableHash(quote) !== source.excerptHash || !supportingExcerptMatches(body, quote, source.supportingExcerpt)) throw new Error("证据引文未由冻结原文证明");
     if (stableHash(source.pdfTextEvidence ?? null) !== stableHash(verifiedPdfTextExcerpt(source, original))) throw new Error("PDF 引文页次、相邻限定内容及未核验图片范围未由冻结原文重建");
+    if (source.officialPublication !== undefined) {
+      const record = boundMetadataPublication(original);
+      if (!record || stableHash(source.officialPublication) !== stableHash(record) || source.sourceType !== "first_party" || source.publishedAt !== record.publishedAt || source.timePrecision !== "instant" || (!original.articleProvenance?.publication && source.timeBasis !== record.timeBasis)) throw new Error("权威发布或 SEC 申报可用时点未由同一份冻结原文与对应发布记录重建");
+    }
     const publication = original.articleProvenance?.publication;
     if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
     if (source.provenanceChecked || source.reportingOrigin) {

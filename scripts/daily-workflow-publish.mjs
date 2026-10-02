@@ -26,6 +26,7 @@ import { validateRecapCompanyBackgroundData } from "./recap-company-background-d
 import { validateRecapPbocNewsData, auditRecapPbocNewsSources } from "./recap-pboc-news-data.mjs";
 import { auditLedgerSourceSnapshots } from "./evidence-source-snapshots.mjs";
 import { auditNativeAgentAttempt } from "./native-agent-receipts.mjs";
+import { assertWorkflowImplementation } from "./workflow-implementation.mjs";
 import {
   buildReportContent,
   validateInput,
@@ -523,6 +524,7 @@ export function preserveInactiveStoredSlice(
 }
 
 export async function auditWorkflowCausalEvidence({ manifest, report, manifestPath, input }) {
+  await assertWorkflowImplementation(manifest.implementation);
   for (const run of [...(manifest.agentRuns ?? []), ...(manifest.failedAgentRuns ?? [])]) {
     if (run.receiptArtifact) await auditNativeAgentAttempt(dirname(resolve(manifestPath)), run);
   }
@@ -863,12 +865,14 @@ export async function publishWorkflowReport(
   let sqlResult;
   let snapshot;
   try {
+    await assertWorkflowImplementation(manifest.implementation);
     sqlResult = await execute(
       workflowCompletedSql(input, reportForPublish, expectedContent, {
         ingestionStatus,
       }),
     );
     snapshot = await readback(input);
+    await assertWorkflowImplementation(manifest.implementation);
   } catch (error) {
     const publicationError =
       error instanceof Error ? error : new Error(String(error));

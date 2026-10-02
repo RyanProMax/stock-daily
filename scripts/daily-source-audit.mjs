@@ -18,6 +18,9 @@ import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
+import { fedSpeechArticleIdentity, fedSpeechArticleRecord, fedSpeechPublicationRecord, fedSpeechRecordFromOpened } from "./fed-speech-publication.mjs";
+
+import { secFilingPublicationRecord } from "./sec-filing-publication.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -624,18 +627,7 @@ function jsonLdArticlePublishedValues(decoded, source) {
 }
 
 function fedSpeechArticleDate(body, source) {
-  const url = new URL(source);
-  if (url.hostname !== "www.federalreserve.gov") return null;
-  const date = /^\/newsevents\/speech\/[a-z]+(20\d{6})[a-z]\.htm$/u.exec(url.pathname)?.[1];
-  if (!date) return null;
-  const document = new JSDOM(decodeSourceBody(Buffer.from(body), "text/html")).window.document;
-  const header = document.querySelector("#article > .heading");
-  if (!header?.querySelector("h3.title")?.textContent.trim()) return null;
-  const visible = header.querySelector(".article__time")?.textContent.trim();
-  const parsed = new Date(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}T12:00:00Z`);
-  if (!Number.isFinite(parsed.getTime())) return null;
-  const expected = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" }).format(parsed);
-  return visible === expected ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : null;
+  return fedSpeechArticleRecord(body, source)?.publicationDate ?? null;
 }
 
 export const BEA_RELEASE_FEED = "https://apps.bea.gov/rss/rss.xml";
@@ -685,24 +677,8 @@ export function beaReleasePublishedAtCandidates(articleBody, feedBody, source) {
 }
 
 export function fedSpeechPublishedAtCandidates(articleBody, feedBody, source) {
-  const articleDate = fedSpeechArticleDate(articleBody, source);
-  if (!articleDate) return [];
-  const document = new JSDOM(decodeSourceBody(Buffer.from(feedBody), "application/xml"), { contentType: "text/xml" }).window.document;
-  const values = [];
-  for (const item of document.querySelectorAll("rss > channel > item")) {
-    if (
-      item.querySelector("link")?.textContent.trim() !== source ||
-      item.querySelector("guid")?.textContent.trim() !== source ||
-      item.querySelector("category")?.textContent.trim() !== "Speech"
-    ) continue;
-    const raw = item.querySelector("pubDate")?.textContent.trim() ?? "";
-    if (!/(?:GMT|UTC|[+-]\d{4})$/u.test(raw) || !Number.isFinite(Date.parse(raw))) continue;
-    const published = new Date(raw);
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(published);
-    const part = (type) => parts.find((item) => item.type === type).value;
-    if (`${part("year")}-${part("month")}-${part("day")}` === articleDate) values.push(published.toISOString());
-  }
-  return [...new Set(values)];
+  const record = fedSpeechPublicationRecord(articleBody, feedBody, source);
+  return record ? [record.publishedAt] : [];
 }
 
 export function sourcePublishedAtCandidates(
@@ -714,6 +690,7 @@ export function sourcePublishedAtCandidates(
   if (isGdpNowCommentary(source)) return [];
   if (!/(?:html|xhtml|json|plain)/iu.test(contentType)) return [];
   const decoded = decodeSourceBody(body, contentType);
+  if (fedSpeechArticleIdentity(source)) return [];
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   if (nativeIssuerReleaseIdentity(source)) return [];
@@ -962,6 +939,10 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
   if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
   if (nativeIssuerReleaseIdentity(source)) return nativeIssuerReleaseRecord(decoded, source)?.publishedDateCandidates ?? [];
+  if (fedSpeechArticleIdentity(source)) {
+    const speech = fedSpeechArticleRecord(body, source);
+    return speech ? [speech.publicationDate] : [];
+  }
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publicationDate];
   const values = jsonLdArticlePublishedValues(decoded, source);
@@ -1039,6 +1020,15 @@ export function secSubmissionMetadataUrl(value) {
   const [, cik, accession] = match;
   const filingName = `${accession.slice(0, 10)}-${accession.slice(10, 12)}-${accession.slice(12)}.txt`;
   return `https://www.sec.gov/Archives/edgar/data/${cik}/${accession}/${filingName}`;
+}
+
+export function boundMetadataPublication(opened) {
+  const speech = fedSpeechRecordFromOpened(opened);
+  if (speech) return speech;
+  const metadataUrl = secSubmissionMetadataUrl(opened.finalUrl);
+  const receipts = (opened.metadataReceipts ?? []).filter(item => item.finalUrl === metadataUrl);
+  if (!metadataUrl || receipts.length !== 1 || !Buffer.isBuffer(opened.rawBody) || !Buffer.isBuffer(receipts[0].rawBody) || receipts[0].status < 200 || receipts[0].status >= 300 || !/^text\/plain(?:;|$)/iu.test(receipts[0].contentType)) return null;
+  return secFilingPublicationRecord(opened.rawBody, receipts[0].rawBody, opened.finalUrl, sourceBodyText);
 }
 
 export async function readExternalSource(

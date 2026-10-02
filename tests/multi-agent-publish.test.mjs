@@ -1,3 +1,5 @@
+import { workflowImplementationSnapshot } from "../scripts/workflow-implementation.mjs";
+const implementation = await workflowImplementationSnapshot();
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -100,6 +102,7 @@ async function publicationFixture(
   };
   const manifest = {
     workflowVersion: WORKFLOW_VERSION,
+    implementation,
     status: "ready",
     market,
     marketAsOf: "2026-08-21",

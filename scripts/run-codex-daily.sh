@@ -133,7 +133,10 @@ fi
 {
   echo
   echo "[$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)] Stock Daily ${UPDATE_KIND} multi-agent run started"
+  export STOCK_DAILY_IMPLEMENTATION_SNAPSHOT="${PROJECT_DIR}/work/scheduled-implementation-${beijing_date}-${UPDATE_KIND}-$$.json"
+  node "${SCRIPT_DIR}/workflow-implementation.mjs" --snapshot "${STOCK_DAILY_IMPLEMENTATION_SNAPSHOT}"
   npm run daily:collect -- --report-date "${beijing_date}" --update-kind "${UPDATE_KIND}"
+  node "${SCRIPT_DIR}/workflow-implementation.mjs" --check "${STOCK_DAILY_IMPLEMENTATION_SNAPSHOT}"
   node scripts/structured-output-schema-audit.mjs docs/daily-agents/*.schema.json
 
   if [[ "${force_run}" != true && -z "${requested_date}" ]]; then

@@ -1,3 +1,4 @@
+import { workflowImplementationSnapshot } from "../scripts/workflow-implementation.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -375,9 +376,10 @@ test("CLI compatibility passes only feature switches present in the installed bi
 });
 
 test("publication cannot bypass comprehensive artifact verification", async () => {
+  const implementation = await workflowImplementationSnapshot();
   const f = recapFixture();
-  await assert.rejects(auditWorkflowCausalEvidence({ manifest: { coverageRequired: true }, report: {}, manifestPath: "/tmp/missing-recap/manifest.json", input: fixtureInput() }), /ENOENT/);
-  await assert.rejects(auditWorkflowCausalEvidence({ manifest: { coverageRequired: true }, report: {}, manifestPath: "/tmp/missing-recap/manifest.json" }), /行情输入/);
+  await assert.rejects(auditWorkflowCausalEvidence({ manifest: { coverageRequired: true, implementation }, report: {}, manifestPath: "/tmp/missing-recap/manifest.json", input: fixtureInput() }), /ENOENT/);
+  await assert.rejects(auditWorkflowCausalEvidence({ manifest: { coverageRequired: true, implementation }, report: {}, manifestPath: "/tmp/missing-recap/manifest.json" }), /行情输入/);
 });
 
 test("an exchange-hosted article cannot masquerade as an official issuer disclosure", () => {

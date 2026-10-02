@@ -1,3 +1,4 @@
+import { workflowImplementationSnapshot } from "../scripts/workflow-implementation.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
@@ -87,7 +88,7 @@ test("changed prompt, schema, output and raw events cannot reuse a native receip
 test("publication auditing and latest-run artifact copies retain and recheck failed attempts", async t => {
   const root = await temporary(t), record = await capture(root, invocation(), ["paid first", "paid second"], 1);
   const ledger = { sources: [], rejected: [], alternatives: [] };
-  const manifest = { agentRuns: [], failedAgentRuns: [record], stages: { evidence: { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(ledger) } } };
+  const manifest = { implementation: await workflowImplementationSnapshot(), agentRuns: [], failedAgentRuns: [record], stages: { evidence: { role: "deterministic_source_verification", status: "completed", outputHash: stableHash(ledger) } } };
   const manifestPath = resolve(root, "manifest.json"), reportPath = resolve(root, "report.json");
   await mkdir(resolve(root, "artifacts"));
   await Promise.all([
