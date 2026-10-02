@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "../scripts/yahoo-live-article.mjs";
+import { YAHOO_LIVE_ARTICLE_VERSION, yahooLiveArticleIdentity, yahooLiveArticleRecord } from "../scripts/yahoo-live-article.mjs";
 import { sourceArticleProvenance } from "../scripts/source-article-provenance.mjs";
 import { sourceBodyText, sourcePublishedAtCandidates } from "../scripts/daily-source-audit.mjs";
 import { snapshotFromOpenedSource, openedSourceFromSnapshot, auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
@@ -26,6 +26,9 @@ test("the owned article accepts its exact regional alias and lead, excluding nav
   assert.equal(record.currentVersionAt, "2026-10-01T20:07:35.000Z");
   assert.equal(record.initialPublishedAt, record.currentVersionAt);
   assert.equal(record.origin.key, "publisher:finance.yahoo.com"); assert.equal(record.origin.identified, true);
+  assert.equal(yahooLiveArticleRecord(fixture(), source + "?guccounter=1").currentVersionAt, record.currentVersionAt);
+  assert.equal(record.ownedBody, "Stocks recovered after an early decline.\nYields fell but remained elevated.");
+  for (const suffix of ["?guccounter=2", "?guccounter=1&guccounter=1", "?guccounter=1&headline=fake", "#guccounter=1"]) assert.equal(yahooLiveArticleIdentity(source + suffix), null);
   const primary = source.replace("ca.finance.yahoo.com", "finance.yahoo.com");
   const primaryHtml = fixture(article => { article.publisher.name = "Yahoo! Finance"; article.publisher.url = "https://finance.yahoo.com/"; }, html => html.replace(`content="${source}"`, `content="${canonical}"`));
   assert.equal(yahooLiveArticleRecord(primaryHtml, primary).currentVersionAt, record.currentVersionAt);
@@ -81,7 +84,7 @@ test("verification and publication replay rebuild the current clock, title and o
   assert.equal(ledger.sources.length, 1, JSON.stringify(ledger.rejected));
   const accepted = ledger.sources[0];
   assert.equal(accepted.title, title); assert.equal(accepted.publishedAt, "2026-10-01T20:07:35.000Z");
-  assert.equal(accepted.publisherTitleChecked, true); assert.equal(accepted.publisherDocumentVersion, "verified-yahoo-live-article-v1");
+  assert.equal(accepted.publisherTitleChecked, true); assert.equal(accepted.publisherDocumentVersion, YAHOO_LIVE_ARTICLE_VERSION);
   const snapshot = snapshotFromOpenedSource(source, opened), book = { version: SOURCE_SNAPSHOT_VERSION, snapshots: [snapshot] };
   assert.deepEqual(openedSourceFromSnapshot(snapshot).articleProvenance, opened.articleProvenance);
   assert.doesNotThrow(() => auditLedgerSourceSnapshots(ledger, book, { envelope }));

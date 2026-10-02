@@ -25,7 +25,7 @@ import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-ev
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v70";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v71";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v5";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
@@ -1310,7 +1310,7 @@ export function hasCausalPassage(excerpt) {
   // "Micron keeps surging as AI demand ..." is a reported price/factor
   // relationship. Bare "as", "as much as 5%" and a temporal closing-bell
   // clause are not. This remains only a necessary prose check.
-  const priceAsFactor = /\b(?:surges?|surged|surging|rall(?:y|ies|ied|ying)|rose|rises?|rising|fell|falls?|falling|slid|slides?|sliding|jump(?:s|ed|ing)?|climb(?:s|ed|ing)?|drop(?:s|ped|ping)?|gain(?:s|ed|ing)?|retreat(?:s|ed|ing)?)\b(?:(?!\bas\b)[^.!?;\n]){0,100}\bas\s+(?!much\s+as\b)(?:(?!\b(?:bell|clock)\b)[^.!?;,\n]){0,100}\b(?:demand|earnings|revenue|guidance|inflation|oil|crude|yields?|interest rates?|borrowing costs?|supply|tariffs?)\b/iu;
+  const priceAsFactor = /\b(?:surges?|surged|surging|rall(?:y|ies|ied|ying)|rose|rises?|rising|recover(?:s|ed|ing)?|stages? (?:a )?comeback|fell|falls?|falling|slid|slides?|sliding|jump(?:s|ed|ing)?|climb(?:s|ed|ing)?|drop(?:s|ped|ping)?|gain(?:s|ed|ing)?|retreat(?:s|ed|ing)?)\b(?:(?!\bas\b)[^.!?;\n]){0,100}\bas\s+(?!much\s+as\b)(?:(?!\b(?:bell|clock)\b)[^.!?;,\n]){0,100}\b(?:demand|earnings|revenue|guidance|inflation|oil|crude|yields?|interest rates?|borrowing costs?|supply|tariffs?)\b/iu;
   return priceAsFactor.test(text) || /(?:因为|由于|缘于|归因|原因|导火索|催化|受.{0,35}(?:影响|提振|拖累)|推动|带动|拖累|提振|支撑|促使|导致|引发|影响|压制|冲击|共振|担忧|预期|抛压|承接不足|\b(?:because|amid|after|following|(?:re)?pricing|due\s+to|driv\w*|drove|driven|drag\w*|lift\w*|help\w*|support\w*|weigh\w*|spurr?\w*|fuel\w*|boost\w*|spark\w*|prompt\w*|catal\w*|react\w*|respond\w*|concern\w*|worr\w*|expect\w*)\b)/iu.test(text);
 }
 

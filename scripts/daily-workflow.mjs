@@ -54,6 +54,7 @@ import {
 } from "./daily-publish.mjs";
 import { publishableExternalSourceDomains } from "./source-registry.mjs";
 import { priorRecapDiscoveryLeads } from "./recap-research-discovery.mjs";
+import { collectRecapNewsOriginals, recapNewsOriginalsContext, recapNewsOriginalsSourceReader } from "./recap-news-originals.mjs";
 import { collectXIntelligence } from "./x-intelligence.mjs";
 import {
   assessRecapEvidenceCoverage, compactRecapCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
@@ -1976,6 +1977,7 @@ export class MarketWorkflow {
       sourceDomains: this.researchSourceDomains,
       ...(exclusions.length ? { excludedSources: exclusions } : {}),
       ...(this.recapDiscoveryLeads?.length ? { discoveryLeads: this.recapDiscoveryLeads } : {}),
+      ...(this.newsOriginalsContext?.sources.length ? { sourceOriginals: this.newsOriginalsContext.sources } : {}),
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps, ...(this.macroData.chinaPmi ? { chinaPmiContext: this.macroData.chinaPmi.context, chinaPmiGaps: this.macroData.chinaPmi.gaps } : {}) } : {}),
@@ -1992,7 +1994,7 @@ export class MarketWorkflow {
     const previouslyConsumedQueries = this.consumedQueriesBefore([key]);
     const run = await this.runAgent({
       key, role, payload,
-      inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", "recap-discovery-leads.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
+      inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", "recap-discovery-leads.json", ...(this.newsOriginalsContext ? ["recap-news-context.json"] : []), ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json", ...(this.newsOriginalsContext ? ["recap-news-context.json"] : [])],
       promptSuffix: this.researchPromptSuffix(anomaly, role, suffix),
     });
     return this.validateAgentStage(key, () => {
@@ -2074,7 +2076,7 @@ export class MarketWorkflow {
     await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v45",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v46",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2881,8 +2883,30 @@ export class MarketWorkflow {
     };
   }
 
+  async prepareRecapNewsOriginals() {
+    await assertWorkflowImplementation(this.manifest.implementation);
+    const path = resolve(this.runDir, "artifacts/recap-news-originals.json");
+    const leads = this.recapDiscoveryLeads ?? [];
+    let book;
+    if (await exists(path)) {
+      book = await readJson(path);
+      if (this.manifest.newsOriginalsHash !== stableHash(book)) throw new Error("冻结新闻原件的哈希发生变化");
+      recapNewsOriginalsContext(book, this.envelope, leads);
+    } else {
+      book = await collectRecapNewsOriginals(this.envelope, leads, { signal: AbortSignal.timeout(Math.max(1, Math.min(120_000, this.remainingTime()))) });
+      await atomicJson(path, book);
+      this.manifest.newsOriginalsHash = stableHash(book);
+      await this.saveManifest();
+    }
+    this.newsOriginalsBook = book;
+    this.newsOriginalsContext = recapNewsOriginalsContext(book, this.envelope, leads);
+    await atomicJson(resolve(this.runDir, "artifacts/recap-news-context.json"), this.newsOriginalsContext);
+    return book;
+  }
+
   async runCompleteRecap() {
     this.recapResearchActive = true;
+    await this.prepareRecapNewsOriginals();
     const socialPath = resolve(this.runDir, "artifacts/social-ledger.json");
     let social;
     if (await exists(socialPath)) {
@@ -2971,7 +2995,7 @@ export class MarketWorkflow {
       await this.saveManifest();
     }
     this.pbocNewsContext = pbocNewsResearchContext(pbocNews, this.envelope);
-    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), pbocNewsSourceReader(pbocNews, chinaPmiSourceReader(macroData.chinaPmi, companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission)))));
+    this.recapSnapshotReader = await createSnapshotSourceReader(resolve(this.runDir, "artifacts/recap-source-snapshots.json"), recapNewsOriginalsSourceReader(this.newsOriginalsBook, pbocNewsSourceReader(pbocNews, chinaPmiSourceReader(macroData.chinaPmi, companyBackgroundSourceReader(companyBackground, transmissionSourceReader(transmission))))));
     this.recapSourceReader = this.recapSnapshotReader.reader;
     const outputs = [];
     const initialAccess = this.manifest.sourceAccess ?? { urls: this.excludedSources, unavailableDomains: [] };

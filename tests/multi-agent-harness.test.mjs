@@ -1706,6 +1706,8 @@ test("a causal worker cannot turn parallel price quotes into a causal passage", 
   assert.equal(hasCausalPassage("Oil prices fell, helping calm inflation worries and support stocks."), true);
   assert.equal(hasCausalPassage("Micron keeps surging as AI demand show no signs of slowing."), true);
   assert.equal(hasCausalPassage("Stocks fell as Treasury yields rose."), true);
+  assert.equal(hasCausalPassage("US stocks are recovering from morning losses as bond yields retreated and the AI trade bounced back."), true);
+  assert.equal(hasCausalPassage("Dow, S&P 500, Nasdaq stage comeback as Treasury yields fall, chip stocks gain"), true);
   assert.equal(hasCausalPassage("Micron gained as much as 5%. AI demand remains strong."), false);
   assert.equal(hasCausalPassage("Shares gained as much as 5%, oil was unchanged."), false);
   assert.equal(hasCausalPassage("Shares rose as the closing bell rang while oil stayed stable."), false);

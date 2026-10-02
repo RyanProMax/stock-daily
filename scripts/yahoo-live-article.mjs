@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 
-export const YAHOO_LIVE_ARTICLE_VERSION = "verified-yahoo-live-article-v1";
+export const YAHOO_LIVE_ARTICLE_VERSION = "verified-yahoo-live-article-v2";
 const clean = value => String(value ?? "").normalize("NFC").replace(/\s+/gu, " ").trim();
 const compact = value => clean(value).replace(/\s/gu, "");
 const instant = value => {
@@ -19,9 +19,10 @@ function livePostTime(value) {
 
 export function yahooLiveArticleIdentity(source) {
   let url; try { url = new URL(source); } catch { return null; }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !["finance.yahoo.com", "ca.finance.yahoo.com"].includes(url.hostname)) return null;
+  if (url.protocol !== "https:" || url.username || url.password || url.port || (url.search && url.search !== "?guccounter=1") || url.hash || !["finance.yahoo.com", "ca.finance.yahoo.com"].includes(url.hostname)) return null;
+  url.search = "";
   const match = /^\/(?:news|markets\/live)\/(stock-market-today-[a-z0-9]+(?:-[a-z0-9]+){2,40}-\d{9})\.html$/u.exec(url.pathname);
-  return match ? { slug: match[1], canonical: `https://finance.yahoo.com/markets/live/${match[1]}.html`, regional: url.hostname === "ca.finance.yahoo.com" } : null;
+  return match ? { slug: match[1], canonical: `https://finance.yahoo.com/markets/live/${match[1]}.html`, sourceAlias: url.toString(), regional: url.hostname === "ca.finance.yahoo.com" } : null;
 }
 
 // The reviewed regional live page has a navigation H1 as well as the owned
@@ -33,7 +34,7 @@ export function yahooLiveArticleRecord(html, source) {
   const document = new JSDOM(html).window.document;
   const canonical = [...document.head.querySelectorAll('link[rel="canonical"]')], urls = [...document.head.querySelectorAll('meta[property="og:url"]')];
   const owners = [...document.querySelectorAll("#main-content-wrapper article.article-wrap")];
-  if (canonical.length !== 1 || canonical[0].getAttribute("href") !== identity.canonical || urls.length !== 1 || urls[0].content !== (identity.regional ? source : identity.canonical) || owners.length !== 1 || document.querySelectorAll("article.article-wrap").length !== 1) return null;
+  if (canonical.length !== 1 || canonical[0].getAttribute("href") !== identity.canonical || urls.length !== 1 || urls[0].content !== (identity.regional ? identity.sourceAlias : identity.canonical) || owners.length !== 1 || document.querySelectorAll("article.article-wrap").length !== 1) return null;
   const owner = owners[0], headings = [...owner.querySelectorAll(".cover-headline h1.cover-title")], times = [...owner.querySelectorAll(".byline-attr time.byline-attr-meta-time[datetime]")], bodies = [...owner.querySelectorAll(".body-wrap > .body > .bodyItems-wrapper")];
   if (headings.length !== 1 || owner.querySelectorAll("h1").length !== 1 || times.length !== 1 || bodies.length !== 1) return null;
   const title = clean(headings[0].textContent), current = instant(times[0].getAttribute("datetime"));
@@ -69,5 +70,5 @@ export function yahooLiveArticleRecord(html, source) {
   }
   // The record dates the current entire article. It deliberately grants no
   // pre-close timestamp to a paragraph or an earlier live-post heading.
-  return { version: YAHOO_LIVE_ARTICLE_VERSION, title, canonical: identity.canonical, initialPublishedAt: first, currentVersionAt: current, origin: { key: "publisher:finance.yahoo.com", identified: true, basis: "original_reporting" } };
+  return { version: YAHOO_LIVE_ARTICLE_VERSION, title, canonical: identity.canonical, initialPublishedAt: first, currentVersionAt: current, ownedBody: paragraphs.map(node => clean(node.textContent)).join("\n"), origin: { key: "publisher:finance.yahoo.com", identified: true, basis: "original_reporting" } };
 }
