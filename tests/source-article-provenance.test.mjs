@@ -105,6 +105,90 @@ test("unrelated titles and URLs, ambiguous articles, invalid or reversed clocks 
   assert.equal(sourceArticleProvenance(`<h1>${title}</h1><meta property="article:modified_time" content="${updated}"><p>${quote}</p>`, url).publication.status, "unverified_update");
 });
 
+const ownedUrl = "https://finance.yahoo.com/markets/stocks/article/owned-networking-stock-call.html";
+const ownedArticle = { ...article, mainEntityOfPage: { "@id": ownedUrl }, author: { name: "Grace O'Donnell" }, publisher: { name: "Yahoo! Finance" } };
+function ownedHtml(data = ownedArticle, changes = {}) {
+  return html(data, { extra: `<link rel="canonical" href="${ownedUrl}"><meta property="og:url" content="${ownedUrl}">`, ...changes }).replace("<body>", "<body><nav><h1>Yahoo Finance</h1></nav>");
+}
+
+test("a unique owned story binds its clock and author despite unrelated external navigation headings", () => {
+  for (const navigation of ["Yahoo Finance", "Unrelated navigation title", title]) {
+    const page = ownedHtml().replace("<h1>Yahoo Finance</h1>", `<h1>${navigation}</h1>`);
+    const result = sourceArticleProvenance(page, ownedUrl);
+    assert.deepEqual(result.publication, { status: "verified", initialPublishedAt: initial, currentVersionAt: updated, timeBasis: "article_update" });
+    assert.deepEqual(result.origin, { key: "publisher:finance.yahoo.com", identified: true, basis: "bound_publisher_and_author" });
+  }
+});
+
+test("external headings cannot lend ownership to a wrong, absent, nested or ambiguous article heading", () => {
+  const page = ownedHtml().replace("<h1>Yahoo Finance</h1>", `<h1>${title}</h1>`);
+  for (const changed of [
+    ownedHtml(ownedArticle, { heading: "Different story" }),
+    page.replace(`<article><h1>${title}</h1>`, "<article>"),
+    page.replace(`<article><h1>${title}</h1>`, "<article><h1></h1>"),
+    page.replace(`<article><h1>${title}</h1>`, `<article><aside><h1>${title}</h1></aside>`),
+    page.replace("</article>", `<h1>${title}</h1></article>`),
+    page.replace("</article>", "<h1>Different story</h1></article>"),
+    page.replace("</article>", "<h1></h1></article>"),
+    page.replace("</body>", "<article><p>Recommended story.</p></article></body>"),
+    page.replace("</body>", `<article><h1>${title}</h1></article></body>`),
+    ownedHtml({ ...ownedArticle, headline: "Different story" }),
+  ]) assert.notEqual(sourceArticleProvenance(changed, ownedUrl).publication?.status, "verified");
+});
+
+test("owned-body fallback needs one exact current identity, one author and consistent current-version metadata", () => {
+  const page = ownedHtml();
+  for (const changed of [
+    page.replace(`<link rel="canonical" href="${ownedUrl}">`, ""),
+    page.replace(`<meta property="og:url" content="${ownedUrl}">`, ""),
+    page.replace(`rel="canonical" href="${ownedUrl}"`, `rel="canonical" href="${ownedUrl}?other=1"`),
+    page.replace(`property="og:url" content="${ownedUrl}"`, `property="og:url" content="${ownedUrl}?other=1"`),
+    page.replace("</head>", `<link rel="canonical" href="${ownedUrl}"></head>`),
+    page.replace("</head>", `<meta property="og:url" content="${ownedUrl}"></head>`),
+    ownedHtml({ ...ownedArticle, mainEntityOfPage: { "@id": ownedUrl + "?other=1" } }),
+    ownedHtml({ ...ownedArticle, url: ownedUrl + "?other=1" }),
+    ownedHtml({ ...ownedArticle, author: undefined }),
+    ownedHtml({ ...ownedArticle, author: { name: " " } }),
+    page.replace("</head>", `<script type="application/ld+json">${JSON.stringify(ownedArticle)}</script></head>`),
+    page.replace("</head>", `<script type="application/ld+json">${JSON.stringify({ ...ownedArticle, headline: "Different story" })}</script></head>`),
+    page.replace(`property="article:published_time" content="${initial}"`, 'property="article:published_time" content="2026-08-21T03:02:10Z"'),
+    page.replace(`property="article:modified_time" content="${updated}"`, 'property="article:modified_time" content="2026-08-21T21:09:12Z"'),
+    ownedHtml({ ...ownedArticle, dateModified: "2026-08-21T21:08:12" }),
+    ownedHtml({ ...ownedArticle, dateModified: "2026-08-20T21:08:12Z" }),
+  ]) assert.notEqual(sourceArticleProvenance(changed, ownedUrl).publication?.status, "verified");
+  // Removing navigation cannot bypass an explicit source-identity conflict.
+  for (const changed of [
+    page.replace(`rel="canonical" href="${ownedUrl}"`, `rel="canonical" href="${ownedUrl}?other=1"`),
+    page.replace(`property="og:url" content="${ownedUrl}"`, `property="og:url" content="${ownedUrl}?other=1"`),
+    ownedHtml({ ...ownedArticle, url: ownedUrl + "?other=1" }),
+  ]) assert.notEqual(sourceArticleProvenance(changed.replace("<nav><h1>Yahoo Finance</h1></nav>", ""), ownedUrl).publication?.status, "verified");
+});
+
+test("all declared publisher page identities agree through arrays with or without external navigation", () => {
+  const elsewhere = ownedUrl + "?other=1";
+  const conflicts = [
+    [{ "@id": elsewhere }],
+    [ownedUrl, elsewhere],
+    [{ url: ownedUrl }, { "@id": elsewhere }],
+    [[{ url: ownedUrl }], [[{ "@id": elsewhere }]]],
+    [{ url: [ownedUrl, elsewhere] }],
+    [ownedUrl, 42],
+  ];
+  const consistent = [
+    [ownedUrl],
+    [{ url: ownedUrl }, { "@id": ownedUrl }],
+    [[{ url: ownedUrl }], [[{ "@id": ownedUrl }]]],
+  ];
+  for (const navigation of [true, false]) {
+    const page = entity => {
+      const raw = ownedHtml({ ...ownedArticle, url: ownedUrl, mainEntityOfPage: entity });
+      return navigation ? raw : raw.replace("<nav><h1>Yahoo Finance</h1></nav>", "");
+    };
+    for (const entity of conflicts) assert.notEqual(sourceArticleProvenance(page(entity), ownedUrl).publication?.status, "verified");
+    for (const entity of consistent) assert.equal(sourceArticleProvenance(page(entity), ownedUrl).publication?.status, "verified");
+  }
+});
+
 test("wire attribution is derived from the owned article, while photo credits and quoted or recommended wires do not identify its origin", () => {
   const own = { ...article, author: { name: "Local WRAL Reporter" } };
   const page = html(own, { body: `${quote}</p><figure><figcaption>AP Photo/Seth Wenig</figcaption></figure><aside><p>Jones writes for the Associated Press.</p></aside><blockquote><p>NEW YORK (AP) — A separately quoted wire story.</p></blockquote><p>` });

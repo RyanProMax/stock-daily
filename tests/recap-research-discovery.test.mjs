@@ -88,6 +88,12 @@ test("current original text comes from owned bytes, retaining its actual version
   assert.equal(context.sources[0].publishedAt, "2026-10-01T20:07:35.000Z");
   assert.equal(context.sources[0].originalText, "Stocks recovered after an early decline.\nYields fell but remained elevated.\nAt the closing bell, the S&P 500 rose 0.50%.");
   assert.equal(context.sources[0].facts, undefined);
+  // Missing live bodies must reach the research payload alongside the owned
+  // lead, rather than appearing only in a separate diagnostics artifact.
+  assert.equal(context.sources[0].originalSections.length, 0);
+  assert.equal(context.sources[0].originalSectionGaps.length, 1);
+  assert.equal(context.sources[0].originalSectionGaps[0].title, "Closing update");
+  assert.equal(context.gaps[0].sectionTitle, "Closing update");
   const opened = await recapNewsOriginalsSourceReader(book, () => { throw new Error("Unexpected refetch"); })(url);
   assert.equal(opened.rawBody.toString("base64"), original.bodyBase64);
   assert.throws(() => recapNewsOriginalsContext(book, envelope, [{ url: url + "?guccounter=1" }]), /输入线索/u);

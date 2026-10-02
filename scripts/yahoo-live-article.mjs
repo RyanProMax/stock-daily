@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 
 export const YAHOO_LIVE_ARTICLE_VERSION = "verified-yahoo-live-article-v2";
+export const YAHOO_LIVE_SECTIONS_VERSION = "bound-yahoo-live-sections-v1";
 const clean = value => String(value ?? "").normalize("NFC").replace(/\s+/gu, " ").trim();
 const compact = value => clean(value).replace(/\s/gu, "");
 const instant = value => {
@@ -71,4 +72,50 @@ export function yahooLiveArticleRecord(html, source) {
   // The record dates the current entire article. It deliberately grants no
   // pre-close timestamp to a paragraph or an earlier live-post heading.
   return { version: YAHOO_LIVE_ARTICLE_VERSION, title, canonical: identity.canonical, initialPublishedAt: first, currentVersionAt: current, ownedBody: paragraphs.map(node => clean(node.textContent)).join("\n"), origin: { key: "publisher:finance.yahoo.com", identified: true, basis: "original_reporting" } };
+}
+
+// Research receives visible, complete sections from the same frozen parent
+// version. Earlier live-post labels never grant an earlier availability time.
+// Typographic quote/whitespace equivalence is only a body identity check; the
+// returned text retains the visible original, including quoted attribution.
+export function yahooLiveArticleSections(html, source) {
+  const parent = yahooLiveArticleRecord(html, source);
+  if (!parent) return null;
+  const document = new JSDOM(html).window.document;
+  const owner = document.querySelector("#main-content-wrapper article.article-wrap");
+  const posts = [...owner.querySelectorAll(".liveblog-posts .liveblog-list > li.caas-liveblogpost")];
+  const blog = [...document.querySelectorAll('script[type="application/ld+json"]')].map(node => JSON.parse(node.textContent)).find(item => item?.["@type"] === "LiveBlogPosting");
+  const sameBody = value => compact(value).replace(/[‘’]/gu, "'").replace(/[“”]/gu, '"');
+  const explicitlyHidden = node => {
+    for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.hasAttribute("hidden") || ancestor.style?.display === "none" || ancestor.style?.visibility === "hidden") return true;
+    }
+    return false;
+  };
+  const foreignOwner = node => node.closest("article") !== owner || Boolean(node.closest("aside, nav, footer, figure, blockquote")) || explicitlyHidden(node);
+  const sections = [], gaps = [];
+  if (posts.length > 32) return { version: YAHOO_LIVE_SECTIONS_VERSION, sections, gaps: [{ reason: "直播正文超过完整分节读取上限，未截断采用" }] };
+  for (const [index, post] of posts.entries()) {
+    const update = blog.liveBlogUpdate[index], title = clean(update.headline);
+    const bodies = [...post.querySelectorAll(".content-wrapper > .content-body > .content-block > .body")];
+    const bylines = [...post.querySelectorAll(".timestamp-byline > .byline-meta > .byline")];
+    const headings = [...post.querySelectorAll("h2.headline")], clocks = [...post.querySelectorAll("time.liveblogpost-relative-time")];
+    const publisher = update.publisher, author = update.author;
+    if (bodies.length !== 1 || bylines.length !== 1 || headings.length !== 1 || clocks.length !== 1 || [post, bodies[0], bylines[0], headings[0], clocks[0]].some(foreignOwner) || author?.["@type"] !== "Person" || !clean(author.name) || clean(bylines[0].textContent) !== clean(author.name) || !/^https:\/\/(?:finance|www)\.yahoo\.com\/author\/[a-z0-9-]+\/$/u.test(author.url ?? "") || publisher?.["@type"] !== "Organization" || !["Yahoo Finance", "Yahoo! Finance"].includes(publisher.name) || !["https://finance.yahoo.com/", "http://finance.yahoo.com/"].includes(publisher.url)) {
+      gaps.push({ title, reason: "直播分节正文或署名未与同一原文完整绑定" }); continue;
+    }
+    const body = bodies[0].cloneNode(true);
+    body.querySelectorAll("script, style, template, svg, .tickerAtomContainer, .loader, article, aside, nav, footer").forEach(node => node.remove());
+    body.querySelectorAll("*").forEach(node => { if (explicitlyHidden(node)) node.remove(); });
+    const originalText = [...body.childNodes].map(node => clean(node.textContent)).filter(Boolean).join("\n");
+    if (typeof update.articleBody !== "string" || sameBody(originalText) !== sameBody(update.articleBody)) {
+      gaps.push({ title, reason: "直播分节可见全文与其记录不一致，未采用不可见内容" }); continue;
+    }
+    if ([...originalText].length < 20 || [...originalText].length > 4_000) {
+      gaps.push({ title, reason: "直播分节完整正文长度超出读取范围，未截断采用" }); continue;
+    }
+    sections.push({ title, author: clean(author.name), sourceVersionAt: parent.currentVersionAt, originalText });
+  }
+  if (sections.reduce((count, section) => count + [...section.originalText].length, 0) > 24_000) return { version: YAHOO_LIVE_SECTIONS_VERSION, sections: [], gaps: [...gaps, { reason: "直播分节完整正文总量超过读取上限，未截断采用" }] };
+  return { version: YAHOO_LIVE_SECTIONS_VERSION, sections, gaps };
 }

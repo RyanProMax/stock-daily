@@ -1,11 +1,12 @@
 import { stableHash } from "./daily-workflow-core.mjs";
 import { decodeSourceBody, readExternalSource } from "./daily-source-audit.mjs";
 import { openedSourceFromSnapshot, snapshotFromOpenedSource } from "./evidence-source-snapshots.mjs";
-import { yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
+import { yahooLiveArticleRecord, yahooLiveArticleSections } from "./yahoo-live-article.mjs";
 import { assertAccessibleOriginalArticle, assertSessionClosingClaims } from "./source-session-integrity.mjs";
 import { sourceEvidenceDeadline } from "./evidence-timing.mjs";
 
 export const NEWS_ORIGINALS_VERSION = "recap-news-originals-v1";
+export const NEWS_ORIGINALS_CONTEXT_VERSION = "recap-news-originals-context-v2";
 
 export function recapNewsOriginalsContext(book, envelope, leads) {
   if (book?.version !== NEWS_ORIGINALS_VERSION || book.market !== envelope.market || book.marketAsOf !== envelope.marketAsOf || book.leadsHash !== stableHash(leads) || !Array.isArray(book.snapshots) || !Array.isArray(book.accessFailures) || book.snapshots.length > 8 || book.accessFailures.length > 8 || new Set(book.snapshots.map(s => s.source)).size !== book.snapshots.length) throw new Error("新闻原件的版本、交易日或输入线索不一致");
@@ -22,14 +23,17 @@ export function recapNewsOriginalsContext(book, envelope, leads) {
       if (time < Date.parse(envelope.session.windowEnd) || time > sourceEvidenceDeadline("market_wrap", envelope.session) || time > Date.parse(snapshot.fetchedAt)) throw new Error("文章当前版本不在有效收盘报道窗口内");
       assertAccessibleOriginalArticle(opened);
       assertSessionClosingClaims(opened.text, envelope, record.currentVersionAt);
-      sources.push({ url: snapshot.source, title: record.title, publishedAt: record.currentVersionAt, initialPublishedAt: record.initialPublishedAt, reportingOrigin: record.origin.key, bodyHash: snapshot.bodyHash, fetchedAt: snapshot.fetchedAt, originalText: record.ownedBody });
+      const live = yahooLiveArticleSections(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl);
+      if (!live) throw new Error("直播分节缺少相同原始文章身份");
+      sources.push({ url: snapshot.source, title: record.title, publishedAt: record.currentVersionAt, initialPublishedAt: record.initialPublishedAt, reportingOrigin: record.origin.key, bodyHash: snapshot.bodyHash, fetchedAt: snapshot.fetchedAt, originalText: record.ownedBody, originalSectionsVersion: live.version, originalSections: live.sections, originalSectionGaps: live.gaps });
+      for (const gap of live.gaps) gaps.push({ url: snapshot.source, ...(gap.title ? { sectionTitle: gap.title } : {}), reason: gap.reason });
     } catch (error) { gaps.push({ url: snapshot.source, reason: error.message }); }
   }
   for (const failure of book.accessFailures) {
     if (typeof failure.reason !== "string" || !failure.reason.trim() || !Number.isFinite(Date.parse(failure.fetchedAt))) throw new Error("新闻原件访问失败记录无效");
     gaps.push({ url: failure.url, reason: failure.reason });
   }
-  return { sources, gaps };
+  return { version: NEWS_ORIGINALS_CONTEXT_VERSION, sources, gaps };
 }
 
 export async function collectRecapNewsOriginals(envelope, leads, { reader = readExternalSource, now = () => new Date(), signal } = {}) {

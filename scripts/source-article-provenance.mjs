@@ -8,7 +8,7 @@ import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-a
 
 import { englishPublicationDate, newYorkPublicationDate } from "./fed-speech-publication.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v7";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v8";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -62,6 +62,30 @@ function names(value) {
   if (Array.isArray(value)) return value.flatMap(names);
   if (typeof value === "string") return [normalized(value)];
   return value && typeof value.name === "string" ? [normalized(value.name)] : [];
+}
+
+function declaredPageIdentities(value) {
+  if (Array.isArray(value)) return value.flatMap(declaredPageIdentities);
+  if (value && typeof value === "object") return [value.url, value["@id"]].filter(item => item != null).flatMap(declaredPageIdentities);
+  return value == null ? [] : [value];
+}
+
+function ownedArticleHeading(document, source, article, pageHeadlines) {
+  const expected = exactUrl(source, source);
+  const canonical = [...document.querySelectorAll('link[rel="canonical"]')];
+  const ogUrls = [...document.querySelectorAll('meta[property="og:url"]')];
+  const identityAgrees = (items, attribute) => items.length <= 1 && items.every(item => exactUrl(item.getAttribute(attribute), source) === expected);
+  if (!identityAgrees(canonical, "href") || !identityAgrees(ogUrls, "content")) return false;
+  const bodies = [...document.querySelectorAll("article")];
+  const headings = bodies.length === 1 ? [...bodies[0].querySelectorAll("h1")] : [];
+  if (bodies.length > 1 || (bodies.length === 1 && (headings.length !== 1 || headings[0].closest("figure, figcaption, aside, nav, footer, blockquote") || titleKey(headings[0].textContent) !== titleKey(article.headline)))) return false;
+  const identities = [article.url, article["@id"], ...declaredPageIdentities(article.mainEntityOfPage)].filter(value => value != null);
+  if (verifiedExternalSourceType(source) === "publisher" && identities.some(value => exactUrl(value, source) !== expected)) return false;
+  if (pageHeadlines.length === 1 && titleKey(pageHeadlines[0]) === titleKey(article.headline)) return true;
+  // A website logo or navigation heading is outside the owned story. Ignore
+  // it only when the one story body, both exact public identities and its
+  // author bind the metadata to this page; another article cannot lend a clock.
+  return bodies.length === 1 && headings.length === 1 && canonical.length === 1 && ogUrls.length === 1 && names(article.author).some(Boolean) && identities.every(value => exactUrl(value, source) === expected);
 }
 
 function issuerPublisherMatches(value, issuer, source) {
@@ -137,7 +161,7 @@ export function sourceArticleProvenance(decodedHtml, source) {
   const document = new JSDOM(decodedHtml).window.document;
   const headlines = [...document.querySelectorAll("h1")].map(item => normalized(item.textContent)).filter(Boolean);
   const allArticles = matchingArticles(document, source);
-  const articles = allArticles.filter(item => ((headlines.length === 1 && titleKey(item.headline) === titleKey(headlines[0])) || (issuer?.domain === "micron.com" && micronReleaseHeading(document, source, item))) && titleKey(item.headline).length >= 8 && (!issuer || issuerPublisherMatches(item.publisher, issuer, source)));
+  const articles = allArticles.length === 1 ? allArticles.filter(item => (ownedArticleHeading(document, source, item, headlines) || (issuer?.domain === "micron.com" && micronReleaseHeading(document, source, item))) && titleKey(item.headline).length >= 8 && (!issuer || issuerPublisherMatches(item.publisher, issuer, source))) : [];
   const host = new URL(source).hostname.replace(/^www\./u, "");
   const nativeAgency = /(?:^|\.)apnews\.com$/u.test(host) ? "agency:associated_press" : /(?:^|\.)reuters\.com$/u.test(host) ? "agency:reuters" : null;
   let origin = issuer ? { key: `issuer:${issuer.domain}`, identified: false, basis: "origin_unresolved" } : nativeAgency ? { key: nativeAgency, identified: true, basis: "original_agency_domain" } : { key: `publisher:${host.replace(/^(?:[a-z]{2})\.finance\.yahoo\.com$/u, "finance.yahoo.com")}`, identified: false, basis: "origin_unresolved" };

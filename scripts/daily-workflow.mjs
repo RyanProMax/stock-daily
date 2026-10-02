@@ -2086,7 +2086,7 @@ export class MarketWorkflow {
     await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v49",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v50",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
