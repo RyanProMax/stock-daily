@@ -18,7 +18,7 @@ import { verifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
-import { SNOWFLAKE_PRESS_RELEASE_VERSION, snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
+import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 import { verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions } from "./company-outlook.mjs";
 
@@ -72,9 +72,9 @@ export function openedSourceFromSnapshot(snapshot) {
     text = record.text;
     publishedAtCandidates = record.publishedAtCandidates;
   }
-  if (snowflakePressReleaseIdentity(snapshot.finalUrl)) {
-    const record = /(?:html|xhtml)/iu.test(snapshot.contentType) ? snowflakePressReleaseRecord(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
-    if (!record || receipts.length) throw new Error("Snowflake 公告未由冻结原文绑定正文、发行主体与发布日期");
+  if (nativeIssuerReleaseIdentity(snapshot.finalUrl)) {
+    const record = /(?:html|xhtml)/iu.test(snapshot.contentType) ? nativeIssuerReleaseRecord(decodeSourceBody(body, snapshot.contentType), snapshot.finalUrl) : null;
+    if (!record || receipts.length) throw new Error("公司公告未由冻结原文绑定正文、发行主体与发布日期");
     text = record.text;
     publishedAtCandidates = [];
   }
@@ -181,8 +181,8 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     if (source.authorityDocumentVersion !== authorityVersion) throw new Error("权威公告身份核验版本未由冻结原文重建");
     if (authorityVersion && source.title !== original.text.split("\n")[0]) throw new Error("权威公告标题未由冻结原始正文重建");
     if (authorityVersion && (source.publishedAt !== original.publishedAtCandidates[0] || source.timePrecision !== "instant" || source.timingLimitation)) throw new Error("权威公告已绑定的精确发布时间不得退化为日期或被替换");
-    const issuerRecord = snowflakePressReleaseIdentity(source.url) ? snowflakePressReleaseRecord(decodeSourceBody(original.rawBody, original.contentType), source.url) : null;
-    if (source.issuerDocumentVersion !== (issuerRecord ? SNOWFLAKE_PRESS_RELEASE_VERSION : undefined)) throw new Error("公司公告原生核验版本未由冻结原文重建");
+    const issuerRecord = nativeIssuerReleaseIdentity(source.url) ? nativeIssuerReleaseRecord(decodeSourceBody(original.rawBody, original.contentType), source.url) : null;
+    if (source.issuerDocumentVersion !== (issuerRecord?.version)) throw new Error("公司公告原生核验版本未由冻结原文重建");
     if (issuerRecord && (source.issuerTitleChecked !== true || source.title !== issuerRecord.title || source.publishedAt !== issuerRecord.publicationDate || source.timePrecision !== "date" || !source.timingLimitation || source.initialPublishedAt)) throw new Error("公司公告标题、发布日期或未知盘中时点未由原始正文重建");
     if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);

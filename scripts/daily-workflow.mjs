@@ -1553,7 +1553,7 @@ export class MarketWorkflow {
     }
   }
 
-  async assertResearchCapacity(anomalies, suffix = "", excludedSources = []) {
+  async assertResearchCapacity(anomalies, suffix = "", excludedSources = [], { skipExhaustedPrimary = false } = {}) {
     const exclusions = [...new Set([...this.excludedSources, ...excludedSources])];
     const reusable = {};
     await Promise.all(anomalies.flatMap((anomaly) => {
@@ -1561,7 +1561,16 @@ export class MarketWorkflow {
       return ["facts", "causal"].map(async (role, index) => {
         const key = anomalyResearchStageKeys(anomaly, suffix)[index];
         const fingerprint = await agentStageFingerprint(role, payload, this.researchPromptSuffix(anomaly, role, suffix));
-        if (await this.readAgentCheckpoint({ key, ...fingerprint })) reusable[key] = { status: "completed" };
+        if (await this.readAgentCheckpoint({ key, ...fingerprint })) {
+          reusable[key] = { status: "completed" };
+          return;
+        }
+        if (skipExhaustedPrimary && this.primaryRoleAttempts(key) >= 2) {
+          // This is only a query-cost exemption: the failed role remains
+          // failed and blocks later stages. No third process will be launched.
+          reusable[key] = { status: "completed" };
+          return;
+        }
       });
     }));
     return assertResearchBatchBudget(this.searchQueryCount + this.reservedSearchQueryCount, anomalies, reusable, suffix, this.searchQueryLimit);
@@ -1944,99 +1953,62 @@ export class MarketWorkflow {
     };
   }
 
-  async researchAnomaly(anomaly, suffix = "", excludedSources = []) {
+  async researchPrimaryRole(anomaly, role, suffix = "", excludedSources = []) {
+    if (!["facts", "causal"].includes(role)) throw new Error("Unknown primary research role");
     const exclusions = [...new Set([...this.excludedSources, ...excludedSources])];
     const payload = this.researchPayload(anomaly, exclusions);
-    const researchKeys = anomalyResearchStageKeys(anomaly, suffix);
-    const previouslyConsumedQueries = this.consumedQueriesBefore(researchKeys);
+    const key = anomalyResearchStageKeys(anomaly, suffix)[role === "facts" ? 0 : 1];
+    const previouslyConsumedQueries = this.consumedQueriesBefore([key]);
+    const run = await this.runAgent({
+      key, role, payload,
+      inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
+      promptSuffix: this.researchPromptSuffix(anomaly, role, suffix),
+    });
+    return this.validateAgentStage(key, () => {
+      const output = validateResearchOutput(run.output, role, anomaly, this.envelope, { targetedRepair: Boolean(suffix) });
+      const events = parseAgentEvents(run.events, { requireSearch: true });
+      if (events.searchCount !== 2) throw new Error(`${anomaly.id} ${role} Agent 必须执行两次搜索`);
+      assertDeclaredQueries(output.queries, events.queries, `${anomaly.id} ${role}`);
+      if (suffix) assertFreshRepairQueries(previouslyConsumedQueries, events.queries, `${anomaly.id} ${role}`);
+      else assertDeclaredQueries(role === "facts" ? anomaly.factQueries : anomaly.causalQueries, events.queries, `${anomaly.id} planned ${role}`);
+      return output;
+    });
+  }
+
+  async researchAnomaly(anomaly, suffix = "", excludedSources = []) {
     await this.assertResearchCapacity([anomaly], suffix, excludedSources);
-    const [factsRun, causalRun] = await settleAgentResults([
-      this.runAgent({
-        key: researchKeys[0],
-        role: "facts",
-        payload,
-        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
-        promptSuffix: this.researchPromptSuffix(anomaly, "facts", suffix),
-      }),
-      this.runAgent({
-        key: researchKeys[1],
-        role: "causal",
-        payload,
-        inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
-        promptSuffix: this.researchPromptSuffix(anomaly, "causal", suffix),
-      }),
-    ]);
-    const facts = await this.validateAgentStage(researchKeys[0], () =>
-      validateResearchOutput(
-        factsRun.output,
-        "facts",
-        anomaly,
-        this.envelope,
-        { targetedRepair: Boolean(suffix) },
-      ),
-    );
-    const causal = await this.validateAgentStage(researchKeys[1], () =>
-      validateResearchOutput(
-        causalRun.output,
-        "causal",
-        anomaly,
-        this.envelope,
-        { targetedRepair: Boolean(suffix) },
-      ),
-    );
-    await this.validateAgentStage(researchKeys[0], () => {
-      const factEvents = parseAgentEvents(factsRun.events, {
-        requireSearch: true,
-      });
-      if (factEvents.searchCount !== 2) {
-        throw new Error(`${anomaly.id} facts Agent 必须执行两次搜索`);
+    return settleAgentResults(["facts", "causal"].map(role => this.researchPrimaryRole(anomaly, role, suffix, excludedSources)));
+  }
+
+  primaryRoleAttempts(key) {
+    return new Set([...(this.manifest.agentRuns ?? []), ...(this.manifest.failedAgentRuns ?? [])].filter(run => run.key === key).map(run => run.agentRunId)).size;
+  }
+
+  async researchCompleteRecapBatch(batch, batchKey, outputs, { recovery = false, pending = [] } = {}) {
+    const jobs = recovery ? pending : batch.flatMap(anomaly => ["facts", "causal"].map(role => ({ anomaly, role, batchKey })));
+    const results = await Promise.allSettled(jobs.map(async job => {
+      const key = anomalyResearchStageKeys(job.anomaly)[job.role === "facts" ? 0 : 1];
+      // Successful checkpoints are always revalidated. Failed primary roles
+      // may consume at most two actual native invocations in this run, even
+      // when a process restart resumes the workflow.
+      if (this.primaryRoleAttempts(key) >= 2) {
+        const payload = this.researchPayload(job.anomaly);
+        const fingerprint = await agentStageFingerprint(job.role, payload, this.researchPromptSuffix(job.anomaly, job.role));
+        if (!await this.readAgentCheckpoint({ key, ...fingerprint })) throw new Error("该研究角色已用完两次原始执行机会");
       }
-      assertDeclaredQueries(
-        facts.queries,
-        factEvents.queries,
-        `${anomaly.id} facts`,
-      );
-      if (suffix) {
-        assertFreshRepairQueries(
-          previouslyConsumedQueries,
-          factEvents.queries,
-          `${anomaly.id} facts`,
-        );
-      } else {
-        assertDeclaredQueries(
-          anomaly.factQueries,
-          factEvents.queries,
-          `${anomaly.id} planned facts`,
-        );
-      }
-    });
-    await this.validateAgentStage(researchKeys[1], () => {
-      const causalEvents = parseAgentEvents(causalRun.events, {
-        requireSearch: true,
-      });
-      if (causalEvents.searchCount !== 2) {
-        throw new Error(`${anomaly.id} causal Agent 必须执行两次搜索`);
-      }
-      assertDeclaredQueries(
-        causal.queries,
-        causalEvents.queries,
-        `${anomaly.id} causal`,
-      );
-      if (suffix) {
-        assertFreshRepairQueries(
-          previouslyConsumedQueries,
-          causalEvents.queries,
-          `${anomaly.id} causal`,
-        );
-      } else {
-        assertDeclaredQueries(
-          anomaly.causalQueries,
-          causalEvents.queries,
-          `${anomaly.id} planned causal`,
-        );
-      }
-    });
-    return [facts, causal];
+      return this.researchPrimaryRole(job.anomaly, job.role);
+    }));
+    const failed = [];
+    for (let index = 0; index < jobs.length; index++) {
+      const job = jobs[index], result = results[index];
+      const key = anomalyResearchStageKeys(job.anomaly)[job.role === "facts" ? 0 : 1];
+      this.manifest.recapResearchRoles ??= {};
+      this.manifest.recapResearchRoles[key] = { anomalyId: job.anomaly.id, target: job.anomaly.target, role: job.role, batchKey, status: result.status === "fulfilled" ? "completed" : "failed", recovery, nativeAttemptCount: this.primaryRoleAttempts(key), ...(result.status === "fulfilled" ? { outputHash: stableHash(result.value) } : { error: result.reason instanceof Error ? result.reason.message : String(result.reason) }) };
+      if (result.status === "fulfilled") outputs.push(result.value);
+      else failed.push(job);
+    }
+    await this.saveManifest();
+    return failed;
   }
 
   async adjudicate(plan, ledger, suffix = "") {
@@ -2070,7 +2042,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v41",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v42",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -2980,11 +2952,20 @@ export class MarketWorkflow {
       ledger = await this.verifyEvidence(outputs);
       nextEvidence = ledger.sources;
     }
-    // Four targets at a time: each has independent facts/causal processes.
-    // A failed sibling must settle before this market can report failure.
-    for (let i = 0; i < plan.anomalies.length; i += 4) {
-      const batch = plan.anomalies.slice(i, i + 4);
-      const batchKey = String(i / 4);
+    // Two targets/four native workers at a time. Finish the first pass for
+    // every target before spending remaining budget on a failed role.
+    const failedRoles = [];
+    const restoreBatch = async batchKey => {
+      this.recapResearchEvidence = this.manifest.recapBatchEvidence[batchKey];
+      this.recapResearchEvidenceArtifact = `recap-batch-evidence-${batchKey}.json`;
+      await atomicJson(resolve(this.runDir, "artifacts", this.recapResearchEvidenceArtifact), this.recapResearchEvidence);
+      const access = this.manifest.recapBatchSourceAccess[batchKey];
+      this.excludedSources = access.urls;
+      this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !access.unavailableDomains.includes(domain));
+    };
+    for (let i = 0; i < plan.anomalies.length; i += 2) {
+      const batch = plan.anomalies.slice(i, i + 2);
+      const batchKey = String(i / 2);
       this.manifest.recapBatchSourceAccess ??= {};
       this.manifest.recapBatchEvidence ??= {};
       this.recapResearchEvidence = this.manifest.recapBatchEvidence[batchKey] ?? nextEvidence;
@@ -2997,13 +2978,22 @@ export class MarketWorkflow {
       this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !access.unavailableDomains.includes(domain));
       await this.saveManifest();
       await this.revalidateResearchQueryCheckpoints({ anomalies: batch });
-      await this.assertResearchCapacity(batch);
-      outputs.push(...(await settleAgentResults(batch.map((anomaly) => this.researchAnomaly(anomaly)))).flat());
+      await this.assertResearchCapacity(batch, "", [], { skipExhaustedPrimary: true });
+      failedRoles.push(...await this.researchCompleteRecapBatch(batch, batchKey, outputs));
       ledger = await this.verifyEvidence(outputs);
       nextAccess = recapResearchSourceAccess(initialAccess, ledger);
       // Keep original IDs/scopes. This is verified prior-batch context, not
       // permission to retag a broad market quote as a direct sector cause.
       nextEvidence = ledger.sources;
+    }
+    const remainingFailures = [];
+    for (const batchKey of [...new Set(failedRoles.map(job => job.batchKey))]) {
+      await restoreBatch(batchKey);
+      const pending = failedRoles.filter(job => job.batchKey === batchKey);
+      // runAgent reserves and charges actual queries for each role, including
+      // failed executions; no pair or whole target is repeated here.
+      remainingFailures.push(...await this.researchCompleteRecapBatch([], batchKey, outputs, { recovery: true, pending }));
+      ledger = await this.verifyEvidence(outputs);
     }
     this.excludedSources = initialAccess.urls;
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
@@ -3013,6 +3003,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
+    if (remainingFailures.length) throw new Error(`复盘研究未完成：${remainingFailures.length} 个独立角色未通过执行和验证；已保留全部已完成研究及原始失败记录`);
     const attributionPayload = () => ({ envelope: this.envelope, evidenceTiming: recapEvidenceTiming(this.envelope), targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
     const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage: compactRecapCoverage(coverage) }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
     let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;

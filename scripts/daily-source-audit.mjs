@@ -16,7 +16,7 @@ import { CNINFO_HISTORY_URL, validateCninfoHistoryBody } from "./cninfo-history-
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
-import { snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
+import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -715,7 +715,7 @@ export function sourcePublishedAtCandidates(
   const decoded = decodeSourceBody(body, contentType);
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
-  if (snowflakePressReleaseIdentity(source)) return [];
+  if (nativeIssuerReleaseIdentity(source)) return [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publishedAt];
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
@@ -956,7 +956,7 @@ export function sourcePublishedDateCandidates(body, contentType = "text/html", s
   const decoded = decodeSourceBody(body, contentType);
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
   if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedDateCandidates ?? [];
-  if (snowflakePressReleaseIdentity(source)) return snowflakePressReleaseRecord(decoded, source)?.publishedDateCandidates ?? [];
+  if (nativeIssuerReleaseIdentity(source)) return nativeIssuerReleaseRecord(decoded, source)?.publishedDateCandidates ?? [];
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publicationDate];
   const values = jsonLdArticlePublishedValues(decoded, source);
@@ -1164,9 +1164,9 @@ export async function readExternalSource(
         text = record.text;
         publishedAtCandidates = record.publishedAtCandidates;
       }
-      if (snowflakePressReleaseIdentity(resolved.url.toString())) {
-        const record = /(?:html|xhtml)/iu.test(contentType) ? snowflakePressReleaseRecord(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null;
-        if (!record) throw new Error("Snowflake 公告标题、原始正文与发布日期无法绑定");
+      if (nativeIssuerReleaseIdentity(resolved.url.toString())) {
+        const record = /(?:html|xhtml)/iu.test(contentType) ? nativeIssuerReleaseRecord(decodeSourceBody(response.body, contentType), resolved.url.toString()) : null;
+        if (!record) throw new Error("公司公告标题、原始正文与发布日期无法绑定");
         text = record.text;
         publishedAtCandidates = [];
       }

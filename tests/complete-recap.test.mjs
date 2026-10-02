@@ -295,9 +295,9 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     await writeFile(resolve(workflow.runDir, "artifacts/recap-macro-data.json"), JSON.stringify(f.macroData));
     workflow.assertResearchCapacity = async () => {};
     const contexts = [];
-    workflow.researchAnomaly = async anomaly => {
+    workflow.researchPrimaryRole = async (anomaly, role) => {
       contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains], macroData: structuredClone(workflow.macroData), sharedEvidence: structuredClone(workflow.recapResearchEvidence), payload: workflow.researchPayload(anomaly) });
-      return [{ anomalyId: anomaly.id, role: "facts", sources: [] }];
+      return { anomalyId: anomaly.id, role, sources: [] };
     };
     await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
     assert.ok(contexts[0].domains.includes("apnews.com"));
@@ -310,6 +310,30 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     contexts.length = 0;
     await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
     assert.deepEqual(contexts, first);
+    // A controlled native failure must not prevent later targets being
+    // researched, or enter attribution/writing even with sufficient sources.
+    const roleCalls = [], failedKey = `${completeRecapPlan(workflow.envelope).anomalies[0].id}-facts`;
+    workflow.verifyEvidence = async () => f.ledger;
+    workflow.researchPrimaryRole = async (anomaly, role) => {
+      const key = `${anomaly.id}-${role}`; roleCalls.push({ key, payload: workflow.researchPayload(anomaly) });
+      if (key === failedKey) {
+        workflow.manifest.failedAgentRuns ??= [];
+        workflow.manifest.failedAgentRuns.push({ key, agentRunId: `controlled-${roleCalls.length}`, queries: [] });
+        workflow.manifest.stages[key] = { status: "failed" };
+        throw new Error("Controlled test failure; no real research was invoked");
+      }
+      return { anomalyId: anomaly.id, role, sources: [] };
+    };
+    workflow.runValidatedAgentStage = async () => { throw new Error("Failed primary research must not enter attribution or writing"); };
+    await assert.rejects(workflow.runCompleteRecap(), /1 个独立角色/);
+    assert.equal(roleCalls.length, 41); assert.equal(new Set(roleCalls.map(call => call.payload.anomaly.target)).size, 20);
+    assert.deepEqual(roleCalls[0].payload, roleCalls.at(-1).payload);
+    assert.equal(Object.values(workflow.manifest.recapResearchRoles).filter(role => role.status === "completed").length, 39);
+    assert.equal(workflow.manifest.recapResearchRoles[failedKey].nativeAttemptCount, 2);
+    assert.match(workflow.manifest.recapResearchRoles[failedKey].error, /Controlled test failure/);
+    roleCalls.length = 0;
+    await assert.rejects(workflow.runCompleteRecap(), /1 个独立角色/);
+    assert.equal(roleCalls.length, 39, "exhausted failures cannot receive a third native attempt on resume");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

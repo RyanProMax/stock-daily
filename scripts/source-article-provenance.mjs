@@ -3,9 +3,9 @@ import { verifiedExternalSourceLabel, verifiedExternalSourceType, verifiedFirstP
 import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
-import { snowflakePressReleaseIdentity, snowflakePressReleaseRecord } from "./snowflake-press-release.mjs";
+import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v4";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v5";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -95,9 +95,10 @@ function agency(value) {
 // version availability or reporting origin. Photo credits, recommended
 // articles, website footers and a generic dateModified are excluded.
 export function sourceArticleProvenance(decodedHtml, source) {
-  if (snowflakePressReleaseIdentity(source)) {
-    const record = snowflakePressReleaseRecord(decodedHtml, source);
-    return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: "issuer:snowflake.com", identified: Boolean(record), basis: record ? "bound_issuer_document" : "origin_unresolved" }, publication: record ? { status: "verified_date", publicationDate: record.publicationDate, timeBasis: "native_announcement_date" } : { status: "unverified_update" } };
+  const nativeIssuer = nativeIssuerReleaseIdentity(source);
+  if (nativeIssuer) {
+    const record = nativeIssuerReleaseRecord(decodedHtml, source);
+    return { version: ARTICLE_PROVENANCE_VERSION, origin: { key: `issuer:${nativeIssuer.issuerDomain}`, identified: Boolean(record), basis: record ? "bound_issuer_document" : "origin_unresolved" }, publication: record ? { status: "verified_date", publicationDate: record.publicationDate, timeBasis: "native_announcement_date" } : { status: "unverified_update" } };
   }
   if (mofDocumentIdentity(source)) {
     const record = mofDocumentRecord(decodedHtml, source);

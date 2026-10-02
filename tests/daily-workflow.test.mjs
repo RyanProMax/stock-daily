@@ -70,8 +70,8 @@ test("daily scheduler delegates to isolated ephemeral market agents", async () =
   assert.match(workflow, /definition\.search \? \["--search"\] : \[\]\),\s*"exec"/);
   assert.match(workflow, /"--ignore-user-config"/);
   assert.match(workflow, /"--sandbox",\s*"read-only"/);
-  assert.match(workflow, /role: "facts"/);
-  assert.match(workflow, /role: "causal"/);
+  assert.match(workflow, /facts:\s*\{\s*prompt: "facts-researcher\.md"/);
+  assert.match(workflow, /causal:\s*\{\s*prompt: "causal-researcher\.md"/);
   assert.match(workflow, /role: "reviewer"/);
   assert.match(workflow, /randomUUID\(\)/);
   assert.match(workflow, /Promise\.all\(\[/);

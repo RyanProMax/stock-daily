@@ -145,11 +145,11 @@ test("the CN workflow seeds verified policy facts and complete conditions, then 
     await writeFile(resolve(workflow.runDir, "artifacts/social-ledger.json"), JSON.stringify(f.social));
     await writeFile(resolve(workflow.runDir, "artifacts/recap-trading-data.json"), JSON.stringify(f.tradingData));
     workflow.assertResearchCapacity = async () => {};
-    const contexts = []; workflow.researchAnomaly = async anomaly => { contexts.push(workflow.researchPayload(anomaly)); return [{ anomalyId: anomaly.id, role: "facts", sources: [], alternatives: [] }]; };
+    const contexts = []; workflow.researchPrimaryRole = async (anomaly, role) => { contexts.push(workflow.researchPayload(anomaly)); return { anomalyId: anomaly.id, role, sources: [], alternatives: [] }; };
     for (let i = 0; i < 2; i++) {
       contexts.length = 0;
       await assert.rejects(() => workflow.runCompleteRecap(), /0\/20/);
-      assert.ok(contexts.length >= 20); assert.equal(new Set(contexts.slice(0, 20).map(item => item.anomaly.target)).size, 20); assert.equal(collections, 1);
+      assert.ok(contexts.length >= 20); assert.equal(new Set(contexts.map(item => item.anomaly.target)).size, 20); assert.equal(collections, 1);
       assert.equal(contexts[0].primaryPolicyContext.articles[0].fullOwnedBody, body);
       assert.equal(contexts[0].sharedEvidence.length, 1); assert.equal(contexts[0].sharedEvidence[0].scope, "event_only"); assert.equal(contexts[0].sharedEvidence[0].causalConnection, false);
       assert.equal(workflow.manifest.pbocNewsHash, stableHash(book));
