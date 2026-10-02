@@ -25,8 +25,8 @@ import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-ev
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v73";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v6";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v74";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v7";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1102,7 +1102,7 @@ function verifiedSourceTime(source, envelope, candidates, dateCandidates = [], s
 const FACT_NUMBER_MENTION =
   /(?<outerSign>[+-]?)(?:(?<prefix>US\$|\$|USD|US dollars?|¥|CNY|RMB|人民币)\s*)?(?<number>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?<suffix>percentage points?|ppts?\b|pp\b|-?percent|-?basis[ -]points?|bps?|billion(?:\s+(?:US\s+)?dollars?)?|million(?:\s+(?:US\s+)?dollars?)?|thousand(?:\s+(?:US\s+)?dollars?)?|[BMK](?![a-z])|US dollars?\b|USD\b|%|％|个百分点|百分点|个基点|基点|亿美元|万美元|美元|亿元|亿人民币|百万元|万元|人民币|元)?/giu;
 const POSITIVE_DIRECTION =
-  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|raising|up)\b/giu;
+  /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climb(?:ed|s|ing)?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|raising|up)\b/giu;
 const NEGATIVE_DIRECTION =
   /下跌|下降|下行|回落|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|eased|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower(?:s|ed|ing)?|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
@@ -1141,7 +1141,7 @@ function nearestDirection(value, start, end, rawNumber) {
   // In "down from ... +5.0%", +5.0 is still a positive GDP level; "down"
   // describes the revision to the new estimate, not a negative baseline.
   const preceding = value.slice(Math.max(0, start - 100), start);
-  if (/\b(?:up|down|rose|fell|increased|decreased|declined|dropped|climbed)\s+from\s+(?:(?:the|prior|previous|earlier)\s+)*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s+)?(?:(?:read|reading|estimate|level)\s+of\s+)?$/iu.test(preceding) || /\bfrom\s*$/iu.test(preceding) || /(?:从|由)\s*$/u.test(preceding) || /(?:低于|高于)(?:(?:此前|先前|之前|上次|前次|上一期)(?:的)?|\d{1,2}月\d{1,2}日)(?:的)?\s*$/u.test(preceding)) return null;
+  if (/\b(?:up|down|rose|fell|increased|decreased|declined|dropped|climbed)\s+from\s+(?:(?:the|prior|previous|earlier)\s+)*(?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s+)?(?:(?:read|reading|estimate|level)\s+of\s+)?$/iu.test(preceding) || /\bfrom\s*$/iu.test(preceding) || /(?:从|由)(?:(?:当日|当天|本日)?(?:早些时候|盘中|此前|之前|先前)(?:的)?)?\s*$/u.test(preceding) || /(?:低于|高于)(?:(?:此前|先前|之前|上次|前次|上一期)(?:的)?|\d{1,2}月\d{1,2}日)(?:的)?\s*$/u.test(preceding)) return null;
   if (rawNumber.startsWith("+")) return "positive";
   if (rawNumber.startsWith("-")) return "negative";
   // In a quoted (signed bp change, yield level) pair, the sign belongs to

@@ -4,6 +4,36 @@ import { assertFactsNumbersInExcerpt, assertNumbersGrounded, bodySupportsDetermi
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 
+test("the actual climbing intraday high cannot borrow the later yield retreat's direction", () => {
+  const supportingExcerpt = "The S&P 500 (^GSPC) gained 0.2% while the tech-heavy Nasdaq Composite (^IXIC) eked out a gain. The 10-year Treasury yield (^TNX) eased to 5.24% after climbing earlier Thursday to 5.3%, a new multidecade high. The bond market just suffered its worst quarter in decades.";
+  for (const facts of [
+    "标普500上涨0.2%；10年期美国国债收益率在盘中升至5.3%后回落至5.24%。",
+    "The 10-year Treasury yield eased to 5.24% after climbing earlier Thursday to 5.3%.",
+    "10年期美国国债收益率升至5.3%。",
+    "10年期美国国债收益率回落至5.24%。",
+    "10年期美国国债收益率从当日早些时候的5.30%回落至5.24%。",
+  ]) assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts, supportingExcerpt}));
+  for (const facts of [
+    "10年期美国国债收益率回落至5.3%。",
+    "The 10-year Treasury yield fell to 5.3%.",
+    "10年期美国国债收益率上升至5.24%。",
+    "The 10-year Treasury yield rose to 5.24%.",
+    "10年期美国国债收益率升至5.3个基点。",
+  ]) assert.throws(() => assertFactsNumbersInExcerpt({facts, supportingExcerpt}), /数字/);
+});
+
+test("a cached pre-fix climbing claim is reopened and its reversed direction is rejected", async () => {
+  const f = recapFixture("US"), anomaly = f.plan.anomalies[0];
+  const source = {originalUrl: "https://www.reuters.com/markets/us/example-close", title: "US market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "The S&P 500 recovered as Treasury yields eased to 5.24% after climbing earlier Friday to 5.3%, with competing pressures limiting the advance.", facts: "报道指出，10年期美国国债收益率回落至5.3%。", causalConnection: false, comparisons: []};
+  const candidateHash = stableHash(source);
+  const verifiedCache = new Map([[candidateHash, {...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: "verified-number-direction-v6"}]]);
+  let reads = 0;
+  const result = await verifyResearchSources([{sources: [source], alternatives: []}], f.envelope, {verifiedCache, reader: async () => {reads++; return {finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt]};}});
+  assert.equal(reads, 1);
+  assert.equal(result.sources.length, 0);
+  assert.match(result.rejected[0].reason, /5\.3%/);
+});
+
 test("the actual GDPNow post's compact quarter and signed baseline support faithful bilingual paraphrases", () => {
   const original = "Big drop in latest 3Q2026 real GDP estimate from @AtlantaFed GDPNow model … +3.7%, down from prior September 25 read of +5.0% https://t.co/nTCgjFirQH";
   const official = "The GDPNow model estimate for real GDP growth (seasonally adjusted annual rate) in the third quarter of 2026 is 3.7 percent on September 30, down from 5.0 percent on September 25.";
