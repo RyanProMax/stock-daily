@@ -73,6 +73,7 @@ import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, 
 import { planRecapResearchRepair } from "./recap-research-repair.mjs";
 import { recapEvidenceTiming } from "./evidence-timing.mjs";
 import { beginNativeAgentAttempt, finishNativeAgentAttempt, auditNativeAgentAttempt, nativeSearchQueries as looseSearchQueries } from "./native-agent-receipts.mjs";
+import { marketSessionQueryConsumption } from "./market-session-query-budget.mjs";
 import { workflowImplementationSnapshot, assertWorkflowImplementation } from "./workflow-implementation.mjs";
 const LOADED_IMPLEMENTATION = (async () => {
   const snapshot = await workflowImplementationSnapshot();
@@ -981,6 +982,42 @@ export class MarketWorkflow {
     this.manifestPath = resolve(this.runDir, "manifest.json");
   }
 
+  async assertSessionSearchBudget(queryCount = 2, { reserve = false } = {}) {
+    const projectWork = resolve(PROJECT_DIR, "work");
+    const root = resolve(this.workRoot);
+    const budgetRoot = root === projectWork || root.startsWith(`${projectWork}/`)
+      ? projectWork
+      : root;
+    const budget = await marketSessionQueryConsumption(budgetRoot, {
+      market: this.market,
+      marketAsOf: this.envelope.marketAsOf,
+    });
+    if (this.manifest) {
+      this.manifest.sessionSearchBudget = budget;
+      await this.saveManifest();
+    }
+    // Completed calls can arrive while the history scan awaits I/O. Replace
+    // this run's scanned consumption with its current counter, then check and
+    // reserve synchronously so parallel calls cannot spend the same remainder.
+    const currentIdentities = new Set([
+      ...(this.manifest?.agentRuns ?? []),
+      ...(this.manifest?.failedAgentRuns ?? []),
+    ].map((record) => record.receiptArtifact || record.invocationArtifact || record.eventStreamArtifact
+      ? `agent:${record.agentRunId}`
+      : `legacy:${record.eventHash}`));
+    const currentScannedCount = budget.chargedAttempts
+      .filter((attempt) => currentIdentities.has(attempt.identity))
+      .reduce((sum, attempt) => sum + attempt.searchCount, 0);
+    const consumed = budget.knownQueryCount - currentScannedCount + this.searchQueryCount;
+    if (
+      budget.unverifiedAttempts.length > 0 ||
+      consumed + this.reservedSearchQueryCount + queryCount > this.searchQueryLimit
+    ) {
+      throw new Error("本交易日资料核查已达停止条件，复盘尚未通过验收；不能通过更换检查时点或版本重复研究");
+    }
+    if (reserve) this.reservedSearchQueryCount += queryCount;
+  }
+
   async bindInputSnapshot() {
     const inputSnapshotPath = resolve(
       this.runDir,
@@ -1061,6 +1098,7 @@ export class MarketWorkflow {
     this.excludedSources = availability.urls;
     this.researchSourceDomains = publishableExternalSourceDomains().filter((domain) => !availability.unavailableDomains.includes(domain));
     await this.selectNoClaimRetryAttempt();
+    if (!(await exists(this.manifestPath))) await this.assertSessionSearchBudget();
     await mkdir(resolve(this.runDir, "artifacts"), { recursive: true });
     await mkdir(resolve(this.runDir, "events"), { recursive: true });
     await mkdir(AGENT_SANDBOX_ROOT, { recursive: true });
@@ -1634,12 +1672,9 @@ export class MarketWorkflow {
     const eventsAliasPath = resolve(this.runDir, "events", `${key}.jsonl`);
     const checkpoint = await this.readAgentCheckpoint({ key, promptHash, schemaHash });
     if (checkpoint) return checkpoint;
-    if (definition.search && this.searchQueryCount + this.reservedSearchQueryCount + 2 > this.searchQueryLimit) {
-      throw new Error("单市场搜索预算不足以启动新的两条查询");
-    }
     // Reserve after checking the real checkpoint fingerprint, not just its
     // completed flag: changed prompts or tampered files require fresh searches.
-    if (definition.search) this.reservedSearchQueryCount += 2;
+    if (definition.search) await this.assertSessionSearchBudget(2, { reserve: true });
     try {
       if (definition.search) await this.startResearchBudget();
       const remaining = definition.search

@@ -40,6 +40,7 @@ import {
   verifyResearchSources,
 } from "../scripts/daily-workflow-core.mjs";
 import { fixtureInput, fixtureReport } from "./daily-v10-fixture.mjs";
+import { marketSessionQueryConsumption } from "../scripts/market-session-query-budget.mjs";
 import { validateReport } from "../scripts/daily-publish.mjs";
 import {
   MarketWorkflow,
@@ -2929,14 +2930,14 @@ test("query checkpoint recovery verifies artifacts and preserves consumed search
   assert.equal((await workflow.runAgent(invocation)).resumed, true);
   workflow.manifest.stages[key].promptHash = "obsolete-prompt";
   workflow.searchQueryCount = 11;
-  await assert.rejects(workflow.runAgent(invocation), /搜索预算不足/);
+  await assert.rejects(workflow.runAgent(invocation), /本交易日资料核查已达停止条件/);
   workflow.searchQueryCount = 10;
   workflow.reservedSearchQueryCount = 2;
-  await assert.rejects(workflow.runAgent(invocation), /搜索预算不足/);
+  await assert.rejects(workflow.runAgent(invocation), /本交易日资料核查已达停止条件/);
   assert.equal(workflow.reservedSearchQueryCount, 2);
   workflow.reservedSearchQueryCount = 0;
   workflow.searchQueryCount = 8;
-  await assert.rejects(workflow.runAgent(invocation), /二十分钟预算/u);
+  await assert.rejects(workflow.runAgent(invocation), /本交易日资料核查已达停止条件/u);
   assert.equal(workflow.reservedSearchQueryCount, 0);
   workflow.searchQueryCount = 12;
   for (const changed of ["output", "events", "prompt", "seed", "other-error"]) {
@@ -3006,8 +3007,9 @@ test("no-claims completion replaces the canonical adjudication artifact", async 
   });
 });
 
-test("a terminal no-claim run starts a fresh isolated research attempt", async () => {
+test("a terminal no-claim run can retry within its remaining session budget", async (t) => {
   const workRoot = await mkdtemp(resolve(tmpdir(), "stock-daily-no-claim-retry-"));
+  t.after(() => rm(workRoot, { recursive: true, force: true }));
   const firstInput = fixtureInput();
   const first = new MarketWorkflow({
     input: firstInput,
@@ -3023,7 +3025,10 @@ test("a terminal no-claim run starts a fresh isolated research attempt", async (
   first.manifest.stages = {
     "old-facts": { status: "completed", role: "facts" },
   };
-  first.manifest.agentRuns = [{ agentRunId: "old-facts", role: "facts" }];
+  const originalEvents = JSON.stringify({ type: "item.completed", item: { type: "web_search", action: { type: "search", query: "paid prior research" } } }) + "\n" + JSON.stringify({ type: "turn.completed" });
+  await writeFile(resolve(first.runDir, "events/old-facts.jsonl"), originalEvents);
+  first.manifest.agentRuns = [{ key: "old-facts", role: "facts", eventArtifact: "events/old-facts.jsonl", eventHash: stableHash(originalEvents), searchCount: 1, queries: ["paid prior research"] }];
+  first.manifest.searchQueryCount = 1;
   await writeFile(
     first.manifestPath,
     `${JSON.stringify(first.manifest, null, 2)}\n`,
@@ -3046,13 +3051,16 @@ test("a terminal no-claim run starts a fresh isolated research attempt", async (
   assert.deepEqual(retry.manifest.stages, {});
   assert.deepEqual(retry.manifest.agentRuns, []);
   assert.equal(retry.manifest.batchRunId, retryInput.runId);
+  const consumption = await marketSessionQueryConsumption(workRoot, { market: "US", marketAsOf: retry.envelope.marketAsOf });
+  assert.equal(consumption.knownQueryCount, 1);
+  assert.equal(consumption.unverifiedAttempts.length, 0);
   assert.equal(
     JSON.parse(await readFile(retry.manifest.inputPath, "utf8")).runId,
     retryInput.runId,
   );
 });
 
-test("an exhausted failed research attempt is retained while the next trigger starts fresh", async () => {
+test("an exhausted failed research attempt cannot get fresh session budget on the next trigger", async () => {
   const workRoot = await mkdtemp(resolve(tmpdir(), "stock-daily-exhausted-retry-"));
   try {
     const options = { input: fixtureInput(), market: "US", deliveryMode: "shadow", workRoot };
@@ -3060,20 +3068,26 @@ test("an exhausted failed research attempt is retained while the next trigger st
     await first.initialize();
     first.manifest.status = "failed";
     first.manifest.lastError = "剩余搜索预算不足以恢复全部待完成的并行研究";
-    first.manifest.searchQueryCount = 10;
+    const queries = Array.from({ length: first.searchQueryLimit }, (_, index) => `already executed ${index}`);
+    const originalEvents = [...queries.map(query => JSON.stringify({ type: "item.completed", item: { type: "web_search", action: { type: "search", query } } })), JSON.stringify({ type: "turn.failed" })].join("\n");
+    await writeFile(resolve(first.runDir, "events/failed-research.jsonl"), originalEvents);
+    first.manifest.failedAgentRuns = [{ key: "failed-research", eventArtifact: "events/failed-research.jsonl", eventHash: stableHash(originalEvents), searchCount: queries.length, queries }];
+    first.manifest.searchQueryCount = queries.length;
     first.manifest.workflowElapsedMs = 720_000;
     await writeFile(first.manifestPath, JSON.stringify(first.manifest));
     const retry = new MarketWorkflow(options);
-    await retry.initialize();
+    await assert.rejects(retry.initialize(), /本交易日资料核查已达停止条件/u);
     assert.notEqual(retry.runKey, first.runKey);
     assert.equal(retry.searchQueryCount, 0);
-    assert.deepEqual(retry.manifest.stages, {});
+    assert.equal(retry.manifest, null);
     const retained = JSON.parse(await readFile(first.manifestPath));
     assert.equal(retained.status, "failed");
     assert.equal(retained.workflowElapsedMs, 720_000);
-    const interruptedRetry = new MarketWorkflow(options);
-    await interruptedRetry.initialize();
-    assert.equal(interruptedRetry.runKey, retry.runKey);
+    const nextTrigger = new MarketWorkflow(options);
+    await assert.rejects(nextTrigger.initialize(), /本交易日资料核查已达停止条件/u);
+    const consumption = await marketSessionQueryConsumption(workRoot, { market: "US", marketAsOf: first.envelope.marketAsOf });
+    assert.equal(consumption.knownQueryCount, first.searchQueryLimit);
+    assert.equal(consumption.unverifiedAttempts.length, 0);
   } finally { await rm(workRoot, { recursive: true, force: true }); }
 });
 
