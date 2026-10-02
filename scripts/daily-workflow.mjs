@@ -2042,7 +2042,7 @@ export class MarketWorkflow {
   async verifyEvidence(researchOutputs) {
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v42",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v43",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -3008,7 +3008,7 @@ export class MarketWorkflow {
     const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage: compactRecapCoverage(coverage) }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
     let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;
     if (attributor) await atomicJson(resolve(this.runDir, "artifacts/recap-attribution-before-research-repair.json"), attributor.output);
-    const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null });
+    const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null, evidenceContext: { tradingData, macroData } });
     if (repair.researched) {
       ledger = repair.ledger;
       coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
@@ -3042,7 +3042,7 @@ export class MarketWorkflow {
     return recap;
   }
 
-  async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution }) {
+  async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution, evidenceContext = {} }) {
     const inputHash = stableHash({ plan, ledger, coverage, attribution });
     const planName = `recap-research-repair-plan-${inputHash.slice(0, 12)}.json`;
     const planPath = resolve(this.runDir, "artifacts", planName);
@@ -3086,11 +3086,28 @@ export class MarketWorkflow {
     // Complete pairs remain isolated and all started siblings must settle. The
     // preserved plan/context reproduce the same payloads on resume, while the
     // exact checkpoint fingerprints decide whether fresh queries are needed.
-    const repaired = await settleAgentResults(repairPlan.jobs.map(job => this.researchAnomaly(anomalies.get(job.anomalyId), job.feedback)));
-    outputs.push(...repaired.flat());
+    const failures = [];
+    for (let index = 0; index < repairPlan.jobs.length; index += 2) {
+      const batch = repairPlan.jobs.slice(index, index + 2);
+      const results = await Promise.allSettled(batch.map(job => this.researchAnomaly(anomalies.get(job.anomalyId), job.feedback)));
+      for (let offset = 0; offset < results.length; offset++) {
+        const result = results[offset];
+        if (result.status === "fulfilled") outputs.push(...result.value);
+        else failures.push({ target: batch[offset].target, reason: result.reason?.message ?? String(result.reason) });
+      }
+    }
     const combined = await this.verifyEvidence(outputs);
-    this.manifest.recapResearchRepair = { planHash: stableHash(repairPlan), contextHash: stableHash(context), targets: repairPlan.jobs.map(job => job.target), ledgerHash: stableHash(combined), searchQueryCount: this.searchQueryCount, status: "researched" };
+    this.manifest.recapResearchRepair = { planHash: stableHash(repairPlan), contextHash: stableHash(context), targets: repairPlan.jobs.map(job => job.target), ledgerHash: stableHash(combined), searchQueryCount: this.searchQueryCount, status: failures.length ? "incomplete" : "researched", ...(failures.length ? { failures } : {}) };
     await this.saveManifest();
+    if (failures.length) {
+      await atomicJson(resolve(this.runDir, "artifacts/recap-ledger.json"), combined);
+      const failedCoverage = assessRecapEvidenceCoverage(this.envelope, combined, evidenceContext);
+      await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), failedCoverage);
+      this.manifest.recapLedgerHash = stableHash(combined);
+      this.manifest.recapCoverage = failedCoverage;
+      await this.saveManifest();
+      throw new Error(`复盘补证未完成：${failures.length} 个目标失败；其余已完成研究及查询消耗已保留`);
+    }
     return { researched: true, ledger: combined };
   }
 }

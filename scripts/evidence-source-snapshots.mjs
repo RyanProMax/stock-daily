@@ -19,6 +19,7 @@ import { chinaPmiDocument, chinaPmiSurveyDefinition } from "./china-pmi-release.
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
+import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
 import { verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions } from "./company-outlook.mjs";
 
@@ -184,6 +185,8 @@ export function auditLedgerSourceSnapshots(ledger, book, { envelope = null, macr
     const issuerRecord = nativeIssuerReleaseIdentity(source.url) ? nativeIssuerReleaseRecord(decodeSourceBody(original.rawBody, original.contentType), source.url) : null;
     if (source.issuerDocumentVersion !== (issuerRecord?.version)) throw new Error("公司公告原生核验版本未由冻结原文重建");
     if (issuerRecord && (source.issuerTitleChecked !== true || source.title !== issuerRecord.title || source.publishedAt !== issuerRecord.publicationDate || source.timePrecision !== "date" || !source.timingLimitation || source.initialPublishedAt)) throw new Error("公司公告标题、发布日期或未知盘中时点未由原始正文重建");
+    const yahooRecord = yahooLiveArticleIdentity(source.url) ? yahooLiveArticleRecord(decodeSourceBody(original.rawBody, original.contentType), source.url) : null;
+    if (source.publisherDocumentVersion !== yahooRecord?.version || (yahooRecord && (source.publisherTitleChecked !== true || source.title !== yahooRecord.title || source.timePrecision !== "instant"))) throw new Error("财经直播文章身份、标题及核验版本未由冻结原文重建");
     if (envelope) assertSessionClosingClaims(original.text, envelope, source.publishedAt);
     const quote = normalizedEvidenceText(source.supportingExcerpt);
     const body = normalizedEvidenceText(original.text);

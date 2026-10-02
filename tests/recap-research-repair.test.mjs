@@ -163,3 +163,44 @@ test("a changed repair payload cannot reuse completed flags to overspend the cum
     assert.equal(workflow.searchQueryCount, 92);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("three repair targets keep at most four isolated native roles active", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-recap-repair-concurrency-"));
+  try {
+    const f = fixture(), calls = [];
+    const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root });
+    await workflow.initialize(); mockResearchProcesses(workflow, calls);
+    const run = workflow.runAgent;
+    let active = 0, peak = 0;
+    workflow.runAgent = async input => {
+      active++; peak = Math.max(peak, active);
+      try { await new Promise(resolve => setTimeout(resolve, 10)); return await run(input); }
+      finally { active--; }
+    };
+    workflow.searchQueryCount = 80; workflow.verifyEvidence = async () => f.ledger;
+    await workflow.repairCompleteRecapResearch({ plan: f.plan, outputs: [], ledger: f.ledger, coverage: f.coverage, attribution: f.attribution });
+    assert.equal(calls.length, 6); assert.equal(peak, 4); assert.equal(active, 0); assert.equal(workflow.searchQueryCount, 92);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a failed repair target does not skip later targets or discard their verified ledger and coverage", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-recap-repair-partial-"));
+  try {
+    const f = fixture(), calls = [];
+    const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root });
+    await workflow.initialize(); mockResearchProcesses(workflow, calls);
+    const plan = planRecapResearchRepair(f.plan, f.ledger, f.coverage, f.attribution, { remainingQueries: 12 });
+    const failed = plan.jobs[1].target, research = workflow.researchAnomaly.bind(workflow), targets = [];
+    workflow.researchAnomaly = async (anomaly, feedback) => { targets.push(anomaly.target); if (anomaly.target === failed) throw new Error("Controlled unavailable worker"); return research(anomaly, feedback); };
+    workflow.searchQueryCount = 80;
+    workflow.verifyEvidence = async outputs => { assert.equal(outputs.length, 4); return f.ledger; };
+    await assert.rejects(() => workflow.repairCompleteRecapResearch({ plan: f.plan, outputs: [], ledger: f.ledger, coverage: f.coverage, attribution: f.attribution }), /补证未完成/);
+    assert.deepEqual(targets, plan.jobs.map(job => job.target)); assert.equal(calls.length, 4); assert.equal(workflow.searchQueryCount, 88);
+    assert.equal(workflow.manifest.recapResearchRepair.status, "incomplete");
+    assert.deepEqual(workflow.manifest.recapResearchRepair.failures, [{ target: failed, reason: "Controlled unavailable worker" }]);
+    const ledger = JSON.parse(await readFile(resolve(workflow.runDir, "artifacts/recap-ledger.json"), "utf8"));
+    const coverage = JSON.parse(await readFile(resolve(workflow.runDir, "artifacts/recap-coverage.json"), "utf8"));
+    assert.equal(stableHash(ledger), workflow.manifest.recapLedgerHash);
+    assert.deepEqual(coverage, workflow.manifest.recapCoverage); assert.deepEqual(ledger, f.ledger);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

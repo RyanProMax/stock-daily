@@ -47,6 +47,26 @@ test("daily range, opening gap and volume use original bars and exclude the curr
   assert.equal(result.intradayRangeDisplay, "3.01%");
 });
 
+test("a missing daily close uses only the bound regular-session closing quote and is rebuilt from unchanged original bytes", () => {
+  const f = fixture(), r = f.snapshot.payload.chart.result[0];
+  r.meta = { ...r.meta, instrumentType: "EQUITY", exchangeTimezoneName: "America/New_York", regularMarketPrice: 101, regularMarketTime: Date.parse("2026-08-21T20:00:01Z") / 1000, currentTradingPeriod: { regular: { start: r.timestamp.at(-1), end: Date.parse("2026-08-21T20:00:00Z") / 1000 } } };
+  r.indicators.quote[0].close[23] = null;
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  const before = structuredClone(f.snapshot), bar = parseTradingSnapshot(f.snapshot, f.request, f.envelope);
+  assert.equal(bar.close, 101); assert.equal(bar.closingReturn, 1); assert.equal(bar.intradayRange, 3.01); assert.equal(bar.volumeVsPrior20Median, 2);
+  assert.equal(bar.closingQuote.basis, "identified_regular_session_closing_quote");
+  assert.equal(bar.closingQuote.quoteTime, "2026-08-21T20:00:01.000Z");
+  assert.match(bar.returnBasis, /regular-session closing quote/);
+  assert.deepEqual(f.snapshot, before);
+  r.meta.regularMarketTime = Date.parse("2026-08-21T19:59:59Z") / 1000;
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  assert.throws(() => parseTradingSnapshot(f.snapshot, f.request, f.envelope), /缺失价格/);
+  r.meta.regularMarketTime = Date.parse("2026-08-21T20:00:01Z") / 1000;
+  r.indicators.quote[0].close[22] = null;
+  f.snapshot.payloadHash = stableHash(f.snapshot.payload);
+  assert.throws(() => parseTradingSnapshot(f.snapshot, f.request, f.envelope), /缺失价格/);
+});
+
 test("future bars cannot enter the session or its volume baseline", () => {
   const f = fixture(), result = f.snapshot.payload.chart.result[0];
   result.timestamp.push(Date.parse("2026-08-24T13:30:00Z") / 1000);

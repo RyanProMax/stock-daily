@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { stableHash } from "./daily-workflow-core.mjs";
+import { yahooClosingQuote } from "./yahoo-closing-quote.mjs";
 
 const execFileAsync = promisify(execFile);
 const DAY = 86_400_000;
@@ -59,17 +60,19 @@ export function tradingRequests(envelope) {
 export function parseTradingSnapshot(snapshot, request, envelope) {
   const url = new URL(snapshot.url);
   if (url.protocol !== "https:" || !Number.isFinite(Date.parse(snapshot.fetchedAt)) || Date.parse(snapshot.fetchedAt) < Date.parse(envelope.session.windowEnd) || snapshot.payloadHash !== stableHash(snapshot.payload)) throw new Error(request.symbol + " 行情原文与来源不匹配或尚未收盘");
-  let inputRows, source, sourceLabel, currency = null, yahooResult = null;
+  let inputRows, source, sourceLabel, currency = null, yahooResult = null, closingQuote = null;
   if (["query1.finance.yahoo.com", "query2.finance.yahoo.com"].includes(url.hostname) && decodeURIComponent(url.pathname) === "/v8/finance/chart/" + request.quoteSymbol && url.searchParams.get("interval") === "1d") {
     const result = snapshot.payload?.chart?.result?.[0];
     if (result?.meta?.symbol !== request.quoteSymbol) throw new Error(request.symbol + " 返回标的不一致");
     const quote = result.indicators?.quote?.[0];
     yahooResult = result;
+    closingQuote = yahooClosingQuote(result, request.quoteSymbol, { cutoffTime: Date.parse(envelope.session.wrapDeadline), fetchedAt: Date.parse(snapshot.fetchedAt), expectedDate: envelope.marketAsOf });
+    if (closingQuote && result.meta.exchangeTimezoneName !== (envelope.market === "CN" ? "Asia/Shanghai" : "America/New_York")) throw new Error(request.symbol + " 收盘报价交易所时区不一致");
     inputRows = (result.timestamp ?? []).map((timestamp, index) => ({
       date: dateInMarket(timestamp * 1000, envelope.market),
-      open: quote?.open?.[index], high: quote?.high?.[index], low: quote?.low?.[index], close: quote?.close?.[index], volume: quote?.volume?.[index],
+      open: quote?.open?.[index], high: quote?.high?.[index], low: quote?.low?.[index], close: closingQuote?.index === index ? closingQuote.close : quote?.close?.[index], volume: quote?.volume?.[index],
     }));
-    source = "https://finance.yahoo.com/quote/" + encodeURIComponent(request.quoteSymbol) + "/history";
+    source = "https://finance.yahoo.com/quote/" + encodeURIComponent(request.quoteSymbol) + "/" + (closingQuote ? "" : "history");
     sourceLabel = "Yahoo Finance";
     currency = result.meta.currency ?? null;
   } else if (envelope.market === "CN" && /^\d{6}$/u.test(request.symbol) && url.hostname === "www.csindex.com.cn" && url.pathname === "/csindex-home/perf/index-perf" && url.searchParams.get("indexCode") === request.symbol) {
@@ -106,7 +109,8 @@ export function parseTradingSnapshot(snapshot, request, envelope) {
     symbol: request.symbol, asOf: latest.date,
     source, sourceLabel, currency,
     sourceHash: snapshot.payloadHash,
-    returnBasis: "Provider quote.close ratio: current close divided by previous-session close minus one. This is distinct from the provider's adjusted-close series and does not establish the exchange's ex-rights reference price, total investor return or economic cause.",
+    returnBasis: `${closingQuote ? "Provider regular-session closing quote divided by the previous-session quote.close" : "Provider quote.close ratio: current close divided by previous-session close"} minus one. This is distinct from the provider's adjusted-close series and does not establish the exchange's ex-rights reference price, total investor return or economic cause.`,
+    ...(closingQuote ? { closingQuote } : {}),
     ...(yahooResult ? { adjustmentReview: providerAdjustmentReview(yahooResult, url, request, envelope, rows) } : {}),
     verifiedAt: snapshot.fetchedAt,
     previousClose: previous.close, open: latest.open, high: latest.high, low: latest.low, close: latest.close,

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readExternalSource, normalizedEvidenceText, decodeSourceBody } from "./daily-source-audit.mjs";
+import { readExternalSource, normalizedEvidenceText, decodeSourceBody, sourceBodyText } from "./daily-source-audit.mjs";
 import { marketAsOfFromInput, marketAsOfFromReport } from "./daily-policy.mjs";
 import {
   verifiedExternalSourceLabel,
@@ -20,11 +20,12 @@ import { MOF_DOCUMENT_VERSION, mofDocumentIdentity, mofDocumentRecord } from "./
 import { PBOC_DOCUMENT_VERSION, pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
 import { sourceArticleProvenance } from "./source-article-provenance.mjs";
+import { YAHOO_LIVE_ARTICLE_VERSION, yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
 import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-evidence.mjs";
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v67";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v68";
 export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v4";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
@@ -1525,12 +1526,13 @@ export async function verifyResearchSources(
         const cachedPbocValid = !pbocDocumentIdentity(candidate.originalUrl) || (cached?.authorityDocumentVersion === PBOC_DOCUMENT_VERSION && cached.authorityTitleChecked === true && cached.timePrecision === "instant" && cached.publishedAt === cached.initialPublishedAt && !cached.timingLimitation);
         const cachedNativeIssuerValid = !nativeIssuerReleaseIdentity(candidate.originalUrl) || (cached?.issuerDocumentVersion === nativeIssuerReleaseIdentity(candidate.originalUrl).version && cached.issuerTitleChecked === true && cached.timePrecision === "date" && isCalendarDate(cached.publishedAt) && Boolean(cached.timingLimitation) && !cached.initialPublishedAt);
         const cachedOutlookValid = !(candidate.role === "facts" && candidate.scope === "company" && verifiedExternalSourceType(candidate.originalUrl) === "first_party") || cached?.scope !== "company" || cached?.companyOutlookEvidenceVersion === COMPANY_OUTLOOK_VERSION;
-        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cachedPbocValid && cachedNativeIssuerValid && cachedOutlookValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
+        const cachedYahooValid = !yahooLiveArticleIdentity(candidate.originalUrl) || (cached?.publisherDocumentVersion === YAHOO_LIVE_ARTICLE_VERSION && cached.publisherTitleChecked === true && cached.timePrecision === "instant");
+        if (cachedPdfIssuerValid && cachedPmiValid && cachedMofValid && cachedPbocValid && cachedNativeIssuerValid && cachedOutlookValid && cachedYahooValid && cached?.candidateHash === candidateHash && cached.timingChecked === true && cached.provenanceChecked === true && cached.comparisonNotesChecked === true && cached.numericEvidenceVersion === NUMERIC_EVIDENCE_VERSION && (candidate.kind !== "corporate_action" || isVerifiedCurrentCorporateAction(cached, envelope)) && (!(isGdpNowCommentary(candidate.originalUrl) || isGdpNowCommentary(cached.url)) || (cached.forecastChecked === true && cached.forecastDefinition?.version === GDP_NOW_EVIDENCE_VERSION)) && (candidate.kind !== "background" || (cached.subjectIdentityChecked === true && cached.subjectIdentityVersion === BACKGROUND_EXPOSURE_VERSION)) && (!checkSessionIntegrity || cached.closingIntegrityChecked === true) && (!hasEarningsPerShareComparison(candidate) || cached.earningsContextChecked === true)) {
           results[index] = { verified: structuredClone(cached) };
           continue;
         }
         const backgroundSecDocument = candidate.kind === "background" && new URL(candidate.originalUrl).hostname === "www.sec.gov";
-        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || nativeIssuerReleaseIdentity(candidate.originalUrl) || verifiedFirstPartyIssuerIdentity(candidate.originalUrl)?.domain === "micron.com" ? { includeRaw: true } : {}) });
+        const opened = await reader(candidate.originalUrl, { signal, ...(backgroundSecDocument || pdfUrl ? { maxBytes: 8 * 1024 * 1024, includeRaw: true } : isGdpNowCommentary(candidate.originalUrl) || isChinaPmiArticle(candidate.originalUrl) || mofDocumentIdentity(candidate.originalUrl) || pbocDocumentIdentity(candidate.originalUrl) || nativeIssuerReleaseIdentity(candidate.originalUrl) || yahooLiveArticleIdentity(candidate.originalUrl) || verifiedFirstPartyIssuerIdentity(candidate.originalUrl)?.domain === "micron.com" ? { includeRaw: true } : {}) });
         assertAccessibleOriginalArticle(opened);
         const boundAuthority = mofDocumentIdentity(opened.finalUrl) || pbocDocumentIdentity(opened.finalUrl);
         const boundRecord = boundAuthority && Buffer.isBuffer(opened.rawBody) ? (mofDocumentIdentity(opened.finalUrl) ? mofDocumentRecord : pbocDocumentRecord)(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
@@ -1543,6 +1545,9 @@ export async function verifyResearchSources(
         const corporateAction = verifiedCurrentCorporateAction(candidate, opened, envelope);
         if (candidate.kind === "background" && (candidate.role !== "facts" || sourceType !== "first_party" || candidate.comparisons.length || candidate.causalConnection)) throw new Error("背景来源与一手披露职责不一致");
         const publication = opened.articleProvenance?.publication;
+        const yahooIdentity = yahooLiveArticleIdentity(candidate.originalUrl) || yahooLiveArticleIdentity(opened.finalUrl);
+        const yahooRecord = yahooIdentity && Buffer.isBuffer(opened.rawBody) ? yahooLiveArticleRecord(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl) : null;
+        if (yahooIdentity && (!yahooRecord || yahooRecord.canonical !== yahooIdentity.canonical || stableHash(opened.text) !== stableHash(sourceBodyText(opened.rawBody, opened.contentType)) || stableHash(opened.articleProvenance) !== stableHash(sourceArticleProvenance(decodeSourceBody(opened.rawBody, opened.contentType), opened.finalUrl)))) throw new Error("财经直播文章标题、正文及当前版本未由原始字节绑定");
         if (issuerRecord && (opened.publishedAtCandidates?.length || stableHash(opened.publishedDateCandidates) !== stableHash(issuerRecord.publishedDateCandidates) || publication?.status !== "verified_date" || publication.publicationDate !== issuerRecord.publicationDate || publication.timeBasis !== "native_announcement_date" || opened.articleProvenance?.origin?.key !== `issuer:${issuerRecord.issuerDomain}` || opened.articleProvenance.origin.identified !== true)) throw new Error("公司公告证据发行主体或发布日期与原始正文记录不一致");
         if (boundRecord && (stableHash(opened.publishedAtCandidates) !== stableHash(boundRecord.publishedAtCandidates) || stableHash(opened.publishedDateCandidates) !== stableHash(boundRecord.publishedDateCandidates) || publication?.status !== "verified" || publication.initialPublishedAt !== boundRecord.publishedAtCandidates[0] || publication.currentVersionAt !== boundRecord.publishedAtCandidates[0] || publication.timeBasis !== "first_publication" || opened.articleProvenance?.origin?.key !== (boundRecord.version === MOF_DOCUMENT_VERSION ? "authority:mof.gov.cn" : "authority:pbc.gov.cn") || opened.articleProvenance.origin.identified !== true)) throw new Error("权威公告证据时间或来源与原始正文记录不一致");
         if (publication?.status === "unverified_update") throw new Error("文章当前版本更新时间无法核验");
@@ -1564,7 +1569,7 @@ export async function verifyResearchSources(
         const closingChecks = checkSessionIntegrity ? assertSessionClosingClaims(opened.text, envelope, publishedAt) : [];
         let normalizedCandidate = {
           ...candidate,
-          title: readerText(boundRecord?.title ?? issuerRecord?.title ?? candidate.title, "verified source title", 4, 220),
+          title: readerText(boundRecord?.title ?? issuerRecord?.title ?? yahooRecord?.title ?? candidate.title, "verified source title", 4, 220),
           facts: readerText(candidate.facts, "verified source facts", 20, 1_600),
           publishedAt,
           kind: normalizedSourceKind(
@@ -1655,6 +1660,7 @@ export async function verifyResearchSources(
             reportingOrigin: opened.articleProvenance?.origin ?? null,
             ...(boundRecord ? { authorityDocumentVersion: boundRecord.version, authorityTitleChecked: true } : {}),
             ...(issuerRecord ? { issuerDocumentVersion: issuerRecord.version, issuerTitleChecked: true } : {}),
+            ...(yahooRecord ? { publisherDocumentVersion: yahooRecord.version, publisherTitleChecked: true } : {}),
             ...(publication?.status === "verified" ? { initialPublishedAt: publication.initialPublishedAt, timeBasis: publication.timeBasis } : {}),
             ...(checkSessionIntegrity ? { closingIntegrityChecked: true, closingChecks } : {}),
             ...(backgroundSubjects ? { backgroundSubjects, subjectIdentityChecked: true, subjectIdentityVersion: BACKGROUND_EXPOSURE_VERSION, useLimitation: "Background exposure/mechanism only; not a current-session event, price reaction, or proven catalyst." } : {}),

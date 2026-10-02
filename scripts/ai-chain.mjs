@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { yahooClosingQuote } from "./yahoo-closing-quote.mjs";
 
 const execFileAsync = promisify(execFile);
 const quoteCache = new Map();
@@ -171,7 +172,24 @@ async function fetchJson(url) {
   return JSON.parse(result.stdout);
 }
 
-async function fetchConstituentUncached([symbol, name, nameEn], cutoffTime) {
+export function yahooEquityConstituent(payload, [symbol, name, nameEn], cutoffTime, fetchedAt = Date.now()) {
+  const result = payload?.chart?.result?.[0];
+  if (result?.meta?.symbol !== symbol) throw new Error("返回标的不一致");
+  const timestamps = result.timestamp ?? [], closes = result.indicators?.quote?.[0]?.close ?? [];
+  if (!Array.isArray(timestamps) || !Array.isArray(closes) || timestamps.length !== closes.length || !timestamps.every(Number.isSafeInteger) || new Set(timestamps).size !== timestamps.length) throw new Error("日线时间与价格记录无效");
+  const closingQuote = yahooClosingQuote(result, symbol, { cutoffTime, fetchedAt });
+  const eligible = timestamps.map((timestamp, index) => ({ timestamp: Number(timestamp) * 1000, index })).filter(point => Number.isFinite(point.timestamp) && point.timestamp <= cutoffTime).sort((a, b) => a.timestamp - b.timestamp);
+  const points = eligible.map(point => ({ timestamp: point.timestamp, close: point.index === closingQuote?.index ? closingQuote.close : closes[point.index] })).filter(point => typeof point.close === "number" && Number.isFinite(point.close) && point.close > 0);
+  if (points.length < 2) throw new Error("fewer than two closes");
+  const previous = points.at(-2), latest = points.at(-1);
+  if (latest.timestamp !== eligible.at(-1)?.timestamp) throw new Error("最新日线缺少已验证收盘价，不能回退旧交易日");
+  if (previous.timestamp !== eligible.at(-2)?.timestamp) throw new Error("前一交易日日线缺少收盘价，不能跳过缺口计算涨跌");
+  const change = ((latest.close - previous.close) / previous.close) * 100;
+  return { symbol, name, nameEn, value: latest.close.toFixed(2), change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`, changeValue: change, direction: directionForChange(change), asOf: new Date(latest.timestamp).toISOString().slice(0, 10), source: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/${closingQuote ? "" : "history"}` };
+}
+
+async function fetchConstituentUncached(constituent, cutoffTime) {
+  const [symbol] = constituent;
   let lastError = "request failed";
   for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     const url = new URL(
@@ -185,37 +203,7 @@ async function fetchConstituentUncached([symbol, name, nameEn], cutoffTime) {
     url.searchParams.set("interval", "1d");
     try {
       const payload = await fetchJson(url);
-      const result = payload?.chart?.result?.[0];
-      const timestamps = result?.timestamp ?? [];
-      const closes = result?.indicators?.quote?.[0]?.close ?? [];
-      const points = timestamps
-        .map((timestamp, index) => ({
-          timestamp: Number(timestamp) * 1_000,
-          close: Number(closes[index]),
-        }))
-        .filter(
-          (point) =>
-            Number.isFinite(point.timestamp) &&
-            Number.isFinite(point.close) &&
-            point.close > 0 &&
-            point.timestamp <= cutoffTime,
-        )
-        .sort((left, right) => left.timestamp - right.timestamp);
-      if (points.length < 2) throw new Error("fewer than two closes");
-      const previous = points.at(-2);
-      const latest = points.at(-1);
-      const change = ((latest.close - previous.close) / previous.close) * 100;
-      return {
-        symbol,
-        name,
-        nameEn,
-        value: latest.close.toFixed(2),
-        change: `${change > 0 ? "+" : ""}${change.toFixed(2)}%`,
-        changeValue: change,
-        direction: directionForChange(change),
-        asOf: new Date(latest.timestamp).toISOString().slice(0, 10),
-        source: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/history`,
-      };
+      return yahooEquityConstituent(payload, constituent, cutoffTime);
     } catch (error) {
       lastError = error instanceof Error ? error.message : "request failed";
     }

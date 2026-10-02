@@ -4,8 +4,9 @@ import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
+import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
 
-export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v5";
+export const ARTICLE_PROVENANCE_VERSION = "verified-article-provenance-v6";
 const TYPES = new Set(["article", "newsarticle", "analysisnewsarticle", "reportagenewsarticle"]);
 const normalized = value => String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim();
 const titleKey = value => normalized(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -95,6 +96,10 @@ function agency(value) {
 // version availability or reporting origin. Photo credits, recommended
 // articles, website footers and a generic dateModified are excluded.
 export function sourceArticleProvenance(decodedHtml, source) {
+  if (yahooLiveArticleIdentity(source)) {
+    const record = yahooLiveArticleRecord(decodedHtml, source);
+    return { version: ARTICLE_PROVENANCE_VERSION, origin: record?.origin ?? { key: "publisher:finance.yahoo.com", identified: false, basis: "origin_unresolved" }, publication: record ? { status: "verified", initialPublishedAt: record.initialPublishedAt, currentVersionAt: record.currentVersionAt, timeBasis: record.initialPublishedAt === record.currentVersionAt ? "first_publication" : "article_update" } : { status: "unverified_update" } };
+  }
   const nativeIssuer = nativeIssuerReleaseIdentity(source);
   if (nativeIssuer) {
     const record = nativeIssuerReleaseRecord(decodedHtml, source);

@@ -17,6 +17,7 @@ import { chinaPmiDocument } from "./china-pmi-release.mjs";
 import { mofDocumentIdentity, mofDocumentRecord } from "./mof-document.mjs";
 import { pbocDocumentIdentity, pbocDocumentRecord } from "./pboc-document.mjs";
 import { nativeIssuerReleaseIdentity, nativeIssuerReleaseRecord } from "./native-issuer-release.mjs";
+import { yahooLiveArticleIdentity, yahooLiveArticleRecord } from "./yahoo-live-article.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONCURRENCY = 4;
@@ -716,6 +717,10 @@ export function sourcePublishedAtCandidates(
   if (mofDocumentIdentity(source)) return mofDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   if (pbocDocumentIdentity(source)) return pbocDocumentRecord(decoded, source)?.publishedAtCandidates ?? [];
   if (nativeIssuerReleaseIdentity(source)) return [];
+  if (yahooLiveArticleIdentity(source)) {
+    const record = yahooLiveArticleRecord(decoded, source);
+    return record ? [record.initialPublishedAt] : [];
+  }
   const chinaPmi = chinaPmiDocument(decoded, source);
   if (chinaPmi) return [chinaPmi.publishedAt];
   const visibleDecoded = decoded.replace(/<!--[\s\S]*?-->/gu, " ");
