@@ -65,7 +65,7 @@ import { collectRecapTradingData, validateRecapTradingData } from "./recap-marke
 import { collectRecapMacroData, validateRecapMacroData } from "./recap-macro-data.mjs";
 import { chinaPmiResearchSources, chinaPmiSourceReader } from "./recap-china-pmi-data.mjs";
 import { collectRecapPbocNewsData, validateRecapPbocNewsData, pbocNewsResearchContext, pbocNewsResearchSources, pbocNewsSourceReader } from "./recap-pboc-news-data.mjs";
-import { validateRecapAttribution } from "./recap-attribution.mjs";
+import { validateRecapAttribution, RecapAttributionEvidenceSelectionError } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
 import { mergeRecapRateFactors, selectedRecapRateComparisons } from "./recap-rate-factors.mjs";
@@ -855,6 +855,13 @@ export function recapResearchSourceAccess(initial, ledger) {
     urls: [...urls].sort().slice(0, 40),
     unavailableDomains: [...new Set([...(initial.unavailableDomains ?? []), ...[...refused].filter(([, failures]) => failures.size >= 2).map(([domain]) => domain)])].sort(),
   };
+}
+
+export function recapAttributionEvidenceHash(ledger) {
+  // Validation receipts and ordering can change without new evidence. Compare
+  // the same verified source identities and substantive support on resume.
+  return stableHash(ledger.sources.map(({ verifiedAt, candidateHash, ...source }) => source)
+    .sort((left, right) => left.id.localeCompare(right.id)));
 }
 
 export async function researchSourceAvailability(workRoot, { market, marketAsOf, inputHash, beforeStartedAt = null }) {
@@ -2079,7 +2086,7 @@ export class MarketWorkflow {
     await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v48",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v49",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -3081,10 +3088,66 @@ export class MarketWorkflow {
     await this.saveManifest();
     if (remainingFailures.length) throw new Error(`复盘研究未完成：${remainingFailures.length} 个独立角色未通过执行和验证；已保留全部已完成研究及原始失败记录`);
     const attributionPayload = () => ({ envelope: this.envelope, evidenceTiming: recapEvidenceTiming(this.envelope), targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
-    const assessAttribution = baseKey => this.runValidatedAgentStage({ baseKey, role: "recap_attributor", payload: { ...attributionPayload(), coverage: compactRecapCoverage(coverage) }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }) });
+    let attributionRejection = null;
+    const assessAttribution = async baseKey => {
+      let rejectedOutput;
+      const diagnosticPath = resolve(this.runDir, `artifacts/${baseKey}-repair-only-rejection.json`);
+      const reviewInputHash = stableHash({ envelope: this.envelope, observations, social, macroData, evidenceHash: recapAttributionEvidenceHash(ledger) });
+      const stageKey = `${baseKey}-attempt-1`;
+      const admissibleRefusal = error => error instanceof RecapAttributionEvidenceSelectionError && error.details.selectionIsArray === true && error.details.evidenceIds.every(id => typeof id === "string");
+      const assertRejectedOutput = async (output, nativeOutputHash) => {
+        const stage = this.manifest.stages[stageKey];
+        if (stage?.status !== "invalid" || stage.role !== "recap_attributor" || !stage.outputHash || nativeOutputHash !== stage.outputHash) throw new Error("复盘补证诊断与原始拒绝记录不一致");
+        const [outputText, eventText] = await Promise.all([
+          readFile(resolve(this.runDir, "artifacts", `${stageKey}.json`), "utf8"),
+          readFile(resolve(this.runDir, "events", `${stageKey}.jsonl`), "utf8"),
+        ]);
+        if (stableHash(outputText) !== stage.outputHash || stableHash(eventText) !== stage.eventHash || stableHash(JSON.parse(outputText)) !== stableHash(output)) throw new Error("复盘补证诊断与原始拒绝记录不一致");
+        if (stage.receiptArtifact) await auditNativeAgentAttempt(this.runDir, stage);
+        return stage;
+      };
+      if (await exists(diagnosticPath)) {
+        const prior = await readJson(diagnosticPath);
+        const stage = this.manifest.stages[stageKey];
+        if (prior.repairOnly !== true || prior.approved !== false || stableHash(prior.rejectedOutput) !== prior.outputHash) throw new Error("复盘补证诊断与原始拒绝记录不一致");
+        // A later successful attempt can supersede a refusal without deleting
+        // that private history. Only the current invalid stage is reusable.
+        if (stage?.status === "invalid" && prior.reviewInputHash === reviewInputHash) {
+          await assertRejectedOutput(prior.rejectedOutput, prior.nativeOutputHash);
+          let replayedError;
+          try { validateRecapAttribution(prior.rejectedOutput, this.envelope, recapTargets(this.envelope), ledger, { macroData }); }
+          catch (error) { replayedError = error; }
+          if (!admissibleRefusal(replayedError) || replayedError.message !== prior.error || stage.error !== prior.error || stableHash(replayedError.details) !== stableHash(prior.details)) throw new Error("复盘补证诊断不能由原始拒绝输出重建");
+          attributionRejection = replayedError;
+          return null;
+        }
+      }
+      try {
+        return await this.runValidatedAgentStage({ baseKey, role: "recap_attributor", maxAttempts: 1, payload: { ...attributionPayload(), coverage: compactRecapCoverage(coverage) }, inputArtifacts: ["recap-plan.json", "recap-ledger.json", "recap-coverage.json", "recap-trading-data.json", "recap-macro-context.json"], withProvenance: true, validate: output => {
+          try { return validateRecapAttribution(output, this.envelope, recapTargets(this.envelope), ledger, { macroData }); }
+          catch (error) {
+            if (admissibleRefusal(error)) rejectedOutput = output;
+            throw error;
+          }
+        } });
+      } catch (error) {
+        // Only a located evidence-selection refusal can enter the existing
+        // research repair. Execution, source pin, receipt and other validation
+        // failures remain fatal. Never treat invalid proposed chains as reviewed.
+        if (!(error instanceof RecapAttributionEvidenceSelectionError) || !rejectedOutput) throw error;
+        const stage = await assertRejectedOutput(rejectedOutput, this.manifest.stages[stageKey]?.outputHash);
+        if (stage.error !== error.message) throw new Error("复盘补证诊断与原始拒绝记录不一致");
+        const diagnostic = { approved: false, repairOnly: true, reviewInputHash, nativeOutputHash: stage.outputHash, outputHash: stableHash(rejectedOutput), rejectedOutput, error: error.message, details: error.details };
+        await atomicJson(diagnosticPath, diagnostic);
+        attributionRejection = error;
+        return null;
+      }
+    };
     let attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor") : null;
     if (attributor) await atomicJson(resolve(this.runDir, "artifacts/recap-attribution-before-research-repair.json"), attributor.output);
-    const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null, evidenceContext: { tradingData, macroData } });
+    const evidenceBeforeRepair = recapAttributionEvidenceHash(ledger);
+    const repairOnlyDiagnostics = attributionRejection ? [{ target: attributionRejection.details.target, reason: attributionRejection.message }] : [];
+    const repair = await this.repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution: attributor?.output ?? null, repairOnlyDiagnostics, evidenceContext: { tradingData, macroData } });
     if (repair.researched) {
       ledger = repair.ledger;
       coverage = assessRecapEvidenceCoverage(this.envelope, ledger, { tradingData, macroData });
@@ -3093,8 +3156,14 @@ export class MarketWorkflow {
       this.manifest.recapLedgerHash = stableHash(ledger);
       this.manifest.recapCoverage = coverage;
       await this.saveManifest();
-      attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor-after-research-repair") : null;
+      // Empty searches, duplicate facts or a changed verification timestamp do
+      // not justify another isolated output against the same trusted evidence.
+      if (recapAttributionEvidenceHash(ledger) !== evidenceBeforeRepair) {
+        attributionRejection = null;
+        attributor = coverage.eligibleCount ? await assessAttribution("recap-attributor-after-research-repair") : null;
+      }
     }
+    if (!attributor && attributionRejection) throw attributionRejection;
     if (!attributor) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
     const attribution = attributor.output, payload = attributionPayload();
     await atomicJson(resolve(this.runDir, "artifacts/recap-attribution.json"), attribution);
@@ -3119,7 +3188,7 @@ export class MarketWorkflow {
     return recap;
   }
 
-  async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution, evidenceContext = {} }) {
+  async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution, repairOnlyDiagnostics = [], evidenceContext = {} }) {
     // Freeze one cumulative ceiling for the whole repair phase. A changed
     // payload or a new coverage plan must not grant another twelve queries.
     if (!this.manifest.recapResearchRepairBudget) {
@@ -3131,7 +3200,7 @@ export class MarketWorkflow {
     }
     const repairBudget = this.manifest.recapResearchRepairBudget;
     if (!Number.isInteger(repairBudget.startQueryCount) || !Number.isInteger(repairBudget.queryLimit) || repairBudget.startQueryCount < 0 || repairBudget.startQueryCount > this.searchQueryCount || repairBudget.queryLimit < repairBudget.startQueryCount || repairBudget.queryLimit - repairBudget.startQueryCount > RECAP_REPAIR_QUERY_BUDGET || repairBudget.queryLimit > this.searchQueryLimit - NARRATIVE_QUERY_BUDGET) throw new Error("复盘返工的冻结搜索预算无效");
-    const inputHash = stableHash({ plan, ledger, coverage, attribution });
+    const inputHash = stableHash({ plan, ledger, coverage, attribution, repairOnlyDiagnostics });
     const planName = `recap-research-repair-plan-${inputHash.slice(0, 12)}.json`;
     const planPath = resolve(this.runDir, "artifacts", planName);
     let repairPlan;
@@ -3139,13 +3208,13 @@ export class MarketWorkflow {
       const stored = await readJson(planPath);
       if (this.manifest.recapResearchRepairPlans?.[inputHash]?.planHash !== stableHash(stored)) throw new Error("复盘返工计划哈希不一致");
       if (stored.inputHash === inputHash) {
-        const replayed = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: stored.remainingQueriesAtPlanning });
+        const replayed = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: stored.remainingQueriesAtPlanning, repairOnlyDiagnostics });
         if (stableHash(replayed) !== stableHash(stored)) throw new Error("复盘返工计划不能由冻结输入重建");
         repairPlan = stored;
       }
     }
     if (!repairPlan) {
-      repairPlan = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: Math.max(0, repairBudget.queryLimit - this.searchQueryCount - this.reservedSearchQueryCount) });
+      repairPlan = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: Math.max(0, repairBudget.queryLimit - this.searchQueryCount - this.reservedSearchQueryCount), repairOnlyDiagnostics });
       await atomicJson(planPath, repairPlan);
       this.manifest.recapResearchRepairPlans ??= {};
       this.manifest.recapResearchRepairPlans[inputHash] = { planArtifact: planName, planHash: stableHash(repairPlan) };

@@ -7,7 +7,8 @@ import { recapFixture } from "./complete-recap-fixture.mjs";
 import { fixtureInput } from "./daily-v10-fixture.mjs";
 import { assessRecapEvidenceCoverage, completeRecapPlan } from "../scripts/complete-recap.mjs";
 import { planRecapResearchRepair } from "../scripts/recap-research-repair.mjs";
-import { MarketWorkflow, agentStageFingerprint, assertResearchQueryCount } from "../scripts/daily-workflow.mjs";
+import { MarketWorkflow, agentStageFingerprint, assertResearchQueryCount, recapAttributionEvidenceHash } from "../scripts/daily-workflow.mjs";
+import { validateRecapAttribution, RecapAttributionEvidenceSelectionError } from "../scripts/recap-attribution.mjs";
 import { stableHash, parseAgentEvents } from "../scripts/daily-workflow-core.mjs";
 
 function fixture() {
@@ -105,6 +106,181 @@ function mockResearchProcesses(workflow, calls) {
   };
 }
 
+async function controlledCompleteWorkflow(root) {
+  const f = recapFixture(), calls = [];
+  const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true, workRoot: root,
+    transmissionCollector: async () => f.transmissionData,
+    companyBackgroundCollector: async () => f.companyBackgroundData,
+    pbocNewsCollector: async () => f.pbocNewsData,
+  });
+  await workflow.initialize();
+  for (const [name, hashKey, value] of [["social-ledger.json", "socialHash", f.social], ["recap-trading-data.json", "tradingHash", f.tradingData], ["recap-macro-data.json", "macroHash", f.macroData]]) {
+    await writeFile(resolve(workflow.runDir, "artifacts", name), JSON.stringify(value));
+    workflow.manifest[hashKey] = stableHash(value);
+  }
+  workflow.prepareRecapNewsOriginals = async () => { workflow.newsOriginalsBook = { snapshots: [] }; };
+  workflow.researchPrimaryRole = async (anomaly, role, suffix = "", excludedSources = []) => suffix
+    ? MarketWorkflow.prototype.researchPrimaryRole.call(workflow, anomaly, role, suffix, excludedSources)
+    : { anomalyId: anomaly.id, role, sources: [], rejectedSources: [], alternatives: [] };
+  workflow.verifyEvidence = async () => f.ledger;
+  // Explicitly controlled accounting, not proof of actual market searches.
+  workflow.searchQueryCount = 80;
+  mockResearchProcesses(workflow, calls);
+  return { f, workflow, calls };
+}
+
+function mockAttributionRefusal(workflow, output, onReview = () => {}) {
+  // Persist controlled raw output/events just as the production stage does.
+  // These records are not genuine native invocations or report acceptance.
+  workflow.runValidatedAgentStage = async ({ baseKey, role, maxAttempts, validate }) => {
+    assert.equal(role, "recap_attributor"); assert.equal(maxAttempts, 1); onReview();
+    const key = `${baseKey}-attempt-1`, outputText = JSON.stringify(output), events = JSON.stringify({ type: "turn.completed" });
+    await writeFile(resolve(workflow.runDir, "artifacts", `${key}.json`), outputText);
+    await writeFile(resolve(workflow.runDir, "events", `${key}.jsonl`), events);
+    workflow.manifest.stages[key] = { status: "completed", role, outputHash: stableHash(outputText), eventHash: stableHash(events) };
+    try { validate(output); assert.fail("Invalid inference must not be approved"); }
+    catch (error) { await workflow.invalidateAgentStage(key, error); throw error; }
+  };
+}
+
+test("a located attribution refusal reaches bounded repair and resumes without repeating an unchanged failed review", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-attribution-entry-"));
+  try {
+    const { f, workflow, calls } = await controlledCompleteWorkflow(root);
+    const invalid = structuredClone(f.attribution);
+    invalid.entries[0].basis = "inferred";
+    let reviews = 0;
+    mockAttributionRefusal(workflow, invalid, () => reviews++);
+    const selectedTargets = [], research = workflow.researchAnomaly.bind(workflow);
+    workflow.researchAnomaly = async (anomaly, feedback) => { selectedTargets.push(anomaly.target); return research(anomaly, feedback); };
+    await assert.rejects(workflow.runCompleteRecap(), RecapAttributionEvidenceSelectionError);
+    assert.equal(reviews, 1); assert.equal(calls.length, 6); assert.equal(workflow.searchQueryCount, 92);
+    assert.deepEqual(workflow.manifest.recapResearchRepairBudget, { startQueryCount: 80, queryLimit: 92 });
+    const diagnostic = JSON.parse(await readFile(resolve(workflow.runDir, "artifacts/recap-attributor-repair-only-rejection.json"), "utf8"));
+    assert.equal(diagnostic.approved, false); assert.equal(diagnostic.repairOnly, true);
+    assert.deepEqual(diagnostic.rejectedOutput, invalid);
+    assert.equal(diagnostic.nativeOutputHash, workflow.manifest.stages["recap-attributor-attempt-1"].outputHash);
+    assert.equal(selectedTargets[0], "SPX", "repair must select the located refusal before larger movers");
+    const spxCalls = calls.filter(call => call.payload.anomaly.target === "SPX");
+    assert.equal(spxCalls.length, 2);
+    assert.ok(spxCalls.every(call => call.promptSuffix.includes(diagnostic.error)));
+    assert.equal(workflow.manifest.recapApproval, undefined);
+    await assert.rejects(workflow.runCompleteRecap(), RecapAttributionEvidenceSelectionError);
+    assert.equal(reviews, 1, "same evidence and located refusal must not spend another native review");
+    assert.equal(calls.length, 6, "exact repair checkpoints must not search twice");
+    assert.equal(workflow.searchQueryCount, 92);
+    assert.equal(workflow.manifest.recapResearchRepairBudget.queryLimit, 92);
+    assert.throws(() => validateRecapAttribution(invalid, f.envelope, f.plan.anomalies.map(a => ({ symbol: a.target, ...a.observation, kind: a.kind })), f.ledger, { requireComplete: true }), RecapAttributionEvidenceSelectionError);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a restored refusal rejects corrupted details, error, output and native records before repair", async () => {
+  for (const corruption of ["details", "error", "replacement", "output", "events", "nativeHash", "stageError", "malformedRestoration"]) {
+    const root = await mkdtemp(resolve(tmpdir(), "stock-daily-attribution-corruption-"));
+    try {
+      const { f, workflow, calls } = await controlledCompleteWorkflow(root);
+      const invalid = structuredClone(f.attribution);
+      invalid.entries[0].basis = "inferred";
+      let reviews = 0, repairs = 0;
+      mockAttributionRefusal(workflow, invalid, () => reviews++);
+      const repair = workflow.repairCompleteRecapResearch.bind(workflow);
+      workflow.repairCompleteRecapResearch = async args => { repairs++; return repair(args); };
+      await assert.rejects(workflow.runCompleteRecap(), RecapAttributionEvidenceSelectionError);
+      assert.equal(repairs, 1);
+      const path = resolve(workflow.runDir, "artifacts/recap-attributor-repair-only-rejection.json");
+      const diagnostic = JSON.parse(await readFile(path, "utf8"));
+      const stage = workflow.manifest.stages["recap-attributor-attempt-1"];
+      if (corruption === "details") Object.assign(diagnostic.details, { target: "WRONG-TARGET", selectionIsArray: false, evidenceIds: null });
+      if (corruption === "error") diagnostic.error += " Altered diagnostic.";
+      if (corruption === "replacement") {
+        diagnostic.rejectedOutput.entries[0].counterAssessment += " Altered rejected output.";
+        diagnostic.outputHash = stableHash(diagnostic.rejectedOutput);
+      }
+      if (corruption === "output") await writeFile(resolve(workflow.runDir, "artifacts/recap-attributor-attempt-1.json"), JSON.stringify({ ...invalid, altered: true }));
+      if (corruption === "events") await writeFile(resolve(workflow.runDir, "events/recap-attributor-attempt-1.jsonl"), "Altered event stream.");
+      if (corruption === "nativeHash") diagnostic.nativeOutputHash = "wrong-native-output";
+      if (corruption === "stageError") stage.error += " Altered stage error.";
+      if (corruption === "malformedRestoration") {
+        diagnostic.rejectedOutput.entries[0].chains[0].mechanismEvidenceIds = null;
+        diagnostic.outputHash = stableHash(diagnostic.rejectedOutput);
+        const outputText = JSON.stringify(diagnostic.rejectedOutput);
+        stage.outputHash = diagnostic.nativeOutputHash = stableHash(outputText);
+        await writeFile(resolve(workflow.runDir, "artifacts/recap-attributor-attempt-1.json"), outputText);
+      }
+      await writeFile(path, JSON.stringify(diagnostic));
+      await assert.rejects(workflow.runCompleteRecap(), /复盘补证诊断/u, corruption);
+      assert.equal(repairs, 1, `${corruption} must fail before repair planning`);
+      assert.equal(reviews, 1, `${corruption} must not be disguised as a fresh review`);
+      assert.equal(calls.length, 6); assert.equal(workflow.searchQueryCount, 92);
+      assert.equal(workflow.manifest.recapApproval, undefined);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test("unchanged verified evidence reordered on resume retains the exact refusal and consumed budget", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-attribution-order-"));
+  try {
+    const { f, workflow, calls } = await controlledCompleteWorkflow(root);
+    for (const id of ["mechanism-b", "mechanism-a"]) f.ledger.sources.push({ ...f.ledger.sources[0], id, kind: "background", scope: "market", publishedAt: "2026-01-28", targets: ["SPX"], backgroundSubjects: ["SPX"], causalConnection: false, timingChecked: true });
+    const invalid = structuredClone(f.attribution);
+    invalid.entries[0].basis = "inferred";
+    let reviews = 0;
+    mockAttributionRefusal(workflow, invalid, () => reviews++);
+    await assert.rejects(workflow.runCompleteRecap(), RecapAttributionEvidenceSelectionError);
+    const path = resolve(workflow.runDir, "artifacts/recap-attributor-repair-only-rejection.json");
+    const prior = JSON.parse(await readFile(path, "utf8"));
+    assert.deepEqual(prior.details.availableApplicableMechanisms.map(source => source.id), ["mechanism-a", "mechanism-b"]);
+    const hash = recapAttributionEvidenceHash(f.ledger);
+    f.ledger.sources.reverse();
+    assert.equal(recapAttributionEvidenceHash(f.ledger), hash);
+    await assert.rejects(workflow.runCompleteRecap(), error => error instanceof RecapAttributionEvidenceSelectionError && stableHash(error.details) === stableHash(prior.details));
+    assert.equal(reviews, 1); assert.equal(calls.length, 6); assert.equal(workflow.searchQueryCount, 92);
+    assert.equal(workflow.manifest.recapResearchRepairBudget.queryLimit, 92);
+    assert.equal(workflow.manifest.recapApproval, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("execution and other integrity failures never become evidence repair", async () => {
+  for (const message of ["Native process timeout", "Workflow implementation hash mismatch", "Native receipt integrity mismatch", "Attribution schema is malformed"]) {
+    const root = await mkdtemp(resolve(tmpdir(), "stock-daily-attribution-fatal-"));
+    try {
+      const { workflow, calls } = await controlledCompleteWorkflow(root);
+      const failure = new Error(message);
+      workflow.runValidatedAgentStage = async () => { throw failure; };
+      await assert.rejects(workflow.runCompleteRecap(), error => error === failure);
+      assert.equal(calls.length, 0);
+      assert.equal(workflow.manifest.recapResearchRepairBudget, undefined);
+      assert.equal(workflow.manifest.recapApproval, undefined);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test("a malformed mechanism field remains fatal rather than spending the research repair allowance", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-attribution-shape-"));
+  try {
+    const { f, workflow, calls } = await controlledCompleteWorkflow(root);
+    const invalid = structuredClone(f.attribution);
+    invalid.entries[0].chains[0].mechanismEvidenceIds = null;
+    workflow.runValidatedAgentStage = async ({ validate }) => validate(invalid);
+    await assert.rejects(workflow.runCompleteRecap(), error => error instanceof RecapAttributionEvidenceSelectionError && error.details.selectionIsArray === false);
+    assert.equal(calls.length, 0);
+    assert.equal(workflow.manifest.recapResearchRepairBudget, undefined);
+    assert.equal(workflow.manifest.recapApproval, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("attribution retry identity ignores receipt clocks and ordering but retains substantive scope and facts", () => {
+  const f = recapFixture(), same = structuredClone(f.ledger);
+  same.sources.reverse();
+  for (const source of same.sources) { source.verifiedAt = "2026-10-02T08:00:00Z"; source.candidateHash = "new-receipt-only"; }
+  assert.equal(recapAttributionEvidenceHash(same), recapAttributionEvidenceHash(f.ledger));
+  same.sources[0].scope = "company";
+  assert.notEqual(recapAttributionEvidenceHash(same), recapAttributionEvidenceHash(f.ledger));
+  same.sources[0].scope = f.ledger.sources.at(-1).scope;
+  same.sources[0].facts = "A substantively new verified event must allow fresh review.";
+  assert.notEqual(recapAttributionEvidenceHash(same), recapAttributionEvidenceHash(f.ledger));
+});
+
 test("repair reuses exact completed pairs after budget exhaustion and keeps failed evidence unresolved", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "stock-daily-recap-repair-"));
   try {
@@ -167,6 +343,9 @@ test("a changed repair payload cannot reuse completed flags to overspend the cum
     assert.equal(next.researched, false, "a different repair plan cannot replenish the phase allowance");
     assert.equal(calls.length, 6);
     assert.equal(workflow.manifest.recapResearchRepairBudget.queryLimit, 92);
+    const diagnosticChange = await workflow.repairCompleteRecapResearch({ ...input, outputs: [], repairOnlyDiagnostics: [{ target: "SPX", reason: "A newly located refusal does not grant a fresh research budget." }] });
+    assert.equal(diagnosticChange.researched, false, "changed diagnostic input cannot replenish the exhausted phase allowance");
+    assert.equal(calls.length, 6); assert.equal(workflow.searchQueryCount, 92);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

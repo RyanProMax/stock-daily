@@ -141,8 +141,31 @@ export function recapAttributionCandidates(envelope, targets, ledger, { macroDat
   });
 }
 
-function selected(values, map, label, min = 1, max = 8) {
-  if (!Array.isArray(values) || values.length < min || values.length > max || new Set(values).size !== values.length || values.some(id => !map.has(id))) throw new Error(`${label} 引用了缺失、重复或过多证据`);
+export class RecapAttributionEvidenceSelectionError extends Error {
+  constructor(details) {
+    const feedback = { target: details.target, chainIndex: details.chainIndex, min: details.min, actualCount: details.actualCount, max: details.max, reactionScope: details.reactionScope, reactionTargets: details.reactionTargets, directMarketFactor: details.directMarketFactor, rootEvidenceId: details.rootEvidenceId, reactionEvidenceId: details.reactionEvidenceId, evidenceIds: details.evidenceIds, missingEvidenceIds: details.missingEvidenceIds, duplicateEvidenceIds: details.duplicateEvidenceIds };
+    super(`${details.target} 背景传导 引用了缺失、重复或过多证据：${JSON.stringify(feedback)}`);
+    this.name = "RecapAttributionEvidenceSelectionError";
+    this.code = "recap_attribution_evidence_selection";
+    this.details = details;
+  }
+}
+
+function selected(values, map, label, min = 1, max = 8, context = null) {
+  if (!Array.isArray(values) || values.length < min || values.length > max || new Set(values).size !== values.length || values.some(id => !map.has(id))) {
+    if (context) {
+      const evidenceIds = Array.isArray(values) ? [...values] : null;
+      throw new RecapAttributionEvidenceSelectionError({
+        ...context(), label, min, max,
+        selectionIsArray: Array.isArray(values),
+        actualCount: evidenceIds?.length ?? null,
+        evidenceIds,
+        missingEvidenceIds: evidenceIds?.filter(id => !map.has(id)) ?? [],
+        duplicateEvidenceIds: evidenceIds ? [...new Set(evidenceIds.filter((id, index) => evidenceIds.indexOf(id) !== index))] : [],
+      });
+    }
+    throw new Error(`${label} 引用了缺失、重复或过多证据`);
+  }
   return values.map(id => map.get(id));
 }
 
@@ -189,7 +212,7 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       if (!entry.chains.length) continue;
     }
     if (!entry.chains.length) throw new Error(`${target.symbol} 缺少事件传导链`);
-    for (const chain of entry.chains) {
+    for (const [chainIndex, chain] of entry.chains.entries()) {
       const subjects = chain.subjectTargets ?? [], basis = chain.basis ?? entry.basis;
       if (!Array.isArray(subjects) || subjects.length > 4 || new Set(subjects).size !== subjects.length || subjects.some(symbol => !subjectDirections.has(symbol)) || !["reported", "inferred"].includes(basis) || (entry.basis === "reported" && basis !== "reported")) throw new Error(`${target.symbol} 分链主体或报道／推断依据无效`);
       if (chain.timingEvidenceId !== null && typeof chain.timingEvidenceId !== "string") throw new Error(`${target.symbol} 当时事实确认的引用字段无效`);
@@ -219,7 +242,15 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       assessmentText(chain.transmission, "传导机制", 50, 1_200);
       assessmentText(chain.limitations, "传导局限", 30, 900);
       const directMarketFactor = observedFactor && target.kind === "market" && report.targets.includes(target.symbol);
-      const mechanisms = selected(chain.mechanismEvidenceIds, map, "背景传导", basis === "inferred" && !directMarketFactor ? 1 : 0);
+      const mechanisms = selected(chain.mechanismEvidenceIds, map, "背景传导", basis === "inferred" && !directMarketFactor ? 1 : 0, 8, () => ({
+        target: target.symbol, chainIndex,
+        rootEvidenceId: root.id, reactionEvidenceId: report.id,
+        reactionScope: report.scope ?? null, reactionTargets: [...report.targets],
+        directMarketFactor,
+        availableApplicableMechanisms: ledger.sources.filter(source => background(source, envelope, target)).map(source => ({
+          id: source.id, scope: source.scope, targets: [...source.targets], backgroundSubjects: [...source.backgroundSubjects],
+        })).sort((left, right) => left.id.localeCompare(right.id)),
+      }));
       if (mechanisms.some(source => !background(source, envelope, target))) throw new Error(`${target.symbol} 背景传导证据类型或适用对象无效`);
       if (basis === "reported") {
         if (subjects.length ? subjects.some(symbol => !constituentClaims(root, symbol) || !constituentClaims(report, symbol)) : !reportedEventRootCovers(root, target.symbol) || !directlyCovers(report, target.symbol)) throw new Error(`${target.symbol} 报道归因未直接对应分链主体`);

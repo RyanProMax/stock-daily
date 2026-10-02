@@ -22,11 +22,32 @@ test("the actual climbing intraday high cannot borrow the later yield retreat's 
   ]) assert.throws(() => assertFactsNumbersInExcerpt({facts, supportingExcerpt}), /数字/);
 });
 
+test("a neutral earlier intraday level cannot inherit the later retreat across its historical clause", () => {
+  // Genuine rejected SPX worker copy from the frozen October 1 session.
+  const supportingExcerpt = [
+    "US stocks kicked off October in a volatile fashion, recovering from the morning's losses as bond yields retreated and the AI trade bounced back.",
+    "The Dow Jones Industrial Average (^DJI) rose above the flat line. The S&P 500 (^GSPC) gained 0.2% while the tech-heavy Nasdaq Composite (^IXIC) eked out a gain.",
+    "The 10-year Treasury yield (^TNX) eased to 5.24% after climbing earlier Thursday to 5.3%, a new multidecade high. The bond market just suffered its worst quarter in decades.",
+  ].join("\n");
+  const facts = "US stocks recovered from morning losses as bond yields retreated and the AI trade rebounded; the S&P 500 gained 0.2%. The 10-year Treasury yield eased to 5.24% after reaching 5.3% earlier Thursday.";
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts, supportingExcerpt }));
+  assert.doesNotThrow(() => assertFactsNumbersInExcerpt({ facts: facts.replace("reaching 5.3%", "reaching +5.3%"), supportingExcerpt }));
+  for (const changed of [
+    facts.replace("eased to 5.24%", "rose to 5.24%"),
+    facts.replace("reaching 5.3%", "falling to 5.3%"),
+    facts.replace("reaching 5.3%", "reaching -5.3%"),
+    facts.replace("eased to 5.24%", "eased to -5.24%"),
+    facts.replace("reaching 5.3%", "reaching 5.3 basis points"),
+    facts.replace("earlier Thursday", "later Thursday"),
+    facts.replace(" earlier Thursday", ""),
+  ]) assert.throws(() => assertFactsNumbersInExcerpt({ facts: changed, supportingExcerpt }), /数字/, changed);
+});
+
 test("a cached pre-fix climbing claim is reopened and its reversed direction is rejected", async () => {
   const f = recapFixture("US"), anomaly = f.plan.anomalies[0];
   const source = {originalUrl: "https://www.reuters.com/markets/us/example-close", title: "US market closing report", role: "facts", kind: "market_wrap", scope: "market", targets: [anomaly.target], anomalyId: anomaly.id, hypothesisIds: [anomaly.hypotheses[0].id], publishedAt: f.envelope.session.windowEnd, supportingExcerpt: "The S&P 500 recovered as Treasury yields eased to 5.24% after climbing earlier Friday to 5.3%, with competing pressures limiting the advance.", facts: "报道指出，10年期美国国债收益率回落至5.3%。", causalConnection: false, comparisons: []};
   const candidateHash = stableHash(source);
-  const verifiedCache = new Map([[candidateHash, {...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: "verified-number-direction-v6"}]]);
+  const verifiedCache = new Map([[candidateHash, {...source, candidateHash, timingChecked: true, provenanceChecked: true, comparisonNotesChecked: true, numericEvidenceVersion: "verified-number-direction-v7"}]]);
   let reads = 0;
   const result = await verifyResearchSources([{sources: [source], alternatives: []}], f.envelope, {verifiedCache, reader: async () => {reads++; return {finalUrl: source.originalUrl, status: 200, contentType: "text/html", text: source.supportingExcerpt, publishedAtCandidates: [source.publishedAt]};}});
   assert.equal(reads, 1);

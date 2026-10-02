@@ -4,7 +4,7 @@ import { recapFixture } from "./complete-recap-fixture.mjs";
 import { collectRecapMacroData } from "../scripts/recap-macro-data.mjs";
 import { verifiedRecapRateFactors, verifiedRateFactor, mergeRecapRateFactors, auditRecapRateFactors, reportedRateFactorMatch, intradayRateComparisonCopy, selectedRecapRateComparisons } from "../scripts/recap-rate-factors.mjs";
 import { recapTargets, validateCompleteRecap } from "../scripts/complete-recap.mjs";
-import { recapAttributionCandidates, validateRecapAttribution } from "../scripts/recap-attribution.mjs";
+import { recapAttributionCandidates, validateRecapAttribution, RecapAttributionEvidenceSelectionError } from "../scripts/recap-attribution.mjs";
 import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
 import { assertFactsNumbersInExcerpt } from "../scripts/daily-workflow-core.mjs";
 
@@ -205,4 +205,82 @@ test("observed factors cannot be promoted to a reported event or omit anchors an
   assert.doesNotThrow(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution, macroData: f.macroData }));
   raw.confidence = "high";
   assert.throws(() => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution, macroData: f.macroData }), /中等置信/);
+});
+
+
+test("a MU-scoped macro reaction returns typed SPX mechanism-selection feedback without widening its scope", async () => {
+  const f = await intradayFixture();
+  f.report.scope = "company"; f.report.targets = ["MU"];
+  f.report.supportingExcerpt += " Micron (MU) shares took a leg higher after the memory giant reported fourth-quarter results and raised its Q1 outlook.";
+  const entry = f.attribution.entries.find(item => item.target === "SPX");
+  entry.basis = "inferred";
+  const copy = intradayRateComparisonCopy(reportedRateFactorMatch(f.factor, f.report, f.envelope));
+  Object.assign(entry.chains[0], {
+    rootEvidenceId: f.factor.id, reactionEvidenceId: f.report.id, timingEvidenceId: null,
+    mechanismEvidenceIds: [], eventAnchors: ["10-year U.S. Treasury", f.envelope.marketAsOf],
+    expectedDirection: "positive",
+    limitations: "This is a par observation, distinct from the nominal quote; historical publication time is unknown. " + copy.en,
+  });
+  const unrelated = { ...f.ledger.sources.find(source => source.id === "0-facts"), id: "xlu-only-background", kind: "background", publishedAt: "2026-01-28", targets: ["XLU"], scope: "sector", causalConnection: false, backgroundSubjects: ["XLU"] };
+  f.ledger.sources.push(unrelated);
+  assert.throws(() => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger, { macroData: f.macroData }), error => {
+    assert.ok(error instanceof RecapAttributionEvidenceSelectionError);
+    assert.equal(error.name, "RecapAttributionEvidenceSelectionError");
+    assert.equal(error.code, "recap_attribution_evidence_selection");
+    assert.deepEqual(error.details, {
+      target: "SPX", chainIndex: 0,
+      rootEvidenceId: f.factor.id, reactionEvidenceId: f.report.id,
+      reactionScope: "company", reactionTargets: ["MU"], directMarketFactor: false,
+      availableApplicableMechanisms: [], label: "背景传导", min: 1, max: 8,
+      selectionIsArray: true, actualCount: 0, evidenceIds: [], missingEvidenceIds: [], duplicateEvidenceIds: [],
+    });
+    assert.match(error.message, /SPX.*chainIndex.*reactionScope.*company.*MU.*directMarketFactor.*false/u);
+    return true;
+  });
+  assert.deepEqual(f.report.targets, ["MU"]);
+  assert.deepEqual(entry.chains[0].mechanismEvidenceIds, []);
+});
+
+test("typed mechanism feedback preserves XLU inference and the existing missing, duplicate and cardinality gates", async () => {
+  const f = await intradayFixture();
+  f.report.scope = "company"; f.report.targets = ["MU"];
+  const target = recapTargets(f.envelope).find(item => item.symbol === "XLU");
+  target.change = "+0.61%";
+  const background = { ...f.ledger.sources.find(source => source.id === "0-facts"), id: "utility-inverse-exposure", kind: "background", publishedAt: "2026-01-28", targets: ["XLU"], scope: "sector", causalConnection: false, backgroundSubjects: ["XLU"], supportingExcerpt: "Utilities Sector Risk: The value of regulated utility equity securities may tend to have an inverse relationship to the movement of interest rates." };
+  f.ledger.sources.push(background);
+  const copy = intradayRateComparisonCopy(reportedRateFactorMatch(f.factor, f.report, f.envelope));
+  const entry = {
+    target: "XLU", basis: "inferred", observedReturn: target.change,
+    counterAssessment: "Company-specific effects remain unverified; this directionally consistent common factor does not identify the dominant cause or exact contribution.", counterEvidenceIds: [],
+    chains: [{ rootEvidenceId: f.factor.id, reactionEvidenceId: f.report.id, timingEvidenceId: null, mechanismEvidenceIds: [background.id], eventAnchors: ["10-year U.S. Treasury", f.envelope.marketAsOf], expectedDirection: "positive", transmission: "The observed long yield decreased, and the independent broad-market passage links lower yields with the market recovery. The utility fund's own disclosure states an inverse interest-rate relationship, supplying the separate target mechanism for a possible positive contribution.", limitations: "This is a par observation, distinct from the nominal quote; historical publication time is unknown. " + copy.en }],
+  };
+  const assessment = { ...f.attribution, entries: [entry] };
+  const validate = () => validateRecapAttribution(assessment, f.envelope, [target], f.ledger, { requireComplete: true, macroData: f.macroData });
+  assert.equal(validate(), assessment);
+  const available = [{ id: background.id, scope: "sector", targets: ["XLU"], backgroundSubjects: ["XLU"] }];
+  for (const selection of [null, [], ["missing-background"], [background.id, background.id]]) {
+    entry.chains[0].mechanismEvidenceIds = selection;
+    assert.throws(validate, error => {
+      assert.ok(error instanceof RecapAttributionEvidenceSelectionError);
+      assert.equal(error.details.target, "XLU"); assert.equal(error.details.chainIndex, 0);
+      assert.equal(error.details.min, 1); assert.equal(error.details.max, 8);
+      assert.equal(error.details.actualCount, Array.isArray(selection) ? selection.length : null);
+      assert.deepEqual(error.details.evidenceIds, selection);
+      assert.deepEqual(error.details.missingEvidenceIds, selection?.filter(id => id === "missing-background") ?? []);
+      assert.deepEqual(error.details.duplicateEvidenceIds, selection?.length === 2 ? [background.id] : []);
+      assert.deepEqual(error.details.availableApplicableMechanisms, available);
+      assert.equal(error.details.reactionScope, "company"); assert.deepEqual(error.details.reactionTargets, ["MU"]);
+      assert.equal(error.details.directMarketFactor, false);
+      return true;
+    });
+  }
+  const cardinalitySources = Array.from({ length: 8 }, (_unused, index) => ({ ...background, id: `extra-utility-exposure-${index}` }));
+  f.ledger.sources.push(...cardinalitySources);
+  entry.chains[0].mechanismEvidenceIds = [background.id, ...cardinalitySources.map(source => source.id)];
+  assert.throws(validate, error => error instanceof RecapAttributionEvidenceSelectionError && error.details.actualCount === 9 && error.details.max === 8 && error.details.missingEvidenceIds.length === 0 && error.details.duplicateEvidenceIds.length === 0);
+  entry.chains[0].mechanismEvidenceIds = entry.chains[0].mechanismEvidenceIds.slice(0, 8);
+  assert.equal(validate(), assessment);
+  entry.chains[0].mechanismEvidenceIds = [background.id];
+  entry.chains[0].rootEvidenceId = "missing-root";
+  assert.throws(validate, error => !(error instanceof RecapAttributionEvidenceSelectionError) && /事件与市场反应.*缺失/u.test(error.message));
 });

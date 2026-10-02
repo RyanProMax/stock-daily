@@ -25,8 +25,8 @@ import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-ev
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v74";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v7";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v75";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v8";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1166,7 +1166,16 @@ function nearestDirection(value, start, end, rawNumber) {
     leftBoundary = boundaries.filter(index => index < leftBoundary && !/[，,]/u.test(value[index])).at(-1) ?? -1;
   }
   const rightBoundary = boundaries.find(index => index >= end) ?? value.length;
-  const clauseStart = leftBoundary + 1;
+  let clauseStart = leftBoundary + 1;
+  // A neutral historical level needs both an immediately bound "after
+  // reaching" clause and an explicit earlier weekday. Its old level must not
+  // inherit the later "eased" direction. Explicit signs, attached directions
+  // and local movement verbs retain their existing checks; other "after" or
+  // "reaching" wording receives no exception.
+  const historicalLevel = /\bafter\s+reaching\s*$/iu.exec(preceding);
+  if (historicalLevel && /^\s+earlier\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?=\s*(?:[,.!?;]|$))/iu.test(value.slice(end))) {
+    clauseStart = Math.max(clauseStart, start - preceding.length + historicalLevel.index + historicalLevel[0].search(/\breaching\b/iu));
+  }
   const clause = value.slice(clauseStart, rightBoundary);
   const numberOffset = start - clauseStart;
   // A closing/low price is an explicitly bound level. A movement verb
