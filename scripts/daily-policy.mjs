@@ -1,3 +1,5 @@
+import chinaCalendar2026 from "../data/china-exchange-calendar-2026.json" with { type: "json" };
+
 export const DAILY_UPDATE_KINDS = ["morning", "close", "evening"];
 
 const DAILY_CUTOFF_UTC = {
@@ -60,12 +62,28 @@ function isWeekday(reportDate) {
   return day >= 1 && day <= 5;
 }
 
+function expectedChinaClose(reportDate) {
+  // Other years retain the conservative weekday gate until their exchange
+  // calendar is verified. Weekend make-up working days are never trading days.
+  if (Number(reportDate.slice(0, 4)) !== chinaCalendar2026.year) return reportDate;
+  const date = new Date(`${reportDate}T12:00:00Z`);
+  for (let offset = 0; offset < 15; offset += 1) {
+    const candidate = date.toISOString().slice(0, 10);
+    const holiday = chinaCalendar2026.closedPeriods.some(
+      ([start, end]) => candidate >= start && candidate <= end,
+    );
+    if (isWeekday(candidate) && !holiday) return candidate;
+    date.setUTCDate(date.getUTCDate() - 1);
+  }
+  throw new Error("中国交易日历无法确定最近收盘日");
+}
+
 export function assessDailyFreshness(input, previousReport) {
   const marketAsOf = marketAsOfFromInput(input);
   if (
     input.updateKind === "close" &&
     isWeekday(input.reportDate) &&
-    marketAsOf.CN !== input.reportDate
+    marketAsOf.CN !== expectedChinaClose(input.reportDate)
   ) {
     return {
       publish: false,

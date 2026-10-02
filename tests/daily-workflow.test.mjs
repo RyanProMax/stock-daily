@@ -340,6 +340,62 @@ test("weekday close retries until current China close data exists", () => {
   assert.equal(result.reason, "cn_close_not_available");
 });
 
+test("exchange holidays use the last China close without blocking a new US session", () => {
+  const input = fixtureInput();
+  input.reportDate = "2026-10-02";
+  input.updateKind = "close";
+  input.cutoffAt = dailyCutoffAt(input.reportDate, input.updateKind);
+  for (const sector of input.sectorHeat) {
+    sector.asOf = sector.market === "CN" ? "2026-09-30" : "2026-10-01";
+  }
+  const previous = {
+    reportDate: "2026-10-01",
+    marketAsOf: { CN: "2026-09-30", US: "2026-09-30" },
+  };
+  const result = assessDailyFreshness(input, previous);
+  assert.equal(result.publish, true);
+  assert.deepEqual(result.advancedMarkets, ["US"]);
+  assert.deepEqual(result.marketAsOf, { CN: "2026-09-30", US: "2026-10-01" });
+
+  const alreadyHandled = assessDailyFreshness(input, {
+    ...previous,
+    marketAsOf: { CN: "2026-09-30", US: "2026-10-01" },
+  });
+  assert.equal(alreadyHandled.publish, false);
+  assert.equal(alreadyHandled.retryable, false);
+
+  for (const sector of input.sectorHeat.filter((item) => item.market === "CN")) {
+    sector.asOf = "2026-09-29";
+  }
+  assert.equal(assessDailyFreshness(input, previous).reason, "cn_close_not_available");
+});
+
+test("verified holiday boundaries retain the China close gate on reopening and unknown years", () => {
+  const cases = [
+    ["2026-01-02", "2025-12-31", true],
+    ["2026-02-20", "2026-02-13", true],
+    ["2026-04-06", "2026-04-03", true],
+    ["2026-05-05", "2026-04-30", true],
+    ["2026-06-19", "2026-06-18", true],
+    ["2026-09-25", "2026-09-24", true],
+    ["2026-09-28", "2026-09-24", false],
+    ["2026-10-07", "2026-09-30", true],
+    ["2026-10-08", "2026-09-30", false],
+    ["2026-10-08", "2026-10-08", true],
+    ["2027-10-01", "2027-09-30", false],
+  ];
+  for (const [reportDate, chinaClose, publish] of cases) {
+    const input = fixtureInput();
+    input.reportDate = reportDate;
+    input.updateKind = "close";
+    input.cutoffAt = dailyCutoffAt(reportDate, input.updateKind);
+    for (const sector of input.sectorHeat.filter((item) => item.market === "CN")) {
+      sector.asOf = chinaClose;
+    }
+    assert.equal(assessDailyFreshness(input, null).publish, publish, reportDate);
+  }
+});
+
 test("daily market pack preserves prior sessions and hides implementation labels", () => {
   const input = fixtureInput();
   const apiMarkets = input.markets.map((market) => ({
