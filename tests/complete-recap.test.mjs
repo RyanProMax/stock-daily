@@ -242,9 +242,9 @@ test("X originals bind allowlisted authors and snowflake times; future posts and
 
 test("comprehensive research has a deterministic query budget and frozen plan", () => {
   const workflow = new MarketWorkflow({ input: fixtureInput(), market: "US", completeRecap: true });
-  assert.equal(workflow.searchQueryLimit, 92);
+  assert.equal(workflow.searchQueryLimit, 108);
   assert.equal(assertResearchBatchBudget(12, completeRecapPlan(workflow.envelope).anomalies, {}, "", workflow.searchQueryLimit), 80);
-  assert.throws(() => assertResearchBatchBudget(13, completeRecapPlan(workflow.envelope).anomalies, {}, "", workflow.searchQueryLimit), /预算不足/);
+  assert.throws(() => assertResearchBatchBudget(29, completeRecapPlan(workflow.envelope).anomalies, {}, "", workflow.searchQueryLimit), /预算不足/);
   assert.deepEqual(completeRecapPlan(workflow.envelope), completeRecapPlan(workflow.envelope));
 });
 
@@ -295,6 +295,11 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     await writeFile(resolve(workflow.runDir, "artifacts/recap-trading-data.json"), JSON.stringify(f.tradingData));
     await writeFile(resolve(workflow.runDir, "artifacts/recap-macro-data.json"), JSON.stringify(f.macroData));
     workflow.assertResearchCapacity = async () => {};
+    // This fixture exercises batch isolation, not native URL discovery.
+    workflow.runValidatedAgentStage = async ({ role }) => {
+      assert.equal(role, "recap_discovery");
+      return { output: [], key: "controlled-empty-discovery" };
+    };
     const contexts = [];
     workflow.researchPrimaryRole = async (anomaly, role) => {
       contexts.push({ target: anomaly.target, urls: [...workflow.excludedSources], domains: [...workflow.researchSourceDomains], macroData: structuredClone(workflow.macroData), sharedEvidence: structuredClone(workflow.recapResearchEvidence), payload: workflow.researchPayload(anomaly) });

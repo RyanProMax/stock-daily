@@ -161,6 +161,12 @@ test("a changed repair payload cannot reuse completed flags to overspend the cum
     await assert.rejects(() => workflow.repairCompleteRecapResearch({ ...input, outputs: [] }), /预算不足/);
     assert.equal(calls.length, 6);
     assert.equal(workflow.searchQueryCount, 92);
+    const changed = structuredClone(input);
+    changed.attribution.entries[0].counterAssessment += " Additional unresolved qualification.";
+    const next = await workflow.repairCompleteRecapResearch({ ...changed, outputs: [] });
+    assert.equal(next.researched, false, "a different repair plan cannot replenish the phase allowance");
+    assert.equal(calls.length, 6);
+    assert.equal(workflow.manifest.recapResearchRepairBudget.queryLimit, 92);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

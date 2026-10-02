@@ -56,7 +56,7 @@ test("an unverified completed flag cannot grant a third native attempt or reserv
   workflow.researchPrimaryRole = async () => { throw new Error("A third invocation must not be reached"); };
   const failures = await workflow.researchCompleteRecapBatch([], "0", [], { recovery: true, pending: [{ anomaly, role: "facts", batchKey: "0" }] });
   assert.equal(failures.length, 1); assert.match(workflow.manifest.recapResearchRoles[key].error, /两次原始执行机会/);
-  workflow.searchQueryCount = 90;
+  workflow.searchQueryCount = workflow.searchQueryLimit - 2;
   assert.equal(await workflow.assertResearchCapacity([anomaly], "", [], { skipExhaustedPrimary: true }), 2);
   await assert.rejects(workflow.assertResearchCapacity([anomaly]), /预算不足/);
 });

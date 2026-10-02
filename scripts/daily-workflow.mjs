@@ -55,6 +55,7 @@ import {
 import { publishableExternalSourceDomains } from "./source-registry.mjs";
 import { priorRecapDiscoveryLeads } from "./recap-research-discovery.mjs";
 import { collectRecapNewsOriginals, recapNewsOriginalsContext, recapNewsOriginalsSourceReader } from "./recap-news-originals.mjs";
+import { assertRecapStageTargets, completeRecapQueryLimit, availableRecapRepairQueries, recapDiscoveryQueries, validateRecapDiscoveryOutput, RECAP_REPAIR_QUERY_BUDGET, NARRATIVE_QUERY_BUDGET } from "./recap-native-input.mjs";
 import { collectXIntelligence } from "./x-intelligence.mjs";
 import {
   assessRecapEvidenceCoverage, compactRecapCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
@@ -109,6 +110,7 @@ async function cliFeatureArgs(binary) {
 }
 
 const STAGES = {
+  recap_discovery: { prompt: "recap-discovery.md", schema: "recap-discovery.schema.json", search: true, reasoning: "medium", timeoutMs: 4 * 60 * 1_000 },
   recap_attributor: { prompt: "recap-attributor.md", schema: "recap-attribution.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   recap_writer: { prompt: "recap-writer.md", schema: "recap.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
   recap_reviewer: { prompt: "recap-reviewer.md", schema: "recap-review.schema.json", search: false, reasoning: "medium", timeoutMs: 8 * 60 * 1_000, idleTimeoutMs: 5 * 60 * 1_000 },
@@ -933,7 +935,7 @@ export class MarketWorkflow {
     this.batchMarkets = [...new Set(batchMarkets)].sort();
     this.now = now;
     this.envelope = researchMarketEnvelope(input, market);
-    this.searchQueryLimit = completeRecap ? 12 + 4 * recapTargets(this.envelope).length : 12;
+    this.searchQueryLimit = completeRecap ? completeRecapQueryLimit(recapTargets(this.envelope).length) : 12;
     this.inputHash = marketInputHash(input, market);
     this.workRoot = workRoot;
     // A parser/validation upgrade must not overwrite an older terminal
@@ -1160,7 +1162,7 @@ export class MarketWorkflow {
             ...(this.manifest.agentRuns ?? []),
             ...(this.manifest.failedAgentRuns ?? []),
           ]
-            .filter((run) => ["facts", "causal"].includes(run.role))
+            .filter((run) => STAGES[run.role]?.search === true)
             .map((run) => Date.parse(run.completedAt ?? ""))
             .filter(Number.isFinite)
         : [];
@@ -1300,7 +1302,7 @@ export class MarketWorkflow {
       ...(this.manifest.agentRuns ?? []),
       ...(this.manifest.failedAgentRuns ?? []),
     ]
-      .filter((run) => ["facts", "causal"].includes(run.role))
+      .filter((run) => STAGES[run.role]?.search === true)
       .map((run) => Date.parse(run.completedAt ?? ""))
       .filter(Number.isFinite);
     if (completedAt.length === 0) return 0;
@@ -1439,7 +1441,7 @@ export class MarketWorkflow {
             ? `${promptSuffix}\n\n# Deterministic validation repair\nThe previous isolated output was rejected for this exact reason: ${String(deterministicFeedback).slice(0, 600)}. Return a fresh result that fixes this defect without changing supported facts.\n`
             : promptSuffix,
         });
-        const output = await this.validateAgentStage(key, () => validate(run.output));
+        const output = await this.validateAgentStage(key, () => validate(run.output, run));
         return withProvenance ? { output, key } : output;
       } catch (error) {
         lastError = error;
@@ -1620,6 +1622,7 @@ export class MarketWorkflow {
         payload,
         promptSuffix,
       );
+    assertRecapStageTargets(role, payload, JSON.parse(schemaText));
     const outputPath = resolve(this.runDir, "artifacts", `${key}.json`);
     const eventsAliasPath = resolve(this.runDir, "events", `${key}.jsonl`);
     const checkpoint = await this.readAgentCheckpoint({ key, promptHash, schemaHash });
@@ -2886,13 +2889,29 @@ export class MarketWorkflow {
   async prepareRecapNewsOriginals() {
     await assertWorkflowImplementation(this.manifest.implementation);
     const path = resolve(this.runDir, "artifacts/recap-news-originals.json");
-    const leads = this.recapDiscoveryLeads ?? [];
+    let leads = this.recapDiscoveryLeads ?? [];
     let book;
     if (await exists(path)) {
       book = await readJson(path);
       if (this.manifest.newsOriginalsHash !== stableHash(book)) throw new Error("冻结新闻原件的哈希发生变化");
       recapNewsOriginalsContext(book, this.envelope, leads);
     } else {
+      if (this.market === "US" && !leads.length) {
+        const payload = { market: this.market, marketAsOf: this.envelope.marketAsOf, session: this.envelope.session, queries: recapDiscoveryQueries(this.envelope) };
+        const discovery = await this.runValidatedAgentStage({ baseKey: "recap-news-discovery", role: "recap_discovery", payload, inputArtifacts: ["market-envelope.json"], maxAttempts: 2, withProvenance: true, validate: (output, run) => {
+          const discovered = validateRecapDiscoveryOutput(output, this.envelope);
+          const events = parseAgentEvents(run.events, { requireSearch: true });
+          if (events.searchCount !== 2) throw new Error("收盘报道发现必须执行两次真实搜索");
+          assertDeclaredQueries(output.queries, events.queries, "收盘报道发现");
+          return discovered;
+        } });
+        leads = discovery.output;
+        this.recapDiscoveryLeads = leads;
+        this.manifest.recapDiscoveryLeads = leads;
+        this.manifest.newsDiscovery = { stage: discovery.key, leadsHash: stableHash(leads) };
+        await atomicJson(resolve(this.runDir, "artifacts/recap-discovery-leads.json"), leads);
+        await this.saveManifest();
+      }
       book = await collectRecapNewsOriginals(this.envelope, leads, { signal: AbortSignal.timeout(Math.max(1, Math.min(120_000, this.remainingTime()))) });
       await atomicJson(path, book);
       this.manifest.newsOriginalsHash = stableHash(book);
@@ -3101,6 +3120,17 @@ export class MarketWorkflow {
   }
 
   async repairCompleteRecapResearch({ plan, outputs, ledger, coverage, attribution, evidenceContext = {} }) {
+    // Freeze one cumulative ceiling for the whole repair phase. A changed
+    // payload or a new coverage plan must not grant another twelve queries.
+    if (!this.manifest.recapResearchRepairBudget) {
+      this.manifest.recapResearchRepairBudget = {
+        startQueryCount: this.searchQueryCount,
+        queryLimit: this.searchQueryCount + availableRecapRepairQueries(this.searchQueryLimit, this.searchQueryCount, this.reservedSearchQueryCount),
+      };
+      await this.saveManifest();
+    }
+    const repairBudget = this.manifest.recapResearchRepairBudget;
+    if (!Number.isInteger(repairBudget.startQueryCount) || !Number.isInteger(repairBudget.queryLimit) || repairBudget.startQueryCount < 0 || repairBudget.startQueryCount > this.searchQueryCount || repairBudget.queryLimit < repairBudget.startQueryCount || repairBudget.queryLimit - repairBudget.startQueryCount > RECAP_REPAIR_QUERY_BUDGET || repairBudget.queryLimit > this.searchQueryLimit - NARRATIVE_QUERY_BUDGET) throw new Error("复盘返工的冻结搜索预算无效");
     const inputHash = stableHash({ plan, ledger, coverage, attribution });
     const planName = `recap-research-repair-plan-${inputHash.slice(0, 12)}.json`;
     const planPath = resolve(this.runDir, "artifacts", planName);
@@ -3115,7 +3145,7 @@ export class MarketWorkflow {
       }
     }
     if (!repairPlan) {
-      repairPlan = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: Math.max(0, this.searchQueryLimit - this.searchQueryCount - this.reservedSearchQueryCount) });
+      repairPlan = planRecapResearchRepair(plan, ledger, coverage, attribution, { remainingQueries: Math.max(0, repairBudget.queryLimit - this.searchQueryCount - this.reservedSearchQueryCount) });
       await atomicJson(planPath, repairPlan);
       this.manifest.recapResearchRepairPlans ??= {};
       this.manifest.recapResearchRepairPlans[inputHash] = { planArtifact: planName, planHash: stableHash(repairPlan) };
@@ -3139,7 +3169,7 @@ export class MarketWorkflow {
     const anomalies = new Map(plan.anomalies.map(anomaly => [anomaly.id, anomaly]));
     let requiredQueries = 0;
     for (const job of repairPlan.jobs) requiredQueries += await this.assertResearchCapacity([anomalies.get(job.anomalyId)], job.feedback);
-    if (this.searchQueryCount + this.reservedSearchQueryCount + requiredQueries > this.searchQueryLimit) throw new Error("完整复盘返工的累计搜索预算不足");
+    if (requiredQueries && this.searchQueryCount + this.reservedSearchQueryCount + requiredQueries > repairBudget.queryLimit) throw new Error("完整复盘返工的累计搜索预算不足");
     if (requiredQueries && this.remainingTime() < 30_000) throw new Error("完整复盘返工的整体预算耗尽");
     // Complete pairs remain isolated and all started siblings must settle. The
     // preserved plan/context reproduce the same payloads on resume, while the
