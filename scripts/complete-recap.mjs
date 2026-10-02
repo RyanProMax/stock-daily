@@ -15,7 +15,7 @@ import { verifiedExternalSourceType } from "./source-registry.mjs";
 import { validateRecapTradingData } from "./recap-market-data.mjs";
 import { hasMeasuredMagnitude, magnitudeEvidenceForObservation, validateMagnitudeObservationIds } from "./recap-magnitude.mjs";
 import { attributionEvidenceIds, recapAttributionCandidates, validateRecapAttribution, hasConstituentAttribution } from "./recap-attribution.mjs";
-import { auditRecapRateFactors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
+import { auditRecapRateFactors, hasUnknownRatePublication, reportedRateFactorMatch, intradayRateComparisonCopy } from "./recap-rate-factors.mjs";
 import { verifiedCompanyOutlooks, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
 export const RECAP_VERSION = "verified-complete-recap-v1";
@@ -272,6 +272,12 @@ export function validateCompleteRecap(value, envelope, ledger, social, { require
     if (decomposed && raw.status !== "unresolved" && target.constituents.some(company => !bodySupportsDeterministicTarget(why, envelope, company.symbol) || !bodySupportsDeterministicTarget(whyEn, envelope, company.symbol))) throw new Error(`${target.symbol} 两种语言必须分别保留所有成分股的解释，不能只写净额或一家公司`);
     if (inferred && (!/推断|推论|推测/u.test(why) || !/\binfer(?:ence|red|ring)?\b/iu.test(whyEn))) throw new Error(`${target.symbol} 推断必须在两种语言中明确标注`);
     if (cause.some(source => source.kind === "macro_observation") && (!/观测|观察/u.test(why) || !/平价/u.test(why) || !hasUnknownRatePublication(why) || !/\bobserv(?:ation|ed)\b/iu.test(whyEn) || !/\bpar\b/iu.test(whyEn) || !hasUnknownRatePublication(whyEn))) throw new Error(`${target.symbol} 两种语言须保留观测口径与未知公布时刻，不得把它写成新闻催化`);
+    for (const link of chain?.chains ?? []) {
+      const root = sourceMap.get(link.rootEvidenceId), reaction = sourceMap.get(link.reactionEvidenceId);
+      if (root?.kind !== "macro_observation") continue;
+      const copy = intradayRateComparisonCopy(reportedRateFactorMatch(root, reaction, envelope));
+      if (copy && (!why.includes(copy.zh) || !whyEn.includes(copy.en))) throw new Error(`${target.symbol} 两种语言须完整保留日内报价的比较基准，不得写成上一交易日变化`);
+    }
     const magnitude = readerText(raw.magnitude, `${target.symbol} magnitude`, 30, 600);
     const magnitudeEn = readerText(raw.magnitudeEn, `${target.symbol} magnitudeEn`, 40, 1_200);
     for (const copy of [magnitude, magnitudeEn]) assertGdpNowCopy(copy, size);

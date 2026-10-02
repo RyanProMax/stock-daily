@@ -67,7 +67,7 @@ import { collectRecapPbocNewsData, validateRecapPbocNewsData, pbocNewsResearchCo
 import { validateRecapAttribution } from "./recap-attribution.mjs";
 import { collectRecapTransmissionData, validateRecapTransmissionData, transmissionSourceReader } from "./recap-transmission-data.mjs";
 import { auditLedgerSourceSnapshots, createSnapshotSourceReader } from "./evidence-source-snapshots.mjs";
-import { mergeRecapRateFactors } from "./recap-rate-factors.mjs";
+import { mergeRecapRateFactors, selectedRecapRateComparisons } from "./recap-rate-factors.mjs";
 import { collectRecapCompanyBackgroundData, validateRecapCompanyBackgroundData, companyBackgroundSourceReader } from "./recap-company-background-data.mjs";
 import { planRecapResearchRepair } from "./recap-research-repair.mjs";
 import { recapEvidenceTiming } from "./evidence-timing.mjs";
@@ -2076,7 +2076,7 @@ export class MarketWorkflow {
     await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v46",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v47",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,
@@ -3081,6 +3081,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-attribution.json"), attribution);
     this.manifest.recapAttributionHash = stableHash(attribution);
     payload.attribution = attribution;
+    payload.observedRateComparisons = selectedRecapRateComparisons(attribution, ledger, this.envelope);
     await this.saveManifest();
     if (coverage.eligibleCount !== coverage.requiredCount) throw new Error(`复盘证据覆盖不完整：${coverage.eligibleCount}/${coverage.requiredCount} 个目标具备归因和幅度解释证据`);
     validateRecapAttribution(attribution, this.envelope, payload.targets, ledger, { requireComplete: true, macroData });

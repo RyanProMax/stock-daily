@@ -2,7 +2,7 @@ import { assertFactsNumbersInExcerpt, hasCausalPassage } from "./daily-workflow-
 import { normalizedEvidenceText } from "./daily-source-audit.mjs";
 import { backgroundEvidenceInWindow, isCalendarDate, officialReleaseDateInWindow, sourceEvidenceDeadline } from "./evidence-timing.mjs";
 import { verifiedExternalSourceType } from "./source-registry.mjs";
-import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication } from "./recap-rate-factors.mjs";
+import { verifiedRateFactor, reportedRateFactorMatch, assertRateFactorAnchors, hasUnknownRatePublication, intradayRateComparisonCopy } from "./recap-rate-factors.mjs";
 import { isVerifiedCurrentCorporateAction } from "./recap-corporate-actions.mjs";
 import { MOF_DOCUMENT_VERSION, mofDocumentIdentity } from "./mof-document.mjs";
 import { CHINA_PMI_EVIDENCE_VERSION, isChinaPmiArticle } from "./china-pmi-release.mjs";
@@ -122,7 +122,10 @@ export function recapAttributionCandidates(envelope, targets, ledger, { macroDat
     const targetReports = reports.filter(source => directlyCovers(source, target.symbol));
     const targetRoots = roots.filter(source => reportedEventRootCovers(source, target.symbol));
     const pairs = roots.flatMap(root => reports.filter(report => independent(root, report) && (root.kind !== "corporate_action" || constituentClaims(report, root.corporateAction.symbol))).flatMap(report => {
-      if (chronology(root, report, envelope)) return [{ root: root.id, reaction: report.id, timingEvidenceIds: [] }];
+      if (chronology(root, report, envelope)) {
+        const rateComparison = root.kind === "macro_observation" ? reportedRateFactorMatch(root, report, envelope) : null;
+        return [{ root: root.id, reaction: report.id, timingEvidenceIds: [], ...(rateComparison ? { rateComparison: { ...rateComparison, requiredCopy: intradayRateComparisonCopy(rateComparison) } } : {}) }];
+      }
       const eligible = confirmations.filter(confirmation => chronology(root, report, envelope, confirmation));
       return eligible.length ? [{ root: root.id, reaction: report.id, timingEvidenceIds: eligible.map(source => source.id) }] : [];
     }));
@@ -198,9 +201,12 @@ export function validateRecapAttribution(value, envelope, targets, ledger, { req
       if (root.kind === "corporate_action" && (subjects.length !== 1 || subjects[0] !== root.corporateAction.symbol || !constituentClaims(report, root.corporateAction.symbol))) throw new Error(`${target.symbol} 公司现金安排只能支持本公司的独立价格反应，不能扩大为行业或其他成分`);
       const observedFactor = root.kind === "macro_observation";
       if (observedFactor) {
-        if (basis !== "inferred" || chain.timingEvidenceId !== null || !reportedRateFactorMatch(root, report, envelope)) throw new Error(`${target.symbol} 观测不能伪装为当日有发布时间的事件或确定归因`);
+        const comparison = reportedRateFactorMatch(root, report, envelope);
+        if (basis !== "inferred" || chain.timingEvidenceId !== null || !comparison) throw new Error(`${target.symbol} 观测不能伪装为当日有发布时间的事件或确定归因`);
         assertRateFactorAnchors(chain.eventAnchors, root);
         if (!/observation|observed|观测|观察/iu.test(chain.limitations) || !hasUnknownRatePublication(chain.limitations) || !/\bpar\b|平价/iu.test(chain.limitations)) throw new Error(`${target.symbol} 观测推断须区分平价收益率与报道报价，并保留未知发布时间`);
+        const copy = intradayRateComparisonCopy(comparison);
+        if (copy && !chain.limitations.includes(copy.en) && !chain.limitations.includes(copy.zh)) throw new Error(`${target.symbol} 日内报价比较必须保留当天较早的基准，不能写成前一交易日变化：${copy.en}`);
       } else {
         try { anchors(chain.eventAnchors, root, report); }
         catch (error) { throw new Error(`${target.symbol} 事件 ${root.id} 与反应 ${report.id} 的 eventAnchors=${JSON.stringify(chain.eventAnchors)} 无效：${error.message}。请逐项使用两段引文实际共有的连续词句或数值，不能用概括句、译文或公司别名替代；不足时保留 unresolved。`); }

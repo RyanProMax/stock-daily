@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { recapFixture } from "./complete-recap-fixture.mjs";
 import { collectRecapMacroData } from "../scripts/recap-macro-data.mjs";
-import { verifiedRecapRateFactors, verifiedRateFactor, mergeRecapRateFactors, auditRecapRateFactors, reportedRateFactorMatch } from "../scripts/recap-rate-factors.mjs";
+import { verifiedRecapRateFactors, verifiedRateFactor, mergeRecapRateFactors, auditRecapRateFactors, reportedRateFactorMatch, intradayRateComparisonCopy, selectedRecapRateComparisons } from "../scripts/recap-rate-factors.mjs";
 import { recapTargets, validateCompleteRecap } from "../scripts/complete-recap.mjs";
 import { recapAttributionCandidates, validateRecapAttribution } from "../scripts/recap-attribution.mjs";
 import { auditLedgerSourceSnapshots, SOURCE_SNAPSHOT_VERSION } from "../scripts/evidence-source-snapshots.mjs";
+import { assertFactsNumbersInExcerpt } from "../scripts/daily-workflow-core.mjs";
 
 async function fixture(market = "US") {
   const f = recapFixture(market);
@@ -19,6 +20,75 @@ async function fixture(market = "US") {
   f.report.supportingExcerpt = "Stocks fell because higher long-term Treasury yields pressured valuations, while opposing forces limited the net decline. The 10-year Treasury rose to 5.25% from 5.24% late Thursday.";
   return f;
 }
+
+async function intradayFixture() {
+  const f = await fixture();
+  const xml = f.macroData.snapshots[0].xml.replace('<d:BC_10YEAR>5.26</d:BC_10YEAR>', '<d:BC_10YEAR>5.23</d:BC_10YEAR>');
+  f.macroData = await collectRecapMacroData(f.envelope, { now: () => new Date("2026-08-21T22:00:00Z"), reader: async url => ({ rawBody: Buffer.from(xml), finalUrl: url }) });
+  f.ledger = mergeRecapRateFactors(f.ledger, f.macroData, f.envelope);
+  f.factor = f.ledger.sources.find(source => source.kind === "macro_observation" && source.years === 10);
+  f.report.supportingExcerpt = "The S&P 500 recovered as bond yields retreated, while opposing forces limited the advance. The 10-year Treasury yield (^TNX) eased to 5.24% after climbing earlier Friday to 5.3%, a new multidecade high.";
+  return f;
+}
+
+test("a named same-session retreat keeps the intraday high separate from the official prior-session observation", async () => {
+  const f = await intradayFixture(), quote = f.report.supportingExcerpt;
+  const comparison = reportedRateFactorMatch(f.factor, f.report, f.envelope);
+  assert.equal(comparison.comparisonPeriod, "intraday");
+  assert.equal(comparison.currentPercent, 5.24);
+  assert.equal(comparison.intradayReferencePercent, 5.3);
+  assert.equal(comparison.intradayChangeBasisPoints, -6);
+  assert.equal(comparison.previousPercent, undefined);
+  assert.equal(comparison.previousSession, undefined);
+  assert.equal(comparison.changeBasisPoints, undefined);
+  assert.equal(f.factor.values.previousPercent, 5.24);
+  assert.equal(f.factor.values.changeBasisPoints, -1);
+  for (const altered of [
+    quote.replace("Friday", "Thursday"), quote.replace("earlier Friday", "late Thursday"),
+    quote.replace("10-year", "2-year"), quote.replace("Treasury", "corporate bond"),
+    quote.replace("eased", "rose"), quote.replace("climbing", "falling"),
+    quote.replace("5.3%", "5.2%"), quote.replace("5.3%", "5.24%"),
+    quote.replace("5.24%", "5.50%"), quote.replace("5.24%", "0%"),
+    quote.replace("% after", " basis points after"), quote.replace("after climbing", ". Another bond was climbing"),
+  ]) assert.equal(reportedRateFactorMatch(f.factor, { ...f.report, supportingExcerpt: altered }, f.envelope), null, altered);
+  assert.equal(reportedRateFactorMatch({ ...f.factor, values: { ...f.factor.values, changeBasisPoints: 1 } }, f.report, f.envelope), null);
+  assert.equal(reportedRateFactorMatch(f.factor, { ...f.report, publishedAt: "2026-08-20T20:30:00Z" }, f.envelope), null);
+  const candidates = recapAttributionCandidates(f.envelope, recapTargets(f.envelope), f.ledger, { macroData: f.macroData });
+  const pair = candidates.find(item => item.target === "SPX").candidatePairs.find(item => item.root === f.factor.id && item.reaction === f.report.id);
+  assert.deepEqual(pair.rateComparison.requiredCopy, intradayRateComparisonCopy(comparison));
+  assert.equal(pair.rateComparison.intradayReferencePercent, 5.3);
+  const copy = intradayRateComparisonCopy(comparison);
+  for (const facts of [copy.zh, copy.en]) assert.doesNotThrow(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt:quote}));
+  for (const facts of ["The 10-year Treasury yield rose to 5.24%.", "10 年期国债收益率上升至 5.24%。"]) assert.throws(() => assertFactsNumbersInExcerpt({facts,supportingExcerpt:quote}), /方向/u);
+});
+
+test("attribution and reader copy cannot turn an intraday high into the previous-session yield", async () => {
+  const f = await intradayFixture();
+  const entry = f.attribution.entries.find(item => item.target === "SPX");
+  const comparison = reportedRateFactorMatch(f.factor, f.report, f.envelope), copy = intradayRateComparisonCopy(comparison);
+  entry.basis = "inferred";
+  Object.assign(entry.chains[0], { rootEvidenceId: f.factor.id, reactionEvidenceId: f.report.id, timingEvidenceId: null, mechanismEvidenceIds: [], eventAnchors: ["10-year U.S. Treasury", "2026-08-21"], expectedDirection: "positive", limitations: "This is a par observation, distinct from the nominal quote; historical publication time is unknown. " + copy.en });
+  const validate = () => validateRecapAttribution(f.attribution, f.envelope, recapTargets(f.envelope), f.ledger, { macroData: f.macroData });
+  assert.doesNotThrow(validate);
+  const contexts = selectedRecapRateComparisons(f.attribution, f.ledger, f.envelope);
+  assert.equal(contexts.length, 1); assert.equal(contexts[0].target, "SPX");
+  assert.equal(contexts[0].rootEvidenceId, f.factor.id); assert.deepEqual(contexts[0].requiredCopy, copy);
+  entry.chains[0].limitations = "This is a par observation, distinct from the nominal quote; historical publication time is unknown.";
+  assert.throws(validate, /日内报价比较/u);
+  entry.chains[0].limitations += " " + copy.en;
+  const raw = f.raw.entries.find(item => item.target === "SPX");
+  raw.evidenceIds.push(f.factor.id);
+  raw.why = "推断：" + raw.why + "财政部平价收益率是当日观测，与报道中的基准债报价口径不同；历史发布时间未知。";
+  raw.whyEn = "Inference: " + raw.whyEn + " The Treasury par yield is an observation, distinct from the benchmark quote; historical publication time is unknown.";
+  const validateCopy = () => validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social, { attribution: f.attribution, macroData: f.macroData });
+  assert.throws(validateCopy, /日内报价/u);
+  raw.why += copy.zh;
+  assert.throws(validateCopy, /日内报价/u);
+  raw.whyEn += " " + copy.en;
+  assert.doesNotThrow(validateCopy);
+  raw.confidence = "high";
+  assert.throws(validateCopy, /中等置信/u);
+});
 
 test("official observations are reconstructed from original XML without a fabricated publication clock", async () => {
   const f = await fixture();

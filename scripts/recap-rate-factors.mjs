@@ -62,7 +62,18 @@ export function reportedRateFactorMatch(factor, report, envelope) {
   const priorDay = dayName(envelope.session.previousAsOf);
   const pattern = new RegExp(`\\b${factor.years}-year (?:U\\.S\\. )?Treasury(?: (?:yield|note|bond))?(?:,[^,.;\\d]{1,180},)? (rose|climbed|fell|declined|slipped|increased|decreased) to (\\d+(?:\\.\\d+)?)% from (\\d+(?:\\.\\d+)?)% (?:late )?${priorDay}\\b`, "iu");
   const match = pattern.exec(report.supportingExcerpt);
-  if (!match) return null;
+  if (!match) {
+    // A quote retreating from an explicitly named same-session high is not a
+    // previous-session comparison. Preserve that reference separately; never
+    // replace the independently measured Treasury par baseline with it.
+    const today = dayName(factor.dataDate);
+    const symbol = factor.years === 10 ? "(?: \\(\\^TNX\\))?" : "";
+    const intraday = new RegExp(`\\b${factor.years}-year (?:U\\.S\\. )?Treasury yield${symbol} (?:eased|fell|declined|slipped|retreated) to (\\d+(?:\\.\\d+)?)% after (?:climbing|rising) earlier ${today} to (\\d+(?:\\.\\d+)?)%`, "iu").exec(report.supportingExcerpt);
+    if (!intraday || factor.values.changeBasisPoints >= 0) return null;
+    const currentPercent = Number(intraday[1]), intradayReferencePercent = Number(intraday[2]);
+    if (currentPercent <= 0 || intradayReferencePercent > 100 || intradayReferencePercent <= currentPercent || Math.abs(currentPercent - factor.values.actualPercent) > 0.10 + 1e-9) return null;
+    return { years: factor.years, currentPercent, intradayReferencePercent, intradayChangeBasisPoints: Number(((currentPercent - intradayReferencePercent) * 100).toFixed(6)), comparisonPeriod: "intraday", comparisonDate: factor.dataDate, basis: "separately reported same-session nominal Treasury quote; neither a prior-session comparison nor the interpolated par observation" };
+  }
   const currentPercent = Number(match[2]), previousPercent = Number(match[3]);
   const delta = currentPercent - previousPercent;
   const verbSign = /^(?:rose|climbed|increased)$/iu.test(match[1]) ? 1 : -1;
@@ -71,7 +82,27 @@ export function reportedRateFactorMatch(factor, report, envelope) {
   // or statistical confidence. Wider differences need additional quote/time
   // evidence; never silently broaden this bound to make a report pass.
   if (Math.abs(currentPercent - factor.values.actualPercent) > 0.10 + 1e-9 || Math.abs(previousPercent - factor.values.previousPercent) > 0.10 + 1e-9) return null;
-  return { years: factor.years, currentPercent, previousPercent, changeBasisPoints: Number((delta * 100).toFixed(6)), basis: "separately reported nominal Treasury quote; not the interpolated par observation", previousSession: envelope.session.previousAsOf };
+  return { years: factor.years, currentPercent, previousPercent, changeBasisPoints: Number((delta * 100).toFixed(6)), comparisonPeriod: "previous_session", basis: "separately reported nominal Treasury quote; not the interpolated par observation", previousSession: envelope.session.previousAsOf };
+}
+
+export function intradayRateComparisonCopy(comparison) {
+  if (comparison?.comparisonPeriod !== "intraday") return null;
+  const current = comparison.currentPercent.toFixed(2), earlier = comparison.intradayReferencePercent.toFixed(2);
+  return {
+    zh: `报道中的 ${comparison.years} 年期国债收益率从当日早些时候的 ${earlier}% 回落至 ${current}%；这是日内比较，不是相较上一交易日的变化。`,
+    en: `The reported ${comparison.years}-year Treasury yield retreated from ${earlier}% earlier in the same session to ${current}%; this is an intraday comparison, not a change from the previous session.`,
+  };
+}
+
+export function selectedRecapRateComparisons(attribution, ledger, envelope) {
+  const sources = new Map(ledger.sources.map(source => [source.id, source]));
+  return attribution.entries.flatMap(entry => entry.chains.flatMap(chain => {
+    const root = sources.get(chain.rootEvidenceId), reaction = sources.get(chain.reactionEvidenceId);
+    if (root?.kind !== "macro_observation") return [];
+    const comparison = reportedRateFactorMatch(root, reaction, envelope);
+    if (!comparison) throw new Error("选定收益率链缺少原始报价比较");
+    return [{ target: entry.target, rootEvidenceId: root.id, reactionEvidenceId: reaction.id, ...comparison, requiredCopy: intradayRateComparisonCopy(comparison) }];
+  }));
 }
 
 export function assertRateFactorAnchors(values, factor) {

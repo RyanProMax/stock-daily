@@ -25,8 +25,8 @@ import { PDF_TEXT_EVIDENCE_VERSION, verifiedPdfTextExcerpt } from "./pdf-text-ev
 import { hasChineseCompanyEconomicExposure } from "./company-exposure-excerpts.mjs";
 import { COMPANY_OUTLOOK_VERSION, companyOutlookDefinitions, verifiedCompanyOutlooks, prospectiveCompanyCopyRemainder, hasUnverifiedResultOrSurprise, hasOtherFinancialStatement, assertCompanyOutlookDescriptions } from "./company-outlook.mjs";
 
-export const WORKFLOW_VERSION = "stock-daily-multi-agent-v71";
-export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v5";
+export const WORKFLOW_VERSION = "stock-daily-multi-agent-v72";
+export const NUMERIC_EVIDENCE_VERSION = "verified-number-direction-v6";
 export const PDF_ISSUER_EVIDENCE_VERSION = "verified-pdf-issuer-v6";
 export const BACKGROUND_EXPOSURE_VERSION = "verified-background-exposure-v4";
 export const AGENT_FILESYSTEM_ISOLATION = "macos-seatbelt-v2";
@@ -1104,7 +1104,7 @@ const FACT_NUMBER_MENTION =
 const POSITIVE_DIRECTION =
   /上涨|上升|上行|增长|增加|提高|升至|高于|超过|超出|好于|改善|扩大|(?:收)?涨(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:放量|增量|增幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:rose|risen|rise|rising|grew|grown|growth|increased?|gained?|jumped?|climbed?|higher|above|exceed(?:ed|s|ing)?|improved?|expanded?|hikes?|hiked|raises?|raised|raising|up)\b/giu;
 const NEGATIVE_DIRECTION =
-  /下跌|下降|下行|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower(?:s|ed|ing)?|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
+  /下跌|下降|下行|回落|减少|降低|降至|低于|不及|逊于|恶化|收窄|(?:略|微|小幅)降(?=\s*[+-]?\d)|(?:收)?跌(?=\s*(?:[+-]?\d|超|逾|近|约|至))|(?:缩量|减量|减幅)(?=\s*(?:[+-]?\d|超|逾|近|约|至|高于|低于|不超过|未超过))|\b(?:fell|fallen|falling|eased|declines?|declined|decreases?|decreased|dips?|dipped|drops?|dropped|dropping|slid|slides?|slips?|slipped|sank|sunk|retreat(?:ed|s|ing)?|lower(?:s|ed|ing)?|below|missed?|weakened?|contracted?|cuts?|reduces?|reduced|down)\b/giu;
 
 function numberMentionUnit(prefix = "", suffix = "") {
   const currency = prefix.toLocaleLowerCase();
