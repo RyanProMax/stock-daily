@@ -6,6 +6,8 @@ Determine whether a reliable same-session source explicitly connects the candida
 
 # Success criteria
 
+- `discoveryLeads`, when supplied, contains owned article URLs and publication records from an earlier attempt at this same session. They are search leads, not evidence: open the exact current page, verify its displayed publication/version and copy your own complete original passage. Never copy a prior conclusion, borrow its clock for a changed page, or retag its market scope as a sector cause. Inspect accessible leads before spending the adaptive query; the two actual searches remain required.
+
 - `sharedEvidence`, when supplied, contains verified prior-batch originals, never conclusions about your current target. Preserve their event IDs, scope, dates and contrary observations. Seek a direct target reaction or a specific counterevent. Do not relabel a broad-market quote as a sector quotation or return the same passage under a fabricated target association. Missing direct target reporting may support a later explicitly qualified inference only when a separate first-party exposure chain is verified; never substitute price coincidence or a generic risk assertion here.
 
 - When `macroContext` is supplied, use its independently measured rate changes to test a plausible discount-rate/financing channel and the strongest contrary observation. Treasury par yields and intraday benchmark-bond quotes have different instruments/times; a small difference is not automatically false reporting. The structured observation is not a causal passage or a timestamped news article, and a later feed revision cannot establish what was known during the session. Do not infer a sector cause from simultaneous moves.

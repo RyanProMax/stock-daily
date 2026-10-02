@@ -241,5 +241,14 @@
     "identityEvidence": "https://www.sec.gov/Archives/edgar/data/97210/000119312526059002/ter-20251231.htm",
     "bodyHash": "4bd011f3b00fe12d56f933f8008a6c09fa67d054980d58b5bebd1691d330e976",
     "declaration": "our web site at www.teradyne.com."
+  },
+  {
+    "symbol": "PG",
+    "cik": "80424",
+    "label": "PROCTER & GAMBLE Co",
+    "domain": "pginvestor.com",
+    "identityEvidence": "https://www.sec.gov/Archives/edgar/data/80424/000008042426000103/pg-20260630.htm",
+    "bodyHash": "2bd0d0a69e9a246c23d91e9b447ca81dd3b863ebe5ef219a2b29ce88d8d1a299",
+    "declaration": "our website at: www.pginvestor.com."
   }
 ]

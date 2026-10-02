@@ -2,7 +2,7 @@
 // domain. A competitor, SEC link, email address or a document hyperlink does
 // not. The reviewed records retain the exact declaration and filing hash.
 export function issuerDeclaredDomain(quote) {
-  const match = /\b(?:our (?:(?:corporate|internet) )?(?:website|web site|internet address)|the company(?:'|’)s website)\s*(?:address\s*)?(?:is\s*(?:located\s*)?(?:at\s*)?|(?:,\s*)?(?:which is located\s*)?at\s*|,\s*|\s+)\s*(?:https?:\/\/)?(?:www\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[\s/.,;)]|$)/iu.exec(quote);
+  const match = /\b(?:our (?:(?:corporate|internet) )?(?:website|web site|internet address)|the company(?:'|’)s website)\s*(?:address\s*)?(?:is\s*(?:located\s*)?(?:at\s*:?[\t ]*)?|(?:,\s*)?(?:which is located\s*)?at\s*:?[\t ]*|,\s*|\s+)\s*(?:https?:\/\/)?(?:www\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[\s/.,;)]|$)/iu.exec(quote);
   if (!match) return null;
   const domain = match[1].toLowerCase();
   if (!/^[a-z0-9-]+\.(?:com|ai)$/u.test(domain) || /^(?:sec|example)\./u.test(domain)) return null;

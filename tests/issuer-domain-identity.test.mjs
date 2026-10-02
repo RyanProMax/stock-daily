@@ -42,7 +42,10 @@ test("substituted original bytes, wrong issuer filings and altered profile ticke
 });
 
 test("reviewed annual declarations expand corporate identity without promoting lookalikes, social commentary or independent performance claims", () => {
-  assert.equal(validateIssuerDomainRecords(issuerDomains), issuerDomains); assert.equal(issuerDomains.length, 27);
+  assert.equal(validateIssuerDomainRecords(issuerDomains), issuerDomains); assert.equal(issuerDomains.length, 28);
+  assert.equal(issuerDeclaredDomain("Reports can be downloaded through links from our website at: www.pginvestor.com."), "pginvestor.com");
+  assert.equal(verifiedFirstPartyIssuerIdentity("https://www.pginvestor.com/news").symbol, "PG");
+  assert.equal(verifiedExternalSourceType("https://us.pg.com/newsroom/news-releases/"), "expert");
   for (const record of issuerDomains) {
     assert.equal(verifiedExternalSourceType(`https://www.${record.domain}/news/release`), "first_party");
     assert.equal(verifiedFirstPartyIssuerIdentity(`https://investors.${record.domain}/release`).domain, record.domain);

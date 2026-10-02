@@ -53,6 +53,7 @@ import {
   validateReport,
 } from "./daily-publish.mjs";
 import { publishableExternalSourceDomains } from "./source-registry.mjs";
+import { priorRecapDiscoveryLeads } from "./recap-research-discovery.mjs";
 import { collectXIntelligence } from "./x-intelligence.mjs";
 import {
   assessRecapEvidenceCoverage, compactRecapCoverage, completeRecapPlan, recapTargets, recapObservations, validateCompleteRecap,
@@ -860,12 +861,15 @@ export async function researchSourceAvailability(workRoot, { market, marketAsOf,
     if (!entry.isDirectory()) continue;
     try {
       const manifest = await readJson(resolve(workRoot, entry.name, "manifest.json"));
-      if (manifest.market !== market || manifest.marketAsOf !== marketAsOf || manifest.inputHash !== inputHash) continue;
+      if (manifest.market !== market || manifest.marketAsOf !== marketAsOf) continue;
       if (beforeStartedAt && Date.parse(manifest.startedAt) >= Date.parse(beforeStartedAt)) continue;
       const ledger = await readJson(resolve(workRoot, entry.name, "artifacts/evidence-ledger.json"));
       const ledgerHash = stableHash(ledger);
       if (!Object.entries(manifest.stages ?? {}).some(([key, stage]) => key.startsWith("evidence-verification-") && stage.status === "completed" && stage.outputHash === ledgerHash)) continue;
       for (const rejected of ledger.rejected ?? []) {
+        // A transport refusal for this session is independent of quote
+        // rounding or workflow version. Price contradictions are not.
+        if (manifest.inputHash !== inputHash && !/HTTP (?:401|403|429)/u.test(rejected.reason ?? "")) continue;
         // Missing publication metadata can be a parser limitation repaired
         // between attempts; it does not mean the publisher refused access.
         if (!/HTTP (?:401|403|404|429)|正文过短|正文需订阅|当日收盘报道.{0,40}矛盾/u.test(rejected.reason ?? "")) continue;
@@ -1043,6 +1047,7 @@ export class MarketWorkflow {
     const availability = await researchSourceAvailability(this.workRoot, {
       market: this.market, marketAsOf: this.envelope.marketAsOf, inputHash: this.inputHash,
     });
+    const discoveryLeads = this.completeRecap ? await priorRecapDiscoveryLeads(this.workRoot, this.envelope) : [];
     this.excludedSources = availability.urls;
     this.researchSourceDomains = publishableExternalSourceDomains().filter((domain) => !availability.unavailableDomains.includes(domain));
     await this.selectNoClaimRetryAttempt();
@@ -1067,6 +1072,8 @@ export class MarketWorkflow {
         this.excludedSources = priorAvailability.urls;
         this.researchSourceDomains = publishableExternalSourceDomains().filter((domain) => !priorAvailability.unavailableDomains.includes(domain));
         this.manifest.sourceAccess = priorAvailability;
+        this.recapDiscoveryLeads = previous.recapDiscoveryLeads ?? [];
+        await atomicJson(resolve(this.runDir, "artifacts/recap-discovery-leads.json"), this.recapDiscoveryLeads);
         const batchChanged = this.manifest.batchRunId !== this.input.runId;
         await this.bindInputSnapshot();
         this.manifest.batchRunId = this.input.runId;
@@ -1119,6 +1126,7 @@ export class MarketWorkflow {
       batchRunId: this.input.runId,
       batchMarkets: this.batchMarkets,
       sourceAccess: availability,
+      recapDiscoveryLeads: discoveryLeads,
       startedAt: this.now().toISOString(),
       updatedAt: this.now().toISOString(),
       stages: {},
@@ -1128,6 +1136,8 @@ export class MarketWorkflow {
         rejectedSourceCount: 0,
       },
     };
+    this.recapDiscoveryLeads = discoveryLeads;
+    await atomicJson(resolve(this.runDir, "artifacts/recap-discovery-leads.json"), discoveryLeads);
     await this.bindInputSnapshot();
     await this.startWorkflowBudgetSession();
   }
@@ -1965,6 +1975,7 @@ export class MarketWorkflow {
       session: this.envelope.session,
       sourceDomains: this.researchSourceDomains,
       ...(exclusions.length ? { excludedSources: exclusions } : {}),
+      ...(this.recapDiscoveryLeads?.length ? { discoveryLeads: this.recapDiscoveryLeads } : {}),
       anomaly,
       ...(this.socialLeads ? { socialLeads: this.socialLeads.leads } : {}),
       ...(this.macroData ? { macroContext: this.macroData.context, macroGaps: this.macroData.gaps, ...(this.macroData.chinaPmi ? { chinaPmiContext: this.macroData.chinaPmi.context, chinaPmiGaps: this.macroData.chinaPmi.gaps } : {}) } : {}),
@@ -1981,7 +1992,7 @@ export class MarketWorkflow {
     const previouslyConsumedQueries = this.consumedQueriesBefore([key]);
     const run = await this.runAgent({
       key, role, payload,
-      inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
+      inputArtifacts: this.macroData ? ["market-envelope.json", "recap-plan.json", "recap-macro-context.json", "recap-discovery-leads.json", ...(this.recapResearchEvidenceArtifact ? [this.recapResearchEvidenceArtifact] : [])] : ["market-envelope.json", "plan.json"],
       promptSuffix: this.researchPromptSuffix(anomaly, role, suffix),
     });
     return this.validateAgentStage(key, () => {
@@ -2063,7 +2074,7 @@ export class MarketWorkflow {
     await assertWorkflowImplementation(this.manifest?.implementation);
     const inputHash = stableHash({
       workflowVersion: WORKFLOW_VERSION,
-      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v44",
+      evidenceValidationVersion: "source-target-time-facts-unit-direction-earnings-notes-causality-v45",
       checkSessionIntegrity: this.completeRecap,
       macroBookHash: this.recapResearchActive && this.macroData ? stableHash(this.macroData) : null,
       researchOutputs,

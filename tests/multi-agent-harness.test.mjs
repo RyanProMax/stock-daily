@@ -134,7 +134,21 @@ test("same-session retries learn inaccessible URLs only from intact verified led
   }
   assert.deepEqual(await unavailableResearchSourceUrls(root, expected), ["https://apnews.com/article/another", "https://apnews.com/article/blocked"]);
   assert.deepEqual((await researchSourceAvailability(root, expected)).unavailableDomains, ["apnews.com"]);
-  assert.deepEqual(await unavailableResearchSourceUrls(root, { ...expected, inputHash: "new-input" }), []);
+  assert.deepEqual(await unavailableResearchSourceUrls(root, { ...expected, inputHash: "new-input" }), ["https://apnews.com/article/another", "https://apnews.com/article/blocked"]);
+  assert.deepEqual(await unavailableResearchSourceUrls(root, { ...expected, marketAsOf: "2026-09-12" }), []);
+});
+
+test("price contradictions remain tied to the exact input rather than becoming transport exclusions", async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-price-access-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const expected = { market: "US", marketAsOf: "2026-09-11", inputHash: "frozen-input" };
+  const dir = resolve(root, "valid");
+  await mkdir(resolve(dir, "artifacts"), { recursive: true });
+  const ledger = { rejected: [{ url: "https://finance.yahoo.com/news/contradictory-close", reason: "SPX 当日收盘报道涨跌幅与已核验行情矛盾" }] };
+  await writeFile(resolve(dir, "manifest.json"), JSON.stringify({ ...expected, stages: { "evidence-verification-test": { status: "completed", outputHash: stableHash(ledger) } } }));
+  await writeFile(resolve(dir, "artifacts/evidence-ledger.json"), JSON.stringify(ledger));
+  assert.deepEqual(await unavailableResearchSourceUrls(root, expected), [ledger.rejected[0].url]);
+  assert.deepEqual(await unavailableResearchSourceUrls(root, { ...expected, inputHash: "changed-quotes" }), []);
 });
 
 test("a resumed run freezes source access hints so its own failures do not change completed research inputs", async (t) => {
@@ -1690,6 +1704,13 @@ test("a causal worker cannot turn parallel price quotes into a causal passage", 
   const priceOnly = "今日，科创50指数收涨1.71%，报1632.02点。盘面上，半导体板块多数上涨，芯原股份涨超9%，华虹宏力涨超7%。创新药板块走强，康希诺涨停。";
   assert.equal(hasCausalPassage(priceOnly), false);
   assert.equal(hasCausalPassage("Oil prices fell, helping calm inflation worries and support stocks."), true);
+  assert.equal(hasCausalPassage("Micron keeps surging as AI demand show no signs of slowing."), true);
+  assert.equal(hasCausalPassage("Stocks fell as Treasury yields rose."), true);
+  assert.equal(hasCausalPassage("Micron gained as much as 5%. AI demand remains strong."), false);
+  assert.equal(hasCausalPassage("Shares gained as much as 5%, oil was unchanged."), false);
+  assert.equal(hasCausalPassage("Shares rose as the closing bell rang while oil stayed stable."), false);
+  assert.equal(hasCausalPassage("Shares rose as the closing bell rang. Oil was unchanged."), false);
+  assert.equal(hasCausalPassage("Stocks rose. Analysts discussed AI demand as a separate topic."), false);
   const changed = structuredClone(ledger);
   const causal = changed.sources.find((source) => source.role === "causal");
   causal.supportingExcerpt = priceOnly;
