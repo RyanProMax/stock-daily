@@ -1,6 +1,6 @@
 import { workflowImplementationSnapshot } from "../scripts/workflow-implementation.mjs";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -319,6 +319,10 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     // A controlled native failure must not prevent later targets being
     // researched, or enter attribution/writing even with sufficient sources.
     const roleCalls = [], failedKey = `${completeRecapPlan(workflow.envelope).anomalies[0].id}-facts`;
+    f.ledger.sources[2].facts = "受控测试中已经核实的其他目标订单信息。";
+    f.ledger.sources[2].scope = "sector";
+    f.ledger.rejected = [{ facts: "REJECTED_FAKE_NEWS_MUST_NOT_ENTER_PRIVATE_COPY" }];
+    await writeFile(resolve(workflow.runDir, "artifacts", `${failedKey}.json`), JSON.stringify({ sources: [{ facts: "INVALID_ROLE_FAKE_NEWS_MUST_NOT_ENTER_PRIVATE_COPY" }] }));
     workflow.verifyEvidence = async () => f.ledger;
     workflow.researchPrimaryRole = async (anomaly, role) => {
       const key = `${anomaly.id}-${role}`; roleCalls.push({ key, payload: workflow.researchPayload(anomaly) });
@@ -337,6 +341,15 @@ test("comprehensive research freezes batch access hints and reproduces them on r
     assert.equal(Object.values(workflow.manifest.recapResearchRoles).filter(role => role.status === "completed").length, 39);
     assert.equal(workflow.manifest.recapResearchRoles[failedKey].nativeAttemptCount, 2);
     assert.match(workflow.manifest.recapResearchRoles[failedKey].error, /Controlled test failure/);
+    const privateDraft = workflow.manifest.privateRecapDraft;
+    const saved = JSON.parse(await readFile(resolve(workflow.runDir, privateDraft.artifact), "utf8"));
+    const readable = await readFile(resolve(workflow.runDir, privateDraft.markdownArtifact), "utf8");
+    assert.equal(saved.entries.length, 20);
+    assert.equal(saved.approved, false);
+    assert.match(readable, /受控测试中已经核实的其他目标订单信息/);
+    assert.doesNotMatch(readable, /(?:INVALID_ROLE|REJECTED)_FAKE_NEWS/);
+    assert.equal(workflow.manifest.recapApproval, undefined);
+    assert.equal(workflow.manifest.reportPath, undefined);
     roleCalls.length = 0;
     await assert.rejects(workflow.runCompleteRecap(), /1 个独立角色/);
     assert.equal(roleCalls.length, 39, "exhausted failures cannot receive a third native attempt on resume");
@@ -350,6 +363,49 @@ test("recap content participates in readback hashes", () => {
   const hash = workflowMarketContentHash(report, "US");
   report.recaps.US.entries[0].why += " altered";
   assert.notEqual(workflowMarketContentHash(report, "US"), hash);
+});
+
+test("private drafts survive a resumed smaller ledger without reopening research or granting approval", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "stock-daily-private-resume-"));
+  try {
+    const allTargets = [];
+    for (const market of ["US", "CN"]) {
+      const options = { input: fixtureInput(), market, completeRecap: true, workRoot: root };
+      const workflow = new MarketWorkflow(options), f = recapFixture(market);
+      workflow.manifest = { stages: {}, searchQueryCount: 32, workflowBudgetMs: 3_300_000, researchBudgetMs: 2_100_000, recapResearchRoles: {} };
+      const target = f.envelope.sectorPerformance[0].symbol;
+      const verified = { sources: [{ id: "saved-fact", scope: "sector", targets: [target], url: "https://www.sec.gov/saved-test-original", kind: "official", role: "facts", sourceLabel: "SEC", publishedAt: `${f.envelope.marketAsOf}T19:00:00Z`, facts: "上一批已核实并保存的订单事实。" }] };
+      await workflow.savePrivateRecapDraft({ verifiedLedger: verified, validatedRecap: validateCompleteRecap(f.raw, f.envelope, f.ledger, f.social) });
+      const previous = structuredClone(workflow.manifest.privateRecapDraft);
+      const resumed = new MarketWorkflow(options);
+      resumed.manifest = JSON.parse(await readFile(workflow.manifestPath, "utf8"));
+      resumed.runAgent = async () => { throw new Error("Private resume must never invoke an agent"); };
+      await resumed.savePrivateRecapDraft();
+      assert.deepEqual(resumed.manifest.privateRecapDraft, previous);
+      await resumed.savePrivateRecapDraft({ verifiedLedger: { sources: [] } });
+      const current = resumed.manifest.privateRecapDraft;
+      const draft = JSON.parse(await readFile(resolve(resumed.runDir, current.artifact), "utf8"));
+      const text = await readFile(resolve(resumed.runDir, current.markdownArtifact), "utf8");
+      assert.match(text, /上一批已核实并保存的订单事实/);
+      assert.match(text, /本次尚待重新核准/);
+      assert.equal(draft.entries.find(entry => entry.target === target).why, f.raw.entries.find(entry => entry.target === target).why);
+      assert.equal(resumed.manifest.searchQueryCount, 32);
+      assert.equal(resumed.manifest.workflowBudgetMs, 3_300_000);
+      assert.equal(resumed.manifest.researchBudgetMs, 2_100_000);
+      assert.equal(resumed.manifest.recapApproval, undefined);
+      assert.equal(resumed.manifest.reportPath, undefined);
+      assert.deepEqual(resumed.manifest.recapResearchRoles, {});
+      assert.equal(await readFile(resolve(resumed.runDir, previous.markdownArtifact), "utf8"), JSON.parse(await readFile(resolve(resumed.runDir, previous.artifact), "utf8")).markdown);
+      allTargets.push(...draft.entries.map(entry => `${market}:${entry.target}`));
+      await writeFile(resolve(resumed.runDir, current.markdownArtifact), `${text}\nTAMPERED_PRIVATE_COPY`);
+      const damagedResume = new MarketWorkflow(options);
+      damagedResume.manifest = JSON.parse(await readFile(resumed.manifestPath, "utf8"));
+      await assert.rejects(damagedResume.savePrivateRecapDraft(), /内容或交易日发生变化/);
+      damagedResume.manifest.implementation = { hash: "historical-source-pin" };
+      await assert.rejects(damagedResume.savePrivateRecapDraft(), /另一源码版本/);
+    }
+    assert.equal(new Set(allTargets).size, 40);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("single-market updates preserve the approved inactive recap exactly", () => {

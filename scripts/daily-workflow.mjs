@@ -75,6 +75,7 @@ import { recapEvidenceTiming } from "./evidence-timing.mjs";
 import { beginNativeAgentAttempt, finishNativeAgentAttempt, auditNativeAgentAttempt, nativeSearchQueries as looseSearchQueries } from "./native-agent-receipts.mjs";
 import { marketSessionQueryConsumption } from "./market-session-query-budget.mjs";
 import { workflowImplementationSnapshot, assertWorkflowImplementation } from "./workflow-implementation.mjs";
+import { buildPrivateRecapDraft } from "./recap-private-draft.mjs";
 const LOADED_IMPLEMENTATION = (async () => {
   const snapshot = await workflowImplementationSnapshot();
   const path = process.env.STOCK_DAILY_IMPLEMENTATION_SNAPSHOT;
@@ -228,6 +229,13 @@ async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temporary, path);
+}
+
+async function atomicText(path, value) {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  await writeFile(temporary, value, "utf8");
   await rename(temporary, path);
 }
 
@@ -2750,6 +2758,7 @@ export class MarketWorkflow {
     await this.saveManifest();
     const envelopePath = resolve(this.runDir, "artifacts/market-envelope.json");
     await atomicJson(envelopePath, this.envelope);
+    if (this.completeRecap) await this.savePrivateRecapDraft();
     const plan = await this.marketPlan();
     const completeRecap = this.completeRecap ? await this.runCompleteRecap() : null;
     await this.revalidateResearchQueryCheckpoints(plan);
@@ -3018,6 +3027,59 @@ export class MarketWorkflow {
     return book;
   }
 
+  async savePrivateRecapDraft(update = {}) {
+    // This private checkpoint never supplies an approval, a reportPath, or
+    // publication input. Only observations and successfully verified sources
+    // enter it; failed native outputs are not read to fill missing analysis.
+    const loaded = await LOADED_IMPLEMENTATION;
+    if (this.manifest.implementation && (!loaded.snapshot || this.manifest.implementation.hash !== loaded.snapshot.hash)) throw new Error("不能向另一源码版本的执行记录写入私稿");
+    const prior = this.manifest.privateRecapDraft;
+    if (update.observations) this.privateRecapObservations = update.observations;
+    if (!this.privateRecapInputs && prior) {
+      if (!/^[a-f0-9]{64}$/u.test(prior.draftHash) || prior.artifact !== `artifacts/recap-private-draft-${prior.draftHash}.json` || prior.markdownArtifact !== `artifacts/recap-private-draft-${prior.draftHash}.md`) throw new Error("私稿保存位置与冻结记录不一致");
+      const saved = await readJson(resolve(this.runDir, prior.artifact));
+      const savedMarkdown = await readFile(resolve(this.runDir, prior.markdownArtifact), "utf8");
+      if (prior.inputHash !== this.inputHash || stableHash(saved) !== prior.draftHash || stableHash(savedMarkdown) !== prior.markdownHash || saved.market !== this.market || saved.marketAsOf !== this.envelope.marketAsOf || saved.approved !== false) throw new Error("已保存私稿的内容或交易日发生变化");
+      this.privateRecapPreserved = saved;
+      // Keep previously written paragraphs available on a failed resume. They
+      // remain pending review and cannot replace the real writer checkpoint.
+      if (prior.hasProposedText) {
+        this.privateRecapCandidate = { market: saved.market, marketAsOf: saved.marketAsOf, entries: saved.entries.map(entry => ({ target: entry.target, why: entry.why, magnitude: entry.magnitude })) };
+      }
+      if (!Object.hasOwn(update, "verifiedLedger") && !Object.hasOwn(update, "validatedRecap")) return prior;
+    }
+    const inputs = {
+      envelope: this.envelope,
+      observations: this.privateRecapObservations ?? recapObservations(this.envelope),
+      verifiedLedger: { sources: [] },
+      ...(this.privateRecapCandidate ? { validatedRecap: this.privateRecapCandidate } : {}),
+      ...this.privateRecapInputs,
+      ...update,
+      preservedDraft: this.privateRecapPreserved ?? null,
+      roleStates: this.manifest.recapResearchRoles ?? {},
+    };
+    const draft = buildPrivateRecapDraft(inputs);
+    const draftHash = stableHash(draft);
+    // Immutable files plus a final manifest pointer keep the previous readable
+    // version usable when a new checkpoint stops between the two writes.
+    const artifact = `artifacts/recap-private-draft-${draftHash}.json`;
+    const markdownArtifact = `artifacts/recap-private-draft-${draftHash}.md`;
+    if (await exists(resolve(this.runDir, artifact)) && stableHash(await readJson(resolve(this.runDir, artifact))) !== draftHash) throw new Error("同一私稿版本的保存内容发生变化");
+    if (await exists(resolve(this.runDir, markdownArtifact)) && stableHash(await readFile(resolve(this.runDir, markdownArtifact), "utf8")) !== stableHash(draft.markdown)) throw new Error("同一私稿版本的正文发生变化");
+    await atomicJson(resolve(this.runDir, artifact), draft);
+    await atomicText(resolve(this.runDir, markdownArtifact), draft.markdown);
+    this.privateRecapInputs = inputs;
+    this.privateRecapPreserved = draft;
+    this.manifest.privateRecapDraft = {
+      artifact, markdownArtifact, draftHash, markdownHash: stableHash(draft.markdown),
+      market: this.market, marketAsOf: this.envelope.marketAsOf, targetCount: draft.entries.length,
+      inputHash: this.inputHash,
+      approved: false, hasProposedText: Boolean(inputs.validatedRecap),
+    };
+    await this.saveManifest();
+    return this.manifest.privateRecapDraft;
+  }
+
   async runCompleteRecap() {
     this.recapResearchActive = true;
     await this.prepareRecapNewsOriginals();
@@ -3068,6 +3130,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-plan.json"), plan);
     const observations = recapObservations(this.envelope, tradingData);
     await atomicJson(resolve(this.runDir, "artifacts/recap-observations.json"), observations);
+    await this.savePrivateRecapDraft({ observations });
     const transmissionPath = resolve(this.runDir, "artifacts/recap-transmission-data.json");
     let transmission;
     if (await exists(transmissionPath)) {
@@ -3122,6 +3185,7 @@ export class MarketWorkflow {
       outputs.push({ sources: [...transmission.sources, ...companyBackground.sources, ...chinaPmiSources, ...pbocNewsSources], rejectedSources: [], alternatives: [] });
       ledger = await this.verifyEvidence(outputs);
       nextEvidence = ledger.sources;
+      await this.savePrivateRecapDraft({ verifiedLedger: ledger });
     }
     // Two targets/four native workers at a time. Finish the first pass for
     // every target before spending remaining budget on a failed role.
@@ -3152,6 +3216,7 @@ export class MarketWorkflow {
       await this.assertResearchCapacity(batch, "", [], { skipExhaustedPrimary: true });
       failedRoles.push(...await this.researchCompleteRecapBatch(batch, batchKey, outputs));
       ledger = await this.verifyEvidence(outputs);
+      await this.savePrivateRecapDraft({ verifiedLedger: ledger });
       nextAccess = recapResearchSourceAccess(initialAccess, ledger);
       // Keep original IDs/scopes. This is verified prior-batch context, not
       // permission to retag a broad market quote as a direct sector cause.
@@ -3165,6 +3230,7 @@ export class MarketWorkflow {
       // failed executions; no pair or whole target is repeated here.
       remainingFailures.push(...await this.researchCompleteRecapBatch([], batchKey, outputs, { recovery: true, pending }));
       ledger = await this.verifyEvidence(outputs);
+      await this.savePrivateRecapDraft({ verifiedLedger: ledger });
     }
     this.excludedSources = initialAccess.urls;
     this.researchSourceDomains = publishableExternalSourceDomains().filter(domain => !initialAccess.unavailableDomains.includes(domain));
@@ -3174,6 +3240,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-coverage.json"), coverage);
     this.manifest.recapCoverage = coverage;
     await this.saveManifest();
+    await this.savePrivateRecapDraft({ verifiedLedger: ledger, coverage });
     if (remainingFailures.length) throw new Error(`复盘研究未完成：${remainingFailures.length} 个独立角色未通过执行和验证；已保留全部已完成研究及原始失败记录`);
     const attributionPayload = () => ({ envelope: this.envelope, evidenceTiming: recapEvidenceTiming(this.envelope), targets: recapTargets(this.envelope), observations, financialComparisons: ledger.sources.map(source => ({ sourceId: source.id, comparisons: (source.comparisons ?? []).map(publicComparison) })).filter(item => item.comparisons.length), ledger, social, macroContext: macroData.context, macroGaps: macroData.gaps, ...(macroData.chinaPmi ? { chinaPmiContext: macroData.chinaPmi.context, chinaPmiGaps: macroData.chinaPmi.gaps } : {}) });
     let attributionRejection = null;
@@ -3244,6 +3311,7 @@ export class MarketWorkflow {
       this.manifest.recapLedgerHash = stableHash(ledger);
       this.manifest.recapCoverage = coverage;
       await this.saveManifest();
+      await this.savePrivateRecapDraft({ verifiedLedger: ledger, coverage });
       // Empty searches, duplicate facts or a changed verification timestamp do
       // not justify another isolated output against the same trusted evidence.
       if (recapAttributionEvidenceHash(ledger) !== evidenceBeforeRepair) {
@@ -3266,6 +3334,7 @@ export class MarketWorkflow {
     await atomicJson(resolve(this.runDir, "artifacts/recap-draft.json"), writer.output);
     const recap = validateCompleteRecap(writer.output, this.envelope, ledger, social, recapOptions);
     await atomicJson(resolve(this.runDir, "artifacts/recap-normalized.json"), recap);
+    await this.savePrivateRecapDraft({ verifiedLedger: ledger, coverage, validatedRecap: recap });
     const reviewer = await this.runValidatedAgentStage({ baseKey: "recap-reviewer", role: "recap_reviewer", payload: { ...payload, recap }, inputArtifacts: ["recap-normalized.json", "recap-ledger.json", "recap-attribution.json", "social-ledger.json", "recap-macro-context.json"], withProvenance: true, validate: (output) => validateRecapReview(output, recap) });
     const review = reviewer.output;
     await atomicJson(resolve(this.runDir, "artifacts/recap-review.json"), review);
@@ -4059,7 +4128,18 @@ export async function runDailyWorkflow({
     try {
       result = await workflow.run();
     } catch (error) {
+      let privateDraft;
       if (workflow.manifest) {
+        const loaded = await LOADED_IMPLEMENTATION;
+        if (workflow.manifest.implementation?.hash === loaded.snapshot?.hash) {
+          try {
+            privateDraft = await workflow.savePrivateRecapDraft();
+          } catch (draftError) {
+            // Do not replace the original execution/verification failure with
+            // a private-artifact error, or write into a historical source pin.
+            workflow.manifest.privateDraftError = draftError instanceof Error ? draftError.message : String(draftError);
+          }
+        }
         workflow.manifest.status = "failed";
         workflow.manifest.lastError =
           error instanceof Error ? error.message : String(error);
@@ -4071,6 +4151,11 @@ export async function runDailyWorkflow({
         market: activeMarket,
         marketAsOf: workflow.envelope.marketAsOf,
         manifestPath: workflow.manifestPath,
+        ...(privateDraft ? { privateDraft: {
+          market: privateDraft.market, marketAsOf: privateDraft.marketAsOf, targetCount: privateDraft.targetCount,
+          approved: false, markdownPath: resolve(workflow.runDir, privateDraft.markdownArtifact),
+          artifactPath: resolve(workflow.runDir, privateDraft.artifact),
+        } } : {}),
         error: error instanceof Error ? error.message : String(error),
       });
       continue;
