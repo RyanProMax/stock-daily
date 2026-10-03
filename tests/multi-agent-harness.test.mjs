@@ -3074,6 +3074,7 @@ test("an exhausted failed research attempt cannot get fresh session budget on th
     first.manifest.failedAgentRuns = [{ key: "failed-research", eventArtifact: "events/failed-research.jsonl", eventHash: stableHash(originalEvents), searchCount: queries.length, queries }];
     first.manifest.searchQueryCount = queries.length;
     first.manifest.workflowElapsedMs = 720_000;
+    first.manifest.workflowSessions[0].elapsedMs = 720_000;
     await writeFile(first.manifestPath, JSON.stringify(first.manifest));
     const retry = new MarketWorkflow(options);
     await assert.rejects(retry.initialize(), /本交易日资料核查已达停止条件/u);

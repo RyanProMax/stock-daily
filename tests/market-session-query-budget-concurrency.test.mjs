@@ -31,11 +31,13 @@ async function fixture(t) {
   });
   return { root, workflow };
 }
-async function original(root, name, queries, { failed = false } = {}) {
-  const run = resolve(root, name), prompt = "Local budget test; no process is launched.", schemaText = "{}";
+async function original(root, name, queries, { failed = false, target = null, anomalyId = null } = {}) {
+  const run = resolve(root, name), prompt = target
+    ? `<task_input_json>${JSON.stringify({ ...session, anomaly: { id: anomalyId, target } })}</task_input_json>`
+    : "Local budget test; no process is launched.", schemaText = "{}";
   await mkdir(run, { recursive: true });
   const schemaHash = stableHash(schemaText), call = {
-    agentRunId: randomUUID(), key: name, role: "facts", schemaHash,
+    agentRunId: randomUUID(), key: anomalyId ? `${anomalyId}-facts` : name, role: "facts", schemaHash,
     promptHash: stableHash({ prompt, schemaHash, filesystemIsolation: AGENT_FILESYSTEM_ISOLATION }),
   };
   const refs = await beginNativeAgentAttempt(run, call, { prompt, schemaText });
@@ -68,6 +70,96 @@ test("a call completed during budget I/O cannot reopen spent capacity at the rea
   assert.equal(researchEntries, 0);
   assert.equal(workflow.reservedSearchQueryCount, 0);
   assert.equal((await marketSessionQueryConsumption(root, session)).knownQueryCount, 6);
+});
+
+async function clockHistory(root, name, { researchElapsedMs, workflowElapsedMs = 0, researchBudgetMs = 2_100_000, workflowBudgetMs = 3_300_000 }) {
+  const run = resolve(root, name);
+  await mkdir(run, { recursive: true });
+  await writeFile(resolve(run, "manifest.json"), JSON.stringify({
+    ...session, status: "failed", workflowVersion: "prior-version", inputHash: "prior-input",
+    researchBudgetMs, workflowBudgetMs, researchElapsedMs, workflowElapsedMs,
+    researchSessions: [{ startedAt: "2026-10-02T01:00:00Z", elapsedMs: researchElapsedMs, budgetMs: researchBudgetMs }],
+    workflowSessions: [{ startedAt: "2026-10-02T00:50:00Z", elapsedMs: workflowElapsedMs, budgetMs: workflowBudgetMs }],
+    agentRuns: [], searchQueryCount: 0,
+  }));
+}
+
+test("a changed input and larger configuration cannot restart a session with only nine seconds of research left", async t => {
+  const { root, workflow } = await fixture(t);
+  await clockHistory(root, "prior-cutoff", { researchElapsedMs: 2_090_559 });
+  workflow.researchBudgetMs = 4_200_000;
+  workflow.workflowTimeoutMs = 6_600_000;
+  let nativeEntries = 0;
+  workflow.startResearchBudget = async () => { nativeEntries += 1; throw new Error("Unexpected native entry"); };
+  await assert.rejects(invoke(workflow, "new-input"), /本交易日研究时间已达停止条件/);
+  assert.equal(nativeEntries, 0);
+  assert.equal(workflow.reservedSearchQueryCount, 0);
+});
+
+test("a verified search checkpoint still returns after the session clock is exhausted", async t => {
+  const { root, workflow } = await fixture(t);
+  await clockHistory(root, "spent-clock", { researchElapsedMs: 2_100_000 });
+  const checkpoint = { output: { retained: true }, events: "verified original", resumed: true };
+  workflow.readAgentCheckpoint = async () => checkpoint;
+  workflow.startResearchBudget = async () => { throw new Error("Unexpected new research"); };
+  assert.equal(await invoke(workflow, "completed"), checkpoint);
+  assert.equal(workflow.reservedSearchQueryCount, 0);
+});
+
+test("a call completed during history I/O cannot restore time to the trading session", async t => {
+  const { root, workflow } = await fixture(t);
+  await clockHistory(root, "current", { researchElapsedMs: 2_040_000 });
+  workflow.researchBudgetMs = 2_100_000;
+  workflow.saveManifest = async () => {
+    workflow.manifest.researchSessions = [{ startedAt: "2026-10-02T01:00:00Z", elapsedMs: 2_090_559, budgetMs: 2_100_000 }];
+  };
+  await assert.rejects(invoke(workflow, "finishing-clock"), /本交易日研究时间已达停止条件/);
+  assert.equal(workflow.reservedSearchQueryCount, 0);
+});
+
+test("a fresh local clock cannot lengthen the remaining frozen session deadline", async t => {
+  const { root, workflow } = await fixture(t);
+  await clockHistory(root, "nearly-spent", { researchElapsedMs: 2_040_000, workflowElapsedMs: 3_240_000 });
+  workflow.workflowTimeoutMs = 6_600_000;
+  workflow.researchBudgetMs = 4_200_000;
+  await workflow.assertSessionSearchBudget();
+  workflow.deadline = Date.now() + workflow.workflowTimeoutMs;
+  workflow.now = () => new Date();
+  workflow.researchDeadline = null;
+  workflow.workflowSessionIndex = null;
+  workflow.researchSessionIndex = null;
+  await workflow.startResearchBudget();
+  assert.ok(workflow.remainingTime() > 30_000 && workflow.remainingTime() <= 60_000);
+  assert.ok(workflow.remainingResearchTime() > 30_000 && workflow.remainingResearchTime() <= 60_000);
+});
+
+test("zero-search invalid and failed original calls prevent a third primary role after an input change", async t => {
+  const { root, workflow } = await fixture(t);
+  const target = "AI-US-applications", anomalyId = "recap-original-target";
+  await original(root, "invalid-zero", [], { failed: true, target, anomalyId });
+  await original(root, "failed-recovery", ["paid one", "paid two"], { failed: true, target, anomalyId });
+  await assert.rejects(workflow.runAgent({ key: `${anomalyId}-facts`, role: "facts", payload: { anomaly: { id: anomalyId, target } }, inputArtifacts: [] }), /该交易日研究角色已用完两次/);
+  assert.equal(workflow.reservedSearchQueryCount, 0);
+  assert.equal(workflow.reservedPrimaryRoleCounts?.size ?? 0, 0);
+});
+
+test("concurrent original calls cannot share the last primary-role execution opportunity", async t => {
+  const { root, workflow } = await fixture(t);
+  const target = "AI-US-applications", anomalyId = "recap-original-target";
+  await original(root, "previous-role", [], { failed: true, target, anomalyId });
+  const bothScanned = deferred(), releaseResearch = deferred();
+  let saves = 0, researchEntries = 0;
+  workflow.saveManifest = async () => { if (++saves === 2) bothScanned.resolve(); await bothScanned.promise; };
+  workflow.startResearchBudget = async () => { researchEntries += 1; await releaseResearch.promise; throw new Error("Stop before native invocation"); };
+  const call = () => workflow.runAgent({ key: `${anomalyId}-facts`, role: "facts", payload: { anomaly: { id: anomalyId, target } }, inputArtifacts: [] });
+  const calls = [call(), call()].map(promise => promise.then(() => null, error => error));
+  try {
+    assert.match((await Promise.race(calls)).message, /该交易日研究角色已用完两次/);
+    assert.equal(researchEntries, 1);
+  } finally { releaseResearch.resolve(); }
+  await Promise.all(calls);
+  assert.equal(workflow.reservedSearchQueryCount, 0);
+  assert.equal(workflow.reservedPrimaryRoleCounts.size, 0);
 });
 
 test("two real search entries compete for the final two slots and only one reserves them", async t => {

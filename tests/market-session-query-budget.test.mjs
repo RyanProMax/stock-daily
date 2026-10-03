@@ -34,14 +34,16 @@ async function legacy(root, name, queries, options = {}) {
   return { run, record, raw };
 }
 async function modern(root, name, queries, options = {}) {
-  const run = await manifest(root, name, {}), prompt = "Controlled query-budget fixture; no native process.", schemaText = '{}';
-  const schemaHash = stableHash(schemaText), call = { agentRunId: options.agentRunId ?? randomUUID(), key: "facts", role: "facts",
+  const run = await manifest(root, name, {}), prompt = options.target
+    ? `<task_input_json>${JSON.stringify({ ...session, anomaly: { id: options.anomalyId ?? "recap-fixture", target: options.target } })}</task_input_json>`
+    : "Controlled query-budget fixture; no native process.", schemaText = '{}';
+  const schemaHash = stableHash(schemaText), call = { agentRunId: options.agentRunId ?? randomUUID(), key: options.key ?? (options.target ? `${options.anomalyId ?? "recap-fixture"}-${options.role ?? "facts"}` : "facts"), role: options.role ?? "facts", ...(options.startedAt ? { startedAt: options.startedAt } : {}),
     schemaHash, promptHash: stableHash({ prompt, schemaHash, filesystemIsolation: AGENT_FILESYSTEM_ISOLATION }) };
   const refs = await beginNativeAgentAttempt(run, call, { prompt, schemaText }), raw = events(queries, options.failed ? "turn.failed" : "turn.completed");
   await writeFile(resolve(run, refs.eventStreamArtifact), raw);
-  const receipt = await finishNativeAgentAttempt(run, call, { events: raw, completedAt: "2026-10-02T00:00:00Z", exitCode: options.failed ? 1 : 0 });
+  const receipt = await finishNativeAgentAttempt(run, call, { events: raw, completedAt: options.completedAt ?? "2026-10-02T00:00:00Z", exitCode: options.failed ? 1 : 0 });
   const record = { ...call, ...receipt, eventHash: stableHash(raw), queries, searchCount: queries.length };
-  await manifest(root, name, { [options.failed ? "failedAgentRuns" : "agentRuns"]: [record] });
+  await manifest(root, name, { [options.failed ? "failedAgentRuns" : "agentRuns"]: [record], ...options.manifest });
   return { run, record };
 }
 
@@ -211,4 +213,82 @@ test("initialize rejects an exhausted session before creating a fresh run or lau
   await assert.rejects(readFile(workflow.manifestPath), { code: "ENOENT" });
   assert.deepEqual(await readdir(root), directories);
   for (const [i, path] of paths.entries()) assert.deepEqual(await readFile(resolve(historical.run, path)), before[i]);
+});
+
+test("a changed input/version cannot reset the frozen trading-session time ceilings", async t => {
+  const root = await temporary(t);
+  await manifest(root, "runs/old", { workflowVersion: "old", inputHash: "old", coverageRequired: true,
+    workflowBudgetMs: 3_300_000, workflowElapsedMs: 3_258_508,
+    workflowSessions: [{ startedAt: "2026-10-02T01:01:10.485Z", elapsedMs: 3_258_508, budgetMs: 3_300_000 }],
+    researchBudgetMs: 2_100_000, researchElapsedMs: 2_090_559,
+    researchSessions: [{ startedAt: "2026-10-02T01:02:24.069Z", elapsedMs: 2_090_559, budgetMs: 2_100_000 }] });
+  await manifest(root, "runs/new", { workflowVersion: "new", inputHash: "new", coverageRequired: true,
+    workflowBudgetMs: 9_000_000, workflowElapsedMs: 50_000,
+    workflowSessions: [{ startedAt: "2026-10-02T02:01:12.206Z", elapsedMs: 50_000, budgetMs: 9_000_000 }],
+    researchBudgetMs: 9_000_000, researchElapsedMs: 10_000,
+    researchSessions: [{ startedAt: "2026-10-02T02:12:29.798Z", elapsedMs: 10_000, budgetMs: 9_000_000 }] });
+  const result = await marketSessionQueryConsumption(root, session);
+  assert.equal(result.unverifiedAttempts.length, 0);
+  assert.equal(result.timeBudgets.workflow.limitMs, 3_300_000);
+  assert.equal(result.timeBudgets.workflow.elapsedMs, 3_308_508);
+  assert.equal(result.timeBudgets.research.limitMs, 2_100_000);
+  assert.equal(result.timeBudgets.research.elapsedMs, 2_100_559);
+});
+
+test("copied time sessions charge once and retain the greatest elapsed checkpoint and smallest ceiling", async t => {
+  const root = await temporary(t), startedAt = "2026-10-02T01:00:00Z";
+  await manifest(root, "runs/original", { researchBudgetMs: 90_000, researchElapsedMs: 40_000,
+    researchSessions: [{ startedAt, elapsedMs: 40_000, budgetMs: 90_000 }] });
+  await manifest(root, "backup", { researchBudgetMs: 900_000, researchElapsedMs: 50_000,
+    researchSessions: [{ startedAt: "2026-10-02T01:00:00.000Z", elapsedMs: 50_000, budgetMs: 900_000 }] });
+  const result = await marketSessionQueryConsumption(root, session);
+  assert.equal(result.unverifiedAttempts.length, 0);
+  assert.equal(result.timeBudgets.research.elapsedMs, 50_000);
+  assert.equal(result.timeBudgets.research.limitMs, 90_000);
+  assert.equal(result.timeBudgets.research.sessions.length, 1);
+  assert.equal(result.timeBudgets.research.sessions[0].budgetMs, 90_000);
+});
+
+test("legacy elapsed clocks migrate conservatively and damaged time declarations fail closed", async t => {
+  const root = await temporary(t);
+  await manifest(root, "runs/legacy", { coverageRequired: true, startedAt: "2026-10-02T01:00:00Z", updatedAt: "2026-10-02T01:50:00Z",
+    researchStartedAt: "2026-10-02T01:10:00Z", researchElapsedMs: 2_090_559 });
+  const migrated = await marketSessionQueryConsumption(root, session);
+  assert.equal(migrated.unverifiedAttempts.length, 0);
+  assert.equal(migrated.timeBudgets.workflow.elapsedMs, 3_000_000);
+  assert.equal(migrated.timeBudgets.workflow.limitMs, 3_300_000);
+  assert.equal(migrated.timeBudgets.research.elapsedMs, 2_090_559);
+  assert.equal(migrated.timeBudgets.research.limitMs, 2_100_000);
+  await manifest(root, "runs/damaged", { researchBudgetMs: 90_000, researchElapsedMs: 50_000,
+    researchSessions: [{ startedAt: "2026-10-02T02:00:00Z", elapsedMs: 1_000 }] });
+  const damaged = await marketSessionQueryConsumption(root, session);
+  assert.ok(damaged.unverifiedAttempts.some(attempt => /exceeds retained sessions/.test(attempt.reason)));
+});
+
+test("role attempts follow audited target/role across runs, including zero-search invalid attempts and receipt copies", async t => {
+  const root = await temporary(t);
+  const first = await modern(root, "runs/first", [], { target: "AI-US-applications", failed: true });
+  await manifest(root, "runs/first", { failedAgentRuns: [{ ...first.record, status: "invalid" }] });
+  const second = await modern(root, "runs/second", ["paid before timeout"], { target: "AI-US-applications", anomalyId: "recap-upgraded-fixture", failed: true });
+  const copy = await manifest(root, "backup", { failedAgentRuns: [first.record] });
+  await cp(resolve(first.run, "native-attempts"), resolve(copy, "native-attempts"), { recursive: true });
+  await modern(root, "runs/causal", [], { target: "AI-US-applications", role: "causal" });
+  await modern(root, "runs/directed-repair", ["new targeted support"], { target: "AI-US-applications", key: "recap-fixture-facts-repair-abcdef" });
+  const result = await marketSessionQueryConsumption(root, session);
+  assert.equal(result.unverifiedAttempts.length, 0);
+  const facts = result.roleAttempts.find(role => role.target === "AI-US-applications" && role.role === "facts");
+  assert.equal(facts.attemptCount, 2);
+  assert.equal(facts.scope, "primary");
+  assert.deepEqual(new Set(facts.agentRunIds), new Set([first.record.agentRunId, second.record.agentRunId]));
+  assert.equal(result.roleAttempts.find(role => role.role === "causal").attemptCount, 1);
+});
+
+test("next trading day and another market retain independent time and role budgets", async t => {
+  const root = await temporary(t);
+  await manifest(root, "runs/other-day", { marketAsOf: "2026-09-30", researchBudgetMs: 1, researchSessions: [null] });
+  await manifest(root, "runs/other-market", { market: "CN", workflowBudgetMs: 1, workflowSessions: [null] });
+  const result = await marketSessionQueryConsumption(root, session);
+  assert.equal(result.unverifiedAttempts.length, 0);
+  assert.deepEqual(result.timeBudgets, { workflow: { elapsedMs: 0, limitMs: null, sessions: [] }, research: { elapsedMs: 0, limitMs: null, sessions: [] } });
+  assert.deepEqual(result.roleAttempts, []);
 });

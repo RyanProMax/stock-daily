@@ -965,6 +965,7 @@ export class MarketWorkflow {
     this.searchQueries = new Set();
     this.searchQueryCount = 0;
     this.reservedSearchQueryCount = 0;
+    this.reservedPrimaryRoleCounts = new Map();
     this.saveQueue = Promise.resolve();
     this.sourceVerifier = sourceVerifier;
     this.macroCollector = macroCollector;
@@ -982,7 +983,7 @@ export class MarketWorkflow {
     this.manifestPath = resolve(this.runDir, "manifest.json");
   }
 
-  async assertSessionSearchBudget(queryCount = 2, { reserve = false } = {}) {
+  async assertSessionSearchBudget(queryCount = 2, { reserve = false, primaryRole = null } = {}) {
     const projectWork = resolve(PROJECT_DIR, "work");
     const root = resolve(this.workRoot);
     const budgetRoot = root === projectWork || root.startsWith(`${projectWork}/`)
@@ -1015,7 +1016,49 @@ export class MarketWorkflow {
     ) {
       throw new Error("本交易日资料核查已达停止条件，复盘尚未通过验收；不能通过更换检查时点或版本重复研究");
     }
-    if (reserve) this.reservedSearchQueryCount += queryCount;
+    // A new input fingerprint must not create another clock for this trading
+    // session. Refresh the live counters after the asynchronous history scan;
+    // aliases of the same persisted session are charged only once.
+    if (this.workflowSessionIndex != null || this.researchSessionIndex != null) this.updateBudgetProgress();
+    for (const [kind, configuredLimit] of [["workflow", this.workflowTimeoutMs], ["research", this.researchBudgetMs]]) {
+      const prior = budget.timeBudgets?.[kind];
+      if (!prior) continue;
+      const sessions = new Map((prior.sessions ?? []).map(session => [session.identity, session.elapsedMs]));
+      for (const session of this.manifest?.[`${kind}Sessions`] ?? []) {
+        const startedAt = Date.parse(session.startedAt);
+        if (!Number.isFinite(startedAt) || !Number.isFinite(session.elapsedMs) || session.elapsedMs < 0) {
+          throw new Error("本交易日研究计时无法核实，不能重新研究");
+        }
+        const identity = `${kind}:${new Date(startedAt).toISOString()}`;
+        sessions.set(identity, Math.max(sessions.get(identity) ?? 0, session.elapsedMs));
+      }
+      const elapsed = [...sessions.values()].reduce((sum, value) => sum + value, 0);
+      const limits = [prior.limitMs, configuredLimit].filter(value => Number.isFinite(value) && value >= 0);
+      if (limits.length && Math.min(...limits) - elapsed < 30_000) {
+        throw new Error("本交易日研究时间已达停止条件，不能通过更换输入、检查时点或预算参数重新研究");
+      }
+      if (limits.length) {
+        this.sessionTimeDeadlines ??= {};
+        this.sessionTimeDeadlines[kind] = Date.now() + Math.min(...limits) - elapsed;
+      }
+    }
+    let primaryIdentity;
+    if (primaryRole) {
+      primaryIdentity = `${primaryRole.target}\0${primaryRole.role}`;
+      const prior = budget.roleAttempts?.find(attempt => attempt.target === primaryRole.target && attempt.role === primaryRole.role);
+      const identities = new Set(prior?.agentRunIds ?? []);
+      for (const run of [...(this.manifest?.agentRuns ?? []), ...(this.manifest?.failedAgentRuns ?? [])]) {
+        if (run.key === primaryRole.key && run.role === primaryRole.role && run.agentRunId) identities.add(run.agentRunId);
+      }
+      this.reservedPrimaryRoleCounts ??= new Map();
+      if (identities.size + (this.reservedPrimaryRoleCounts.get(primaryIdentity) ?? 0) >= 2) {
+        throw new Error("该交易日研究角色已用完两次原始执行机会，不能通过更换输入或版本重置");
+      }
+    }
+    if (reserve) {
+      this.reservedSearchQueryCount += queryCount;
+      if (primaryIdentity) this.reservedPrimaryRoleCounts.set(primaryIdentity, (this.reservedPrimaryRoleCounts.get(primaryIdentity) ?? 0) + 1);
+    }
   }
 
   async bindInputSnapshot() {
@@ -1563,7 +1606,7 @@ export class MarketWorkflow {
   }
 
   remainingTime() {
-    return this.deadline - Date.now();
+    return Math.min(this.deadline, this.sessionTimeDeadlines?.workflow ?? Infinity) - Date.now();
   }
 
   async startResearchBudget() {
@@ -1600,8 +1643,8 @@ export class MarketWorkflow {
   }
 
   remainingResearchTime() {
-    if (!this.researchDeadline) return this.researchBudgetMs;
-    return this.researchDeadline - Date.now();
+    const local = this.researchDeadline ? this.researchDeadline - Date.now() : this.researchBudgetMs;
+    return Math.min(local, (this.sessionTimeDeadlines?.research ?? Infinity) - Date.now());
   }
 
   async finishResearchBudget() {
@@ -1611,6 +1654,7 @@ export class MarketWorkflow {
     this.researchSessionIndex = null;
     this.researchSessionWallStartedAt = null;
     this.researchDeadline = null;
+    if (this.sessionTimeDeadlines) delete this.sessionTimeDeadlines.research;
     await this.saveManifest();
   }
 
@@ -1674,7 +1718,10 @@ export class MarketWorkflow {
     if (checkpoint) return checkpoint;
     // Reserve after checking the real checkpoint fingerprint, not just its
     // completed flag: changed prompts or tampered files require fresh searches.
-    if (definition.search) await this.assertSessionSearchBudget(2, { reserve: true });
+    const primaryRole = ["facts", "causal"].includes(role) && payload.anomaly?.target && key === `${payload.anomaly.id}-${role}`
+      ? { target: payload.anomaly.target, role, key }
+      : null;
+    if (definition.search) await this.assertSessionSearchBudget(2, { reserve: true, primaryRole });
     try {
       if (definition.search) await this.startResearchBudget();
       const remaining = definition.search
@@ -1899,6 +1946,12 @@ export class MarketWorkflow {
     } finally {
       if (definition.search) {
         this.reservedSearchQueryCount -= 2;
+        if (primaryRole) {
+          const identity = `${primaryRole.target}\0${primaryRole.role}`;
+          const remainingReservations = (this.reservedPrimaryRoleCounts?.get(identity) ?? 0) - 1;
+          if (remainingReservations > 0) this.reservedPrimaryRoleCounts.set(identity, remainingReservations);
+          else this.reservedPrimaryRoleCounts?.delete(identity);
+        }
         if (this.reservedSearchQueryCount === 0) await this.finishResearchBudget();
       }
     }
