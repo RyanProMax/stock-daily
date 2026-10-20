@@ -3153,9 +3153,16 @@ test("source verification is aborted by the workflow hard deadline", async () =>
     workRoot,
     sourceVerifier: async (_outputs, _envelope, { signal }) =>
       new Promise((_resolve, reject) => {
+        // Real pending I/O keeps Node alive; the workflow deadline is unref'd.
+        // Give this fake request the same lifetime until it receives abort.
+        const pendingRequest = setTimeout(
+          () => reject(new Error("Mock source request did not abort")),
+          2_000,
+        );
         signal.addEventListener(
           "abort",
           () => {
+            clearTimeout(pendingRequest);
             aborted = true;
             reject(signal.reason);
           },
