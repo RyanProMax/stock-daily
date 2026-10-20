@@ -1,22 +1,9 @@
-# Automation
+# Transition operations
 
-## Daily
+The new report service has no scheduler, model runner or Agent orchestration framework. An external dot / Grokbot task reads the Skill, builds a final report, conditionally PUTs it, then verifies production GET before marking completion.
 
-- Full run: `npm run daily:run`
-- Close run: `npm run daily:close`
-- Evening run: `npm run daily:evening`
-- Backfill: `scripts/run-codex-daily.sh --force --date YYYY-MM-DD --update-kind morning|close|evening`
-- Stages: `daily:collect`, scheduled `daily:freshness`, read-only Codex native research, search audit, cited-source audit, `daily:check`, `daily:publish`, `daily:verify`
-- Schedule: Beijing 09:00 morning, 15:00 close, and 21:00 evening via `com.stock-daily.codex.plist`
-- Persistence: all three updates upsert the same `report_date`; later runs do not create another edition
+The legacy main checkout is still referenced by loaded `com.stock-daily.codex` and `com.stock-daily.codex-weekly` launchd jobs. Their entry points are `scripts/run-codex-daily.sh` and `scripts/run-codex-weekly.sh`. The scripts gate on Beijing dates/times and have local lock/checkpoint logic. The daily intent is morning 09:00, CN close 15:00 and evening 21:00; weekly intent is Sunday 20:30. Actual launchd calendar entries include compensation windows in the host timezone, so do not copy those hours into another scheduler verbatim.
 
-## Weekly
+Do not change active main, launchd configuration, production D1 or real credentials during the local implementation phase. Keep the old entry points and npm tasks until the new route, migrated database, writer credential and an external report have passed end-to-end readback. Then, under explicit cutover authorization, stop the old writers before enabling the new writer. Never run both paths concurrently as a normal update strategy.
 
-- Full run: `npm run weekly:run`
-- Backfill: `scripts/run-codex-weekly.sh --force --week-end YYYY-MM-DD`
-- Stages: `weekly:collect`, `weekly:check`, `weekly:publish`, `weekly:verify`
-- Schedule: Sunday Beijing 20:30 via `com.stock-daily.codex-weekly.plist`
-
-Wrappers derive the repository root from their own path. Use `STOCK_DAILY_NODE_BIN_DIR`, `STOCK_DAILY_CODEX_BIN`, or `CLOUDFLARE_ACCOUNT_ID` only as local environment overrides.
-
-Keep wrappers non-interactive, idempotent, locked, and date-gated. A failed validation must not overwrite the last successful report.
+After cutover, remove legacy generation entry points and their transitive collector/research/publish modules, process-only contracts/prompts/data and corresponding tests together. Retain final schemas, generated declarations, API/SSR tests, historical compatibility, quality/security CI, migrations and deployment commands. See `docs/report-contracts/MIGRATION.md` for the ordered checklist.

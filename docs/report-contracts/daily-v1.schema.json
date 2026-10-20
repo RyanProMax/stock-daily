@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stock-daily:daily:v1",
+  "title": "Stock Daily final daily report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportDate",
+    "generatedAt",
+    "cutoffAt",
+    "marketAsOf",
+    "headline",
+    "summary",
+    "overview",
+    "marketViews",
+    "aiChainViews",
+    "markets",
+    "sectorHeat",
+    "sectorPerformance",
+    "aiChainPerformance",
+    "drivers",
+    "aiChainUpdates",
+    "stories",
+    "translations"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "daily-v1"
+    },
+    "reportDate": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/date"
+    },
+    "generatedAt": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/time"
+    },
+    "cutoffAt": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/time"
+    },
+    "marketAsOf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CN",
+        "US"
+      ],
+      "properties": {
+        "CN": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/date"
+        },
+        "US": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/date"
+        }
+      }
+    },
+    "headline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "overview": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/overview"
+    },
+    "marketViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CN",
+        "US"
+      ],
+      "properties": {
+        "CN": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/view"
+        },
+        "US": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/view"
+        }
+      }
+    },
+    "aiChainViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CN",
+        "US"
+      ],
+      "properties": {
+        "CN": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/aiView"
+        },
+        "US": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/aiView"
+        }
+      }
+    },
+    "markets": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/marketMetric"
+      },
+      "maxItems": 32
+    },
+    "sectorHeat": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/sector"
+      },
+      "maxItems": 32
+    },
+    "sectorPerformance": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/sector"
+      },
+      "maxItems": 32
+    },
+    "aiChainPerformance": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/aiMetric"
+      },
+      "maxItems": 32
+    },
+    "drivers": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/driver"
+      },
+      "maxItems": 32
+    },
+    "aiChainUpdates": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/aiUpdate"
+      },
+      "maxItems": 32
+    },
+    "stories": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/story"
+      },
+      "maxItems": 64
+    },
+    "recaps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "CN": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/recap"
+        },
+        "US": {
+          "$ref": "urn:stock-daily:common:v1#/$defs/recap"
+        }
+      }
+    },
+    "translations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "en"
+      ],
+      "properties": {
+        "en": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "headline",
+            "summary",
+            "overview",
+            "marketViews",
+            "aiChainViews",
+            "drivers",
+            "aiChainUpdates",
+            "stories"
+          ],
+          "properties": {
+            "headline": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "pattern": "\\S"
+            },
+            "overview": {
+              "$ref": "urn:stock-daily:common:v1#/$defs/overviewText"
+            },
+            "marketViews": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "CN",
+                "US"
+              ],
+              "properties": {
+                "CN": {
+                  "$ref": "urn:stock-daily:common:v1#/$defs/viewEn"
+                },
+                "US": {
+                  "$ref": "urn:stock-daily:common:v1#/$defs/viewEn"
+                }
+              }
+            },
+            "aiChainViews": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "CN",
+                "US"
+              ],
+              "properties": {
+                "CN": {
+                  "$ref": "urn:stock-daily:common:v1#/$defs/aiViewEn"
+                },
+                "US": {
+                  "$ref": "urn:stock-daily:common:v1#/$defs/aiViewEn"
+                }
+              }
+            },
+            "drivers": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:stock-daily:common:v1#/$defs/driverText"
+              },
+              "maxItems": 32
+            },
+            "aiChainUpdates": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:stock-daily:common:v1#/$defs/aiText"
+              },
+              "maxItems": 32
+            },
+            "stories": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:stock-daily:common:v1#/$defs/storyEn"
+              },
+              "maxItems": 64
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "npm run build && wrangler pages dev dist",
-    "check": "tsc --noEmit",
+    "check": "npm run contracts:check && tsc --noEmit",
     "build": "npm run check && vite build && vite build --mode client",
     "preview": "npm run build && wrangler pages dev dist",
     "pages:dev": "npm run preview",
@@ -34,9 +34,12 @@
     "weekly:run": "scripts/run-codex-weekly.sh --force",
     "db:migrate:remote": "wrangler d1 migrations apply stock-daily-db --config wrangler.data.jsonc --remote",
     "deploy": "npm run build && wrangler pages deploy dist --project-name stock-daily --branch main --commit-dirty=true",
-    "test": "npm run build && python3 -m unittest tests/test_x_intelligence.py && node --test tests/*.test.mjs"
+    "test": "npm run build && python3 -m unittest tests/test_x_intelligence.py && node --test tests/*.test.mjs",
+    "contracts:generate": "node scripts/report-contract-types.mjs",
+    "contracts:check": "node scripts/report-contract-types.mjs --check"
   },
   "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource-variable/noto-sans-sc": "^5.3.0",
     "@fontsource-variable/noto-serif-sc": "^5.3.0",

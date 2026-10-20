@@ -1,5 +1,7 @@
 # Stock Daily 数据与运行策略
 
+> 以下保留旧生成链路的运行记录，供当前 main 的 launchd 过渡使用。新的最终报告 API 与外部 Agent 更新协议见 [report-contracts/README.md](report-contracts/README.md)，安全切换与历史迁移见 [MIGRATION.md](report-contracts/MIGRATION.md)。本地第一阶段不会停用旧任务或配置生产服务。
+
 ## 定时策略
 
 - 触发时间：macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 生成早间版、A 股收盘版和晚间版；Mac 到点需保持开机。

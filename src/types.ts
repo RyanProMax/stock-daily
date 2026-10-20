@@ -352,6 +352,8 @@ export interface CompleteRecap {
 }
 
 export interface DailyReport {
+  schemaVersion?: "daily-v1";
+  cutoffAt?: string;
   contractVersion?: string;
   reportDate: string;
   edition: number;
@@ -496,6 +498,8 @@ export interface WeeklyEventTimeline {
 }
 
 export interface WeeklyReport {
+  schemaVersion?: "weekly-v1";
+  cutoffAt?: string;
   weekStart: string;
   weekEnd: string;
   generatedAt: string;

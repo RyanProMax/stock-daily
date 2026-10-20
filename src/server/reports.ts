@@ -1,3 +1,4 @@
+import { dailyReportView, weeklyReportView, validateReportPayload } from "../contracts/reports";
 import type {
   DailyReport,
   DailyReportTranslation,
@@ -714,8 +715,11 @@ function normalizeReport(report: StoredDailyReport): DailyReport {
   };
 }
 
-function parseDailyRow(row: DailyRow): DailyReport {
+export function parseDailyRow(row: DailyRow): DailyReport {
   const content = JSON.parse(row.content) as Partial<DailyReport>;
+  if (content.schemaVersion !== undefined) {
+    return dailyReportView(validateReportPayload("daily", content), row.edition);
+  }
   return normalizeReport({
     reportDate: row.reportDate,
     edition: row.edition,
@@ -806,7 +810,11 @@ export function buildSectorHeatView(
   };
 }
 
-function parseWeeklyRow(row: WeeklyRow): WeeklyReport {
+export function parseWeeklyRow(row: WeeklyRow): WeeklyReport {
+  const payload = JSON.parse(row.content);
+  if (payload.schemaVersion !== undefined) {
+    return weeklyReportView(validateReportPayload("weekly", payload));
+  }
   const content = JSON.parse(row.content) as Omit<
     WeeklyReport,
     "weekStart" | "weekEnd" | "headline" | "summary" | "generatedAt" | "agentModel"

@@ -17,7 +17,7 @@
 - 日报顶部按格子展示本周关键事件；只有兑现结果、同一官方来源和核验时间齐全时才标绿打勾
 - 市场状态显示明确的本地化收盘日期，历史日报不会把旧行情称为今天
 - 每条新闻保留原始标题、最小核验事实、来源 URL 和发布时间
-- macOS 定时唤醒本机 Codex，每天生成早间版、A 股收盘版与晚间版，每周日生成周报并写入 D1
+- 外部 Agent 可通过带鉴权、幂等与版本保护的 API 更新日报/周报（旧本地调度待验收切换）
 - 中英文切换、深浅色主题、新闻渐进展开与摘要复制
 - 自托管中英文字体与无横向溢出的移动端布局
 
@@ -32,62 +32,16 @@ npm run pages:dev
 
 ## 数据更新
 
-macOS `launchd` 每天北京时间 `09:00`、`15:00`、`21:00` 分别生成早间版、A 股收盘版和晚间版：
+新的外部 Agent 路径：dot / Grokbot 在仓库外研究并生成最终日报/周报，通过受鉴权的 PUT 写入 D1，再从生产 GET 回读确认。服务端仅校验、存储和展示，不运行采集、模型或定时任务。
 
-1. 通过一次性
-   `stock-analysis-api/scripts/market_data_query.py daily-pack` 获取 S&P 500、
-   NASDAQ、DOW、美国 10 年期收益率、上证指数和沪深 300；无需启动 FastAPI，
-   固定无持久化，并由 API 统一比较 FRED / Yahoo 与中国指数 fallback；
-2. 确定性程序整理指数、一级行业、代表股与 AI 产业链的真实异动；Planner 只据此提出研究问题，不把涨跌事实当作原因；
-3. 每个异动并行启动互不可见的事实研究与因果研究进程，主动检索公告、财报、市场预期、收盘报道和竞争解释；
-4. 程序重新打开最终来源正文，核实页面发布时间与精确摘录。财报数据必须包含类型化实际值、预期值和程序计算的差额；
-5. 独立裁决、成稿、复核和翻译分别使用新的临时 Agent。任何阶段证据不足时不生成凑数卡片；
-6. CN、US 按收盘日独立更新。发布只替换当前市场切片，另一市场已验证内容保持不变；
-7. 所有断点均为忽略版本控制的临时 JSON，不创建本地数据库；
-8. 写入 D1 后必须从线上 API 回读并比较内容哈希，完全一致才标记完成。
+- 最终契约与合成例子：[docs/report-contracts/](docs/report-contracts/README.md)
+- 更新 Skill：[maintain-stock-daily](.agents/skill/maintain-stock-daily/SKILL.md)
+- 日报：`GET/PUT /api/reports/:date`；周报：`GET/PUT /api/weekly/:weekEnd`
+- PUT 需要应用级 Bearer 凭据、`Idempotency-Key` 及创建/更新版本条件；Agent 不需要 SQL 或 Cloudflare 管理权限。
+- JSON Schema 是校验与渲染适配的共同来源；修改契约后运行 `npm run contracts:generate`，构建会检查类型声明漂移。
+- 历史内容不批量重写，现有双语、中美、行业与 AI 页面继续使用。
 
-`launchd` 只负责到点唤醒；抓取、AI 解读与质量校验都在本机完成，Cloudflare 不运行抓取或模型任务。本机通过 Wrangler 登录态直写 D1。运行审计保留 90 天，日报长期保留。任务契约和运行前提见 [docs/codex-daily-task.md](docs/codex-daily-task.md)。
-
-行情 Skill 默认使用同级目录 `../stock-analysis-api`，并从常见安装位置解析
-`uv`。目录或可执行文件不在默认位置时，在本机环境设置绝对路径：
-
-```bash
-STOCK_ANALYSIS_API_ROOT="/absolute/path/to/stock-analysis-api"
-STOCK_ANALYSIS_UV="/absolute/path/to/uv"
-```
-
-手工试跑同一流程：
-
-```bash
-npm run daily:shadow  # 完整运行但不发布
-npm run daily:run     # 只运行并发布 US
-npm run daily:close   # 只运行并发布 CN
-npm run daily:check   # 校验最近一次运行清单与报告
-npm run daily:verify  # 重新回读线上当前市场切片
-```
-
-定向核验或发布已审核成稿时，显式指定该次运行的 `manifest.json`，输入和报告路径会从清单读取：
-
-```bash
-npm run daily:check -- --require-complete --manifest work/runs/RUN_KEY/manifest.json
-npm run daily:publish -- --manifest work/runs/RUN_KEY/manifest.json
-```
-
-手工发布和调度共用发布恢复与批次完成逻辑；只有正式发布模式且通过全部板块复盘验收的成稿可写入，影子报告和旧版简略报告会被拒绝。普通检查会单独返回完整复盘是否通过及其目标数量，不能把旧版结构有效当作完整复盘验收。旧流程验证见 [历史验收记录](specs/verified-recap-workflow/acceptance.md)，完整板块复盘实跑与页面验收见 [完整复盘验收记录](specs/complete-sector-recap/acceptance.md)。
-
-完整复盘会把所用页面的原始字节、引文、采集时间和发布时间元数据冻结在 `recap-source-snapshots.json`。同一轮与续跑沿用这份原文；发布前重新解析并核对引文、数字及时间。SEC 申报头、美联储 RSS 等附加时间来源也保留对应原文。日期级官方发布不会被补造为精确时刻；收盘后的反应报道需另有收盘前、确认同一事件和值的精确时间原文。
-
-美国 AI 成分公司的背景敞口另从 SEC 原始代码表、对应申报记录和年报原文重建，冻结在 `recap-company-background-data.json`，发布前按相同规则复核。引用只适用于已确认的披露主体，不能把客户或竞争对手的提及变成其自身敞口；历史披露及其限定条件只说明可能的传导渠道，不能代替当日事件和价格反应。
-
-手工生成收盘版或晚间版分别使用 `npm run daily:close`、`npm run daily:evening`。
-指定日期回补需显式选择 `--update-kind morning`、`--update-kind close`
-或 `--update-kind evening`。
-
-每周日北京时间 `20:30` 汇总当周日报，生成基准/上行/下行情景并从官方日历筛选未来一周关键事件。事件公布后，日报仅在同一官方机构的已核验新闻中匹配到结果时展示绿色勾和兑现摘要：
-
-```bash
-npm run weekly:run
-```
+这是本地第一阶段改造。现有 main 的 launchd 仍引用旧生成链路，因此本分支暂留原脚本、依赖与测试；尚未切换生产调度或创建真实凭据。部署迁移、验收、停用旧任务及后续删除顺序见[迁移说明](docs/report-contracts/MIGRATION.md)。GitHub Actions 仍负责构建测试与安全扫描。
 
 ## 构建与测试
 

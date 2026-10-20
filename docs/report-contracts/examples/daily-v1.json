@@ -1,0 +1,192 @@
+{
+  "schemaVersion": "daily-v1",
+  "reportDate": "2026-10-18",
+  "generatedAt": "2026-10-18T12:30:00Z",
+  "cutoffAt": "2026-10-18T12:00:00Z",
+  "marketAsOf": {
+    "CN": "2026-10-16",
+    "US": "2026-10-16"
+  },
+  "headline": "日报格式示例",
+  "summary": "这是合成示例，不是真实市场报告。",
+  "overview": {
+    "tone": "mixed",
+    "interpretation": "示例数据用于说明报告格式，不能用于判断真实市场。",
+    "positive": [],
+    "negative": []
+  },
+  "marketViews": {
+    "CN": {
+      "headline": "示例市场观察",
+      "summary": "此处由发布者填写有来源支持的观察。",
+      "overview": {
+        "tone": "mixed",
+        "interpretation": "示例数据用于说明报告格式，不能用于判断真实市场。",
+        "positive": [],
+        "negative": []
+      },
+      "driverStatus": "insufficient",
+      "leaderSectorSymbols": [],
+      "laggardSectorSymbols": [],
+      "driverIds": []
+    },
+    "US": {
+      "headline": "示例市场观察",
+      "summary": "此处由发布者填写有来源支持的观察。",
+      "overview": {
+        "tone": "mixed",
+        "interpretation": "示例数据用于说明报告格式，不能用于判断真实市场。",
+        "positive": [],
+        "negative": []
+      },
+      "driverStatus": "insufficient",
+      "leaderSectorSymbols": [],
+      "laggardSectorSymbols": [],
+      "driverIds": []
+    }
+  },
+  "aiChainViews": {
+    "CN": {
+      "headline": "示例产业链观察",
+      "summary": "本例保留 AI 产业链展示所需字段。",
+      "driverStatus": "insufficient",
+      "leaderLayers": [],
+      "laggardLayers": [],
+      "driverIds": []
+    },
+    "US": {
+      "headline": "示例产业链观察",
+      "summary": "本例保留 AI 产业链展示所需字段。",
+      "driverStatus": "insufficient",
+      "leaderLayers": [],
+      "laggardLayers": [],
+      "driverIds": []
+    }
+  },
+  "markets": [
+    {
+      "region": "CN",
+      "symbol": "SSE",
+      "name": "示例指数",
+      "value": "100.00",
+      "change": "+0.50%",
+      "direction": "up",
+      "note": "合成示例",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/quotes/SSE"
+    },
+    {
+      "region": "US",
+      "symbol": "SPX",
+      "name": "示例指数",
+      "value": "100.00",
+      "change": "+0.50%",
+      "direction": "up",
+      "note": "合成示例",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/quotes/SPX"
+    }
+  ],
+  "sectorHeat": [],
+  "sectorPerformance": [
+    {
+      "market": "CN",
+      "symbol": "CN-TECH",
+      "name": "示例信息技术",
+      "nameEn": "Example technology",
+      "score": 50,
+      "change": "+0.25%",
+      "direction": "up",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/sector/CN"
+    },
+    {
+      "market": "US",
+      "symbol": "US-TECH",
+      "name": "示例信息技术",
+      "nameEn": "Example technology",
+      "score": 50,
+      "change": "+0.25%",
+      "direction": "up",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/sector/US"
+    }
+  ],
+  "aiChainPerformance": [
+    {
+      "market": "CN",
+      "layer": "chips",
+      "name": "示例芯片",
+      "nameEn": "Example chips",
+      "symbol": "CN-CHIPS",
+      "benchmark": "示例指数",
+      "benchmarkEn": "Example index",
+      "benchmarkKind": "index",
+      "change": "+0.25%",
+      "direction": "up",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/ai/CN"
+    },
+    {
+      "market": "US",
+      "layer": "chips",
+      "name": "示例芯片",
+      "nameEn": "Example chips",
+      "symbol": "US-CHIPS",
+      "benchmark": "示例指数",
+      "benchmarkEn": "Example index",
+      "benchmarkKind": "index",
+      "change": "+0.25%",
+      "direction": "up",
+      "asOf": "2026-10-16",
+      "source": "https://example.com/ai/US"
+    }
+  ],
+  "drivers": [],
+  "aiChainUpdates": [],
+  "stories": [],
+  "translations": {
+    "en": {
+      "headline": "Daily format example",
+      "summary": "Synthetic example, not a real market report.",
+      "overview": {
+        "interpretation": "Synthetic example data for the report format.",
+        "positive": [],
+        "negative": []
+      },
+      "marketViews": {
+        "CN": {
+          "headline": "Example market overview",
+          "summary": "The publisher supplies sourced observations here.",
+          "overview": {
+            "interpretation": "Synthetic example data for the report format.",
+            "positive": [],
+            "negative": []
+          }
+        },
+        "US": {
+          "headline": "Example market overview",
+          "summary": "The publisher supplies sourced observations here.",
+          "overview": {
+            "interpretation": "Synthetic example data for the report format.",
+            "positive": [],
+            "negative": []
+          }
+        }
+      },
+      "aiChainViews": {
+        "CN": {
+          "headline": "Example AI chain overview",
+          "summary": "Example fields for the existing AI chain display."
+        },
+        "US": {
+          "headline": "Example AI chain overview",
+          "summary": "Example fields for the existing AI chain display."
+        }
+      },
+      "drivers": [],
+      "aiChainUpdates": [],
+      "stories": []
+    }
+  }
+}

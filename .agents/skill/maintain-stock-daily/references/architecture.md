@@ -1,21 +1,16 @@
 # Architecture
 
-- `src/worker.tsx`: Hono Pages entry, D1-backed SSR routes, and JSON APIs.
-- `src/App.tsx`: React document plus daily and weekly server-rendered views.
-- `src/client.tsx`: hydration entry; it receives embedded SSR data and does not fetch reports.
-- `src/components/`: reusable React Aria controls and report presentation.
-- `src/server/reports.ts`: D1 reads, legacy normalization, local fallback, and trading-day sector-heat streak aggregation.
-- `src/lib/i18n.ts`: UI copy and report localization.
-- `src/styles.css`: shared editorial visual system and responsive rules.
-- `src/types.ts`: persisted and rendered report contracts.
-- `migrations/`: D1 schema history.
-- `scripts/daily-policy.mjs`: shared morning/close/evening cutoffs, market dates, and material-advance policy.
-- `scripts/daily-collect.mjs`: deterministic index, sector, representative-stock, AI-chain, session, and market-brief collection; the daily input contains no preselected news pool.
-- `scripts/daily-agent-audit.mjs`: verifies that the completed Codex JSONL run performed distinct CN and US native searches and declared only queries that actually ran.
-- `scripts/daily-source-audit.mjs`: opens every cited external source through pinned, public-address-only HTTPS requests before validation or publication.
-- `scripts/daily-publish.mjs`: validates the V10 report contract, evidence/session alignment, reader copy, and market-scoped numeric grounding before constructing D1 content.
-- `scripts/check-public-repo.mjs`: pre-push privacy and sensitive-file guard; CI uses Gitleaks for credential history.
-- `scripts/`: remaining deterministic validation, publishing, verification, and launchd wrappers.
-- `docs/codex-*-task.md`: Agent output contracts and fact boundaries.
+- `docs/report-contracts/`: authoritative final daily/weekly JSON Schemas, shared definitions, synthetic examples and the publication protocol.
+- `scripts/report-contract-types.mjs`: deterministic schema-to-TypeScript declarations; `contracts:check` prevents drift.
+- `src/contracts/reports.ts`: Workers-compatible JSON Schema validation, structural/date/reference consistency, and compile-time checked adapters to the existing renderer.
+- `src/server/report-writes.ts`: scoped report authentication, GET metadata, conditional PUT, canonical hashes, atomic D1 content + idempotency receipts.
+- `src/worker.tsx`: Hono Pages entry, SSR and report APIs. Local/preview remote-data mode remains GET-only.
+- `src/server/reports.ts`: D1 reads. Versioned reports use the final contract directly; old reports keep legacy normalization and historical presentation helpers.
+- `src/App.tsx`, `src/components/`, `src/lib/i18n.ts`, `src/styles.css`: existing bilingual CN/US, industry/AI and weekly presentation. No research or model calls.
+- `src/types.ts`: legacy reader and presentation types; `src/report-contracts.generated.ts`: final contract types derived from schemas.
+- `migrations/0009_report_writes.sql`: additive revision columns and write receipts; no historical content conversion.
+- `.github/workflows/quality.yml`, `security.yml`: build/test and repository safety, not generation or scheduling.
 
-Production flow: local deterministic market snapshot → read-only Codex native research → search and cited-source audits → report validator → Wrangler D1 write → production API readback → Hono/React SSR read.
+Target flow: external Agent research → final report JSON → authenticated PUT → D1 transaction → production GET/readback → existing SSR.
+
+Legacy collectors, research scripts and launchd wrappers remain temporarily for safe cutover. They are not dependencies of the new report API or runtime validator. Do not move them into the Skill or add financial analysis to the service.

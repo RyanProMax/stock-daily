@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stock-daily:weekly:v1",
+  "title": "Stock Daily final weekly report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "weekStart",
+    "weekEnd",
+    "generatedAt",
+    "cutoffAt",
+    "headline",
+    "summary",
+    "overview",
+    "highlights",
+    "outlook",
+    "events",
+    "translations"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "weekly-v1"
+    },
+    "weekStart": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/date"
+    },
+    "weekEnd": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/date"
+    },
+    "generatedAt": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/time"
+    },
+    "cutoffAt": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/time"
+    },
+    "headline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "overview": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/overview"
+    },
+    "highlights": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000,
+        "pattern": "\\S"
+      },
+      "maxItems": 16
+    },
+    "outlook": {
+      "$ref": "urn:stock-daily:common:v1#/$defs/outlook"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:stock-daily:common:v1#/$defs/event"
+      },
+      "maxItems": 32
+    },
+    "translations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "en"
+      ],
+      "properties": {
+        "en": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "headline",
+            "summary",
+            "overview",
+            "highlights",
+            "outlook",
+            "events"
+          ],
+          "properties": {
+            "headline": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "pattern": "\\S"
+            },
+            "overview": {
+              "$ref": "urn:stock-daily:common:v1#/$defs/overviewText"
+            },
+            "highlights": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000,
+                "pattern": "\\S"
+              },
+              "maxItems": 16
+            },
+            "outlook": {
+              "$ref": "urn:stock-daily:common:v1#/$defs/outlook"
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:stock-daily:common:v1#/$defs/eventEn"
+              },
+              "maxItems": 32
+            }
+          }
+        }
+      }
+    }
+  }
+}

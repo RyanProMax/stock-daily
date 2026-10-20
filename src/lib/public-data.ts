@@ -48,6 +48,7 @@ function publicTranslation(
 export function publicDailyReport(report: DailyReport): DailyReport {
   const reportWithAudit = report as DailyReport & { researchAudit?: unknown };
   const {
+    schemaVersion: _schemaVersion,
     agentModel: _agentModel,
     contractVersion: _contractVersion,
     researchAudit: _researchAudit,
@@ -79,6 +80,6 @@ export function publicDailyReport(report: DailyReport): DailyReport {
 }
 
 export function publicWeeklyReport(report: WeeklyReport): WeeklyReport {
-  const { agentModel: _agentModel, ...readerFields } = report;
+  const { schemaVersion: _schemaVersion, agentModel: _agentModel, ...readerFields } = report;
   return readerFields as WeeklyReport;
 }

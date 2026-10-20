@@ -1,0 +1,1638 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stock-daily:common:v1",
+  "$defs": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 40
+    },
+    "published": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/date"
+        },
+        {
+          "$ref": "#/$defs/time"
+        }
+      ]
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2000,
+      "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$"
+    },
+    "market": {
+      "type": "string",
+      "enum": [
+        "CN",
+        "US"
+      ]
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "up",
+        "down",
+        "flat"
+      ]
+    },
+    "tone": {
+      "type": "string",
+      "enum": [
+        "positive",
+        "negative",
+        "mixed",
+        "neutral"
+      ]
+    },
+    "layer": {
+      "type": "string",
+      "enum": [
+        "chips",
+        "memory",
+        "servers",
+        "interconnect",
+        "data_center",
+        "cloud",
+        "applications",
+        "robotics"
+      ]
+    },
+    "driverStatus": {
+      "type": "string",
+      "enum": [
+        "explained",
+        "partial",
+        "insufficient",
+        "structural",
+        "unattributed"
+      ]
+    },
+    "overviewText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interpretation",
+        "positive",
+        "negative"
+      ],
+      "properties": {
+        "interpretation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "positive": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 32
+        },
+        "negative": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "overview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tone",
+        "interpretation",
+        "positive",
+        "negative"
+      ],
+      "properties": {
+        "tone": {
+          "$ref": "#/$defs/tone"
+        },
+        "interpretation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "positive": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 32
+        },
+        "negative": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "summary",
+        "overview",
+        "driverStatus",
+        "leaderSectorSymbols",
+        "laggardSectorSymbols",
+        "driverIds"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "overview": {
+          "$ref": "#/$defs/overview"
+        },
+        "driverStatus": {
+          "$ref": "#/$defs/driverStatus"
+        },
+        "leaderSectorSymbols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        },
+        "laggardSectorSymbols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        },
+        "driverIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        }
+      }
+    },
+    "viewEn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "summary",
+        "overview"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "overview": {
+          "$ref": "#/$defs/overviewText"
+        }
+      }
+    },
+    "aiView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "summary",
+        "driverStatus",
+        "leaderLayers",
+        "laggardLayers",
+        "driverIds"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "driverStatus": {
+          "$ref": "#/$defs/driverStatus"
+        },
+        "leaderLayers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layer"
+          },
+          "maxItems": 8
+        },
+        "laggardLayers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layer"
+          },
+          "maxItems": 8
+        },
+        "driverIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        }
+      }
+    },
+    "aiViewEn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "summary"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "label",
+        "tier"
+      ],
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/url"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "first_party",
+            "wire",
+            "secondary"
+          ]
+        },
+        "observedAt": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    },
+    "constituent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "name",
+        "nameEn",
+        "change",
+        "direction",
+        "asOf",
+        "source"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "change": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "asOf": {
+          "$ref": "#/$defs/date"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        }
+      }
+    },
+    "marketMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region",
+        "symbol",
+        "name",
+        "value",
+        "change",
+        "direction",
+        "note",
+        "source",
+        "asOf"
+      ],
+      "properties": {
+        "region": {
+          "$ref": "#/$defs/market"
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "change": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "\\S"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "asOf": {
+          "$ref": "#/$defs/date"
+        },
+        "previousAsOf": {
+          "$ref": "#/$defs/date"
+        }
+      }
+    },
+    "sector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "symbol",
+        "name",
+        "nameEn",
+        "score",
+        "change",
+        "direction",
+        "asOf",
+        "source"
+      ],
+      "properties": {
+        "market": {
+          "$ref": "#/$defs/market"
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "change": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "asOf": {
+          "$ref": "#/$defs/date"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "constituents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constituent"
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "aiMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "layer",
+        "name",
+        "nameEn",
+        "benchmark",
+        "benchmarkEn",
+        "benchmarkKind",
+        "symbol",
+        "change",
+        "direction",
+        "asOf",
+        "source"
+      ],
+      "properties": {
+        "market": {
+          "$ref": "#/$defs/market"
+        },
+        "layer": {
+          "$ref": "#/$defs/layer"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "benchmark": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "benchmarkEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "pattern": "\\S"
+        },
+        "benchmarkKind": {
+          "type": "string",
+          "enum": [
+            "index",
+            "etf_proxy",
+            "equal_weight_basket"
+          ]
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        "change": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "asOf": {
+          "$ref": "#/$defs/date"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "constituents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constituent"
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "actual",
+        "baselineLabel",
+        "baseline",
+        "delta",
+        "tone",
+        "note"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "actual": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "baselineLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "baseline": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "delta": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "tone": {
+          "$ref": "#/$defs/tone"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "facts",
+        "source",
+        "sourceLabel",
+        "publishedAt",
+        "kind",
+        "sourceType"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "facts": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/published"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "market_data",
+            "market_wrap",
+            "event",
+            "official"
+          ]
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": [
+            "first_party",
+            "publisher",
+            "expert"
+          ]
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "web",
+            "x"
+          ]
+        },
+        "authority": {
+          "type": "string",
+          "enum": [
+            "first_party",
+            "specialist",
+            "expert"
+          ]
+        },
+        "authorHandle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "driverText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "summary",
+        "mechanism"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comparison"
+          },
+          "maxItems": 32
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "market",
+        "role",
+        "basis",
+        "direction",
+        "title",
+        "summary",
+        "mechanism",
+        "sectorSymbols",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "market": {
+          "$ref": "#/$defs/market"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "secondary"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "event",
+            "macro"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "positive",
+            "negative",
+            "mixed"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comparison"
+          },
+          "maxItems": 32
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "sectorSymbols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "maxItems": 32,
+          "minItems": 1
+        }
+      }
+    },
+    "aiText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "summary",
+        "implication"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comparison"
+          },
+          "maxItems": 32
+        },
+        "implication": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "aiUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "market",
+        "layer",
+        "title",
+        "summary",
+        "implication",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "market": {
+          "$ref": "#/$defs/market"
+        },
+        "layer": {
+          "$ref": "#/$defs/layer"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comparison"
+          },
+          "maxItems": 32
+        },
+        "implication": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "maxItems": 32,
+          "minItems": 1
+        }
+      }
+    },
+    "storyInsight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tone",
+        "interpretation",
+        "sectors",
+        "tickers"
+      ],
+      "properties": {
+        "tone": {
+          "$ref": "#/$defs/tone"
+        },
+        "interpretation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "sectors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        },
+        "tickers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        }
+      }
+    },
+    "story": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "regions",
+        "category",
+        "importance",
+        "title",
+        "summary",
+        "evidence",
+        "source",
+        "sourceLabel",
+        "publishedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/market"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "公司",
+            "宏观",
+            "商品",
+            "行业"
+          ]
+        },
+        "importance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/published"
+        },
+        "evidenceSource": {
+          "$ref": "#/$defs/source"
+        },
+        "ai": {
+          "$ref": "#/$defs/storyInsight"
+        }
+      }
+    },
+    "storyEn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "summary",
+        "interpretation",
+        "sectors"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "interpretation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "sectors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "maxItems": 128
+        }
+      }
+    },
+    "recapSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "url",
+        "label",
+        "publishedAt",
+        "verifiedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "url": {
+          "$ref": "#/$defs/url"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/published"
+        },
+        "verifiedAt": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "market_data"
+        }
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "textEn",
+        "status",
+        "sources"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "textEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "supported",
+            "contradicted",
+            "unresolved"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recapSource"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "opinion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "textEn",
+        "authorHandle",
+        "url",
+        "publishedAt",
+        "sources"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "textEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "authorHandle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        "url": {
+          "$ref": "#/$defs/url"
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/published"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recapSource"
+          },
+          "maxItems": 32
+        }
+      }
+    },
+    "recapEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "kind",
+        "status",
+        "confidence",
+        "why",
+        "whyEn",
+        "magnitude",
+        "magnitudeEn",
+        "invalidateIf",
+        "invalidateIfEn",
+        "sources",
+        "alternatives",
+        "opinions"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "market",
+            "sector",
+            "ai_layer"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "explained",
+            "partial",
+            "unresolved"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "whyEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "magnitude": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "magnitudeEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "invalidateIf": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "invalidateIfEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recapSource"
+          },
+          "maxItems": 32
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alternative"
+          },
+          "maxItems": 16
+        },
+        "opinions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opinion"
+          },
+          "maxItems": 16
+        }
+      }
+    },
+    "recap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market",
+        "marketAsOf",
+        "status",
+        "socialStatus",
+        "entries"
+      ],
+      "properties": {
+        "market": {
+          "$ref": "#/$defs/market"
+        },
+        "marketAsOf": {
+          "$ref": "#/$defs/date"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial"
+          ]
+        },
+        "socialStatus": {
+          "type": "string",
+          "enum": [
+            "consulted",
+            "no_relevant_posts",
+            "unavailable"
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recapEntry"
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "outlook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "upside",
+        "downside"
+      ],
+      "properties": {
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "upside": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "downside": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "date",
+        "title",
+        "whyItMatters",
+        "source",
+        "sourceLabel",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "\\S"
+        },
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "whyItMatters": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "source": {
+          "$ref": "#/$defs/url"
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "expectation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "expectationSource": {
+          "$ref": "#/$defs/url"
+        },
+        "expectationSourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "realized",
+            "cancelled",
+            "postponed"
+          ]
+        },
+        "result": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "assessment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "nextWatch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "impactTone": {
+          "type": "string",
+          "enum": [
+            "positive",
+            "negative",
+            "neutral"
+          ]
+        },
+        "resultSource": {
+          "$ref": "#/$defs/url"
+        },
+        "resultSourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        "resultVerifiedAt": {
+          "$ref": "#/$defs/time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "realized"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "result",
+              "resultSource",
+              "resultSourceLabel",
+              "resultVerifiedAt"
+            ]
+          }
+        }
+      ],
+      "dependentRequired": {
+        "expectation": [
+          "expectationSource",
+          "expectationSourceLabel"
+        ],
+        "expectationSource": [
+          "expectation",
+          "expectationSourceLabel"
+        ],
+        "expectationSourceLabel": [
+          "expectation",
+          "expectationSource"
+        ]
+      }
+    },
+    "eventEn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "whyItMatters"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        },
+        "whyItMatters": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "expectation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "result": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "assessment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        "nextWatch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        }
+      }
+    }
+  }
+}

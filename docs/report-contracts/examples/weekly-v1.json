@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "weekly-v1",
+  "weekStart": "2026-10-12",
+  "weekEnd": "2026-10-18",
+  "generatedAt": "2026-10-18T12:30:00Z",
+  "cutoffAt": "2026-10-18T12:00:00Z",
+  "headline": "周报格式示例",
+  "summary": "这是合成示例，不是真实市场报告。",
+  "overview": {
+    "tone": "mixed",
+    "interpretation": "示例数据用于说明报告格式，不能用于判断真实市场。",
+    "positive": [],
+    "negative": []
+  },
+  "highlights": [
+    "发布者提供当周有来源支持的重点。"
+  ],
+  "outlook": {
+    "base": "基准情景示例",
+    "upside": "上行情景示例",
+    "downside": "下行情景示例"
+  },
+  "events": [
+    {
+      "id": "example-event",
+      "date": "2026-10-21",
+      "title": "示例公布事件",
+      "whyItMatters": "解释事件与市场观察之间的关系。",
+      "source": "https://example.com/calendar",
+      "sourceLabel": "示例机构",
+      "status": "scheduled"
+    }
+  ],
+  "translations": {
+    "en": {
+      "headline": "Weekly format example",
+      "summary": "Synthetic example, not a real market report.",
+      "overview": {
+        "interpretation": "Synthetic example data for the report format.",
+        "positive": [],
+        "negative": []
+      },
+      "highlights": [
+        "The publisher supplies sourced weekly highlights."
+      ],
+      "outlook": {
+        "base": "Example base case",
+        "upside": "Example upside case",
+        "downside": "Example downside case"
+      },
+      "events": [
+        {
+          "title": "Example release",
+          "whyItMatters": "Explain why the event matters to the market view."
+        }
+      ]
+    }
+  }
+}

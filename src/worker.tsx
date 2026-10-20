@@ -1,3 +1,4 @@
+import { readApiReport, reportWriteRoutes } from "./server/report-writes";
 import { Hono } from "hono";
 import { renderToReadableStream } from "react-dom/server.edge";
 import Document, {
@@ -25,6 +26,7 @@ import {
 type Bindings = {
   DB?: D1Database;
   REMOTE_DATA_ORIGIN?: string;
+  REPORT_WRITE_TOKENS?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -143,6 +145,7 @@ async function buildDailyPageData(
   }
   const [weekEvents, thesisLedger, thesisHistory] =
     [
+      "external-report-v1",
       "market-attribution-v9",
       "codex-market-research-v10",
       "codex-market-research-v11",
@@ -240,6 +243,8 @@ app.use("/api/*", async (c, next) => {
   }
   return proxyRemoteApi(c.req.raw, origin);
 });
+
+app.route("/api", reportWriteRoutes);
 
 app.get("/api/page/daily", async (c) => {
   try {
@@ -350,7 +355,8 @@ app.get("/api/reports/:date", async (c) => {
     );
   }
   try {
-    const data = await getDailyReport(database(c.env), date);
+    const result = await readApiReport(database(c.env), "daily", date);
+    const data = result?.data;
     if (!data) {
       return c.json(
         { error: { message: "Daily report not found.", status: 404 } },
@@ -358,7 +364,8 @@ app.get("/api/reports/:date", async (c) => {
       );
     }
     c.header("Cache-Control", "no-store");
-    return c.json({ data });
+    c.header("ETag", result!.meta.etag);
+    return c.json({ data, meta: result!.meta });
   } catch {
     return c.json(
       { error: { message: "Daily report is unavailable.", status: 503 } },
@@ -375,15 +382,15 @@ app.get("/api/weekly/:weekEnd", async (c) => {
       400,
     );
   }
-  const data = await getWeeklyReport(database(c.env), weekEnd);
-  if (!data) {
-    return c.json(
-      { error: { message: "Weekly report not found.", status: 404 } },
-      404,
-    );
+  try {
+    const result = await readApiReport(database(c.env), "weekly", weekEnd);
+    if (!result) return c.json({ error: { message: "Weekly report not found.", status: 404 } }, 404);
+    c.header("Cache-Control", "no-store");
+    c.header("ETag", result.meta.etag);
+    return c.json(result);
+  } catch {
+    return c.json({ error: { message: "Weekly report is unavailable.", status: 503 } }, 503);
   }
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({ data });
 });
 
 app.get("/", (c) => dailyPage(c.req.url, c.env));
